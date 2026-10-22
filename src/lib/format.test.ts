@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes } from "./format";
+import { formatBytes, formatSize } from "./format";
 
 describe("formatBytes", () => {
 	it("formats across units", () => {
@@ -7,5 +7,12 @@ describe("formatBytes", () => {
 		expect(formatBytes(999)).toBe("999 B");
 		expect(formatBytes(52_500_000_000)).toBe("52.5 GB");
 		expect(formatBytes(288_000_000_000)).toBe("288 GB");
+	});
+});
+
+describe("formatSize", () => {
+	it("prefixes estimates", () => {
+		expect(formatSize(4_100_000_000, true)).toBe("up to 4.1 GB");
+		expect(formatSize(4_100_000_000)).toBe("4.1 GB");
 	});
 });

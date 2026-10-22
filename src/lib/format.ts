@@ -11,3 +11,8 @@ export function formatBytes(bytes: number): string {
 	const digits = unit === 0 || value >= 100 ? 0 : 1;
 	return `${value.toFixed(digits)} ${UNITS[unit]}`;
 }
+
+/** Estimates (command rules) read "up to 4.1 GB". */
+export function formatSize(bytes: number, estimate = false): string {
+	return estimate ? `up to ${formatBytes(bytes)}` : formatBytes(bytes);
+}
