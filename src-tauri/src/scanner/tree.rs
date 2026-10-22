@@ -88,3 +88,167 @@ pub enum ScanEvent {
         message: String,
     },
 }
+
+const TOP_FILES: usize = 20;
+
+/// Builds the arena from a depth-first, parent-before-children stream of entries.
+///
+/// Ids are assigned in visit order, so a child's id is always greater than its
+/// parent's. That lets `finish` aggregate sizes with one reverse pass.
+#[derive(Default)]
+pub struct TreeBuilder {
+    nodes: Vec<DirNode>,
+    /// `stack[d]` is the id of the directory currently open at depth `d`.
+    stack: Vec<u32>,
+    hardlinks: super::hardlinks::HardLinks,
+}
+
+impl TreeBuilder {
+    /// Open a directory at `depth` (0 = scan root). `own_size` is its own allocated size.
+    pub fn push_dir(&mut self, depth: usize, name: String, own_size: u64, flags: NodeFlags) -> u32 {
+        let id = self.nodes.len() as u32;
+        let parent = depth.checked_sub(1).map(|d| self.stack[d]);
+        self.stack.truncate(depth);
+        self.stack.push(id);
+        if let Some(p) = parent {
+            self.nodes[p as usize].children.push(id);
+        }
+        self.nodes.push(DirNode {
+            id,
+            parent,
+            name,
+            size: own_size,
+            logical_size: 0,
+            file_count: 0,
+            children: Vec::new(),
+            top_files: Vec::new(),
+            flags,
+            category: String::new(),
+        });
+        id
+    }
+
+    /// Mark the directory at `depth` as unreadable.
+    pub fn mark_inaccessible(&mut self, depth: usize) {
+        let id = self.stack[depth];
+        self.nodes[id as usize].flags.inaccessible = true;
+    }
+
+    /// Add a file whose parent is the directory open at `depth - 1`.
+    pub fn add_file(&mut self, depth: usize, name: String, size: u64, logical: u64) {
+        let parent = self.stack[depth - 1] as usize;
+        self.account_file(parent, name, size, logical);
+    }
+
+    /// Add a file with more than one hard link; it is credited once in `finish`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_linked_file(
+        &mut self,
+        depth: usize,
+        name: String,
+        path: std::path::PathBuf,
+        dev: u64,
+        ino: u64,
+        size: u64,
+        logical: u64,
+    ) {
+        let parent = self.stack[depth - 1];
+        self.hardlinks
+            .record(dev, ino, path, parent, name, size, logical);
+    }
+
+    fn account_file(&mut self, parent: usize, name: String, size: u64, logical: u64) {
+        let node = &mut self.nodes[parent];
+        node.size += size;
+        node.logical_size += logical;
+        node.file_count += 1;
+        node.top_files.push(FileLeaf { name, size });
+        // Keep the vector small without sorting on every push.
+        if node.top_files.len() >= TOP_FILES * 4 {
+            trim_top(&mut node.top_files);
+        }
+    }
+
+    pub fn finish(mut self) -> Vec<DirNode> {
+        for link in std::mem::take(&mut self.hardlinks).into_credits() {
+            self.account_file(link.parent as usize, link.name, link.size, link.logical);
+        }
+        for node in &mut self.nodes {
+            trim_top(&mut node.top_files);
+        }
+        // Children have larger ids than parents: one reverse pass aggregates the subtree.
+        for i in (1..self.nodes.len()).rev() {
+            let (size, logical, files) = {
+                let n = &self.nodes[i];
+                (n.size, n.logical_size, n.file_count)
+            };
+            let p = self.nodes[i].parent.expect("non-root has parent") as usize;
+            let parent = &mut self.nodes[p];
+            parent.size += size;
+            parent.logical_size += logical;
+            parent.file_count += files;
+        }
+        let sizes: Vec<u64> = self.nodes.iter().map(|n| n.size).collect();
+        for node in &mut self.nodes {
+            node.children
+                .sort_by_key(|&c| std::cmp::Reverse(sizes[c as usize]));
+        }
+        self.nodes
+    }
+}
+
+fn trim_top(files: &mut Vec<FileLeaf>) {
+    files.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+    files.truncate(TOP_FILES);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aggregates_bottom_up_and_orders_children() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        b.push_dir(1, "small".into(), 0, NodeFlags::default());
+        b.add_file(2, "f".into(), 100, 90);
+        b.push_dir(1, "big".into(), 0, NodeFlags::default());
+        b.add_file(2, "g".into(), 500, 400);
+        b.add_file(1, "top".into(), 7, 7);
+        let n = b.finish();
+        assert_eq!(
+            (n[0].size, n[0].logical_size, n[0].file_count),
+            (607, 497, 3)
+        );
+        assert_eq!(n[0].children, vec![2, 1]); // big before small
+        assert_eq!(n[2].parent, Some(0));
+    }
+
+    #[test]
+    fn keeps_only_the_largest_twenty_files() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        for i in 0..100u64 {
+            b.add_file(1, format!("f{i:03}"), i, i);
+        }
+        let n = b.finish();
+        assert_eq!(n[0].top_files.len(), 20);
+        assert_eq!(n[0].top_files[0].size, 99);
+        assert_eq!(n[0].top_files[19].size, 80);
+        assert_eq!(n[0].file_count, 100);
+    }
+
+    #[test]
+    fn linked_file_credited_once_to_smallest_path_dir() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        b.push_dir(1, "a".into(), 0, NodeFlags::default());
+        b.add_linked_file(2, "x".into(), "/r/a/x".into(), 1, 9, 4096, 10);
+        b.push_dir(1, "b".into(), 0, NodeFlags::default());
+        b.add_linked_file(2, "y".into(), "/r/b/y".into(), 1, 9, 4096, 10);
+        let n = b.finish();
+        assert_eq!(n[0].size, 4096);
+        assert_eq!(n[1].size, 4096);
+        assert_eq!(n[2].size, 0);
+    }
+}
