@@ -66,6 +66,7 @@ impl Matcher {
     pub fn run(&self, rules: &Rules, snap: &Snapshot, env: &Env) -> Vec<Match> {
         let mut out = Vec::new();
         let mut hits = Vec::new();
+        let root = Path::new(&snap.meta.root);
         let mut stack: Vec<(u32, String)> = snap.nodes[0]
             .children
             .iter()
@@ -79,7 +80,7 @@ impl Matcher {
             if f.inaccessible || f.symlink || f.mount || self.protected.is_protected_root(p) {
                 continue;
             }
-            if let Some(rule) = self.best(rules, p, env, &mut hits) {
+            if let Some(rule) = self.best(rules, p, root, env, &mut hits) {
                 out.push(Match { rule, node: id });
                 continue;
             }
@@ -92,7 +93,14 @@ impl Matcher {
 
     /// The winning rule for `path`: highest priority, then longest literal glob
     /// prefix, then the rule listed first.
-    fn best(&self, rules: &Rules, path: &Path, env: &Env, hits: &mut Vec<usize>) -> Option<usize> {
+    fn best(
+        &self,
+        rules: &Rules,
+        path: &Path,
+        root: &Path,
+        env: &Env,
+        hits: &mut Vec<usize>,
+    ) -> Option<usize> {
         self.paths.matches_into(path, hits);
         let mut best: Option<(i32, usize, usize)> = None;
         for &glob in hits.iter() {
@@ -106,7 +114,7 @@ impl Matcher {
                 }
             };
             // Cheap checks first: the guards may stat files or run git.
-            if better && !self.excludes[rule].is_match(path) && match_time_ok(r, path, env) {
+            if better && !self.excludes[rule].is_match(path) && match_time_ok(r, path, root, env) {
                 best = Some((r.priority, prefix, rule));
             }
         }
@@ -115,7 +123,7 @@ impl Matcher {
 }
 
 /// `sibling_exists`, `requires_tool` (unless a fallback exists) and `project_idle_days`.
-fn match_time_ok(rule: &Rule, path: &Path, env: &Env) -> bool {
+fn match_time_ok(rule: &Rule, path: &Path, root: &Path, env: &Env) -> bool {
     let g = &rule.guards;
     if !g.sibling_exists.is_empty() && !guards::sibling_exists(path, &g.sibling_exists) {
         return false;
@@ -127,7 +135,7 @@ fn match_time_ok(rule: &Rule, path: &Path, env: &Env) -> bool {
         return false;
     }
     g.project_idle_days
-        .is_none_or(|days| guards::project_idle(path, days, env))
+        .is_none_or(|days| guards::project_idle(path, days, root, env))
 }
 
 /// Characters before the first glob metacharacter.

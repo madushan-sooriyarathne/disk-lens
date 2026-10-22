@@ -59,7 +59,11 @@ pub fn sibling_exists(path: &Path, names: &[String]) -> bool {
 /// The project containing `path` (its parent folder) has been idle for `days`.
 /// Idle time is measured from the newest of the last commit, `package.json` and
 /// any lockfile. With no evidence at all the project does not count as idle.
-pub fn project_idle(path: &Path, days: u32, env: &Env) -> bool {
+///
+/// Only repositories below `root` count: a repository enclosing the scan root
+/// (a dotfiles repo in home, or the repo holding a sandbox) says nothing about
+/// the projects inside it.
+pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
     let Some(project) = path.parent() else {
         return false;
     };
@@ -73,8 +77,10 @@ pub fn project_idle(path: &Path, days: u32, env: &Env) -> bool {
     for lock in LOCKFILES {
         consider(mtime(&project.join(lock)));
     }
-    if let Some(git) = Git::new(env) {
-        consider(git.last_commit(project));
+    if let Some(repo) = repo_below(project, root)
+        && let Some(git) = Git::new(env)
+    {
+        consider(git.last_commit(&repo));
     }
     newest.is_some_and(|t| age(env.now, t) >= Duration::from_secs(u64::from(days) * 86_400))
 }
@@ -164,6 +170,14 @@ fn changed_within(path: &Path, window: Duration, now: SystemTime) -> bool {
         return true;
     }
     std::fs::read_dir(path).is_ok_and(|entries| entries.flatten().any(|e| recent(&e.path())))
+}
+
+/// The nearest folder from `dir` upwards, strictly below `root`, holding `.git`.
+fn repo_below(dir: &Path, root: &Path) -> Option<PathBuf> {
+    dir.ancestors()
+        .take_while(|d| *d != root && d.starts_with(root))
+        .find(|d| d.join(".git").symlink_metadata().is_ok())
+        .map(Path::to_path_buf)
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -541,10 +555,13 @@ mod tests {
                 tools: &tools,
                 now,
             };
-            project_idle(&nm, 30, &env)
+            project_idle(&nm, 30, t.path(), &env)
         };
-        // Not a git repo: only package.json (90 days) counts.
-        assert!(idle(&FakeRunner::default()));
+        // Not a git repo: only package.json (90 days) counts, and git is not asked.
+        let runner = FakeRunner::default().with(&log, true, &secs_ago(3));
+        assert!(idle(&runner));
+        assert!(runner.calls.lock().unwrap().is_empty());
+        fs::create_dir(proj.join(".git")).unwrap();
         // A commit 3 days ago makes it active.
         assert!(!idle(&FakeRunner::default().with(&log, true, &secs_ago(3))));
         assert!(idle(&FakeRunner::default().with(&log, true, &secs_ago(45))));
@@ -564,6 +581,46 @@ mod tests {
             tools: &no_tools(),
             now: SystemTime::now() + Duration::from_secs(365 * DAY),
         };
-        assert!(!project_idle(&t.path().join("p/node_modules"), 30, &env));
+        assert!(!project_idle(
+            &t.path().join("p/node_modules"),
+            30,
+            t.path(),
+            &env
+        ));
+    }
+
+    #[test]
+    fn repositories_enclosing_the_root_are_ignored() {
+        let t = tempfile::tempdir().unwrap();
+        let tools = git_tools(t.path());
+        fs::create_dir_all(t.path().join(".git")).unwrap();
+        let root = t.path().join("home");
+        let proj = aged(&root, "proj", 90 * DAY);
+        fs::rename(proj.join("f"), proj.join("package.json")).unwrap();
+        let recent = (SystemTime::now() - Duration::from_secs(DAY))
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+        let facts = Facts::default();
+        let mut runner = FakeRunner::default();
+        for dir in [t.path(), root.as_path(), proj.as_path()] {
+            runner = runner.with(
+                &format!("git -C {} log -1 --format=%ct", dir.display()),
+                true,
+                &recent,
+            );
+        }
+        let env = Env {
+            facts: &facts,
+            runner: &runner,
+            tools: &tools,
+            now: SystemTime::now(),
+        };
+        assert!(project_idle(&proj.join("node_modules"), 30, &root, &env));
+        assert!(runner.calls.lock().unwrap().is_empty());
+        // A repository at the root itself is ignored too.
+        fs::create_dir(root.join(".git")).unwrap();
+        assert!(project_idle(&proj.join("node_modules"), 30, &root, &env));
     }
 }
