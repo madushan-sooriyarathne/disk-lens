@@ -17,7 +17,14 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let started = Instant::now();
-    let snap = match scanner::scan(&path, &Arc::new(AtomicBool::new(false)), &mut |_| {}) {
+    let snap = match scanner::scan(&path, &Arc::new(AtomicBool::new(false)), &mut |p| {
+        eprintln!(
+            "{} files, {} MB, {}",
+            p.files,
+            p.bytes / 1_000_000,
+            p.current
+        )
+    }) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("scan failed: {e}");

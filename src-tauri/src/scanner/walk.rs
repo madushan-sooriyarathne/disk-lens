@@ -83,7 +83,7 @@ pub fn walk(
     let walker = WalkDirGeneric::<Client>::new(root)
         .follow_links(false)
         .skip_hidden(false)
-        .sort(false)
+        .sort(true) // path order: the first sighting of a hard link is its smallest path
         .process_read_dir(move |_depth, _path, _state, children| {
             if cb_cancel.load(Ordering::Relaxed) {
                 children.clear();
@@ -155,13 +155,13 @@ pub fn walk(
         if !st.valid {
             continue;
         }
-        let name = entry.file_name.to_string_lossy().into_owned();
+        let name = entry.file_name.to_string_lossy();
         if entry.file_type.is_dir() {
             let flags = NodeFlags {
                 mount: st.mount,
                 ..NodeFlags::default()
             };
-            tree.push_dir(depth, name, st.allocated, flags);
+            tree.push_dir(depth, name.into_owned(), st.allocated, flags);
             bytes += st.allocated;
             if read_failed(&entry) {
                 tree.mark_inaccessible(depth);
@@ -170,19 +170,8 @@ pub fn walk(
         } else {
             files += 1;
             bytes += st.allocated;
-            if st.nlink > 1 {
-                tree.add_linked_file(
-                    depth,
-                    name,
-                    entry.path(),
-                    st.dev,
-                    st.ino,
-                    st.allocated,
-                    st.logical,
-                );
-            } else {
-                tree.add_file(depth, name, st.allocated, st.logical);
-            }
+            let link = (st.nlink > 1).then_some((st.dev, st.ino));
+            tree.add_file(depth, &name, st.allocated, st.logical, link);
         }
         if last_emit.elapsed() >= PROGRESS_INTERVAL {
             last_emit = Instant::now();

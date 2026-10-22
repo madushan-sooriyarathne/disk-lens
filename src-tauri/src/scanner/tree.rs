@@ -135,44 +135,47 @@ impl TreeBuilder {
     }
 
     /// Add a file whose parent is the directory open at `depth - 1`.
-    pub fn add_file(&mut self, depth: usize, name: String, size: u64, logical: u64) {
-        let parent = self.stack[depth - 1] as usize;
-        self.account_file(parent, name, size, logical);
-    }
-
-    /// Add a file with more than one hard link; it is credited once in `finish`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_linked_file(
+    ///
+    /// `link` is `(dev, ino)` for files with more than one hard link: only the first
+    /// sighting is counted. Callers must feed entries in sorted, parent-first order.
+    pub fn add_file(
         &mut self,
         depth: usize,
-        name: String,
-        path: std::path::PathBuf,
-        dev: u64,
-        ino: u64,
+        name: &str,
         size: u64,
         logical: u64,
+        link: Option<(u64, u64)>,
     ) {
-        let parent = self.stack[depth - 1];
-        self.hardlinks
-            .record(dev, ino, path, parent, name, size, logical);
-    }
-
-    fn account_file(&mut self, parent: usize, name: String, size: u64, logical: u64) {
-        let node = &mut self.nodes[parent];
+        if let Some((dev, ino)) = link
+            && !self.hardlinks.first_sighting(dev, ino)
+        {
+            return;
+        }
+        let node = &mut self.nodes[self.stack[depth - 1] as usize];
         node.size += size;
         node.logical_size += logical;
         node.file_count += 1;
-        node.top_files.push(FileLeaf { name, size });
-        // Keep the vector small without sorting on every push.
-        if node.top_files.len() >= TOP_FILES * 4 {
-            trim_top(&mut node.top_files);
+        // Keep the 20 largest (ties broken by name) without allocating names for the rest.
+        if node.top_files.len() < TOP_FILES {
+            node.top_files.push(FileLeaf {
+                name: name.to_owned(),
+                size,
+            });
+        } else if let Some((i, min)) = node
+            .top_files
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.size.cmp(&b.size).then_with(|| b.name.cmp(&a.name)))
+            && (size > min.size || (size == min.size && name < min.name.as_str()))
+        {
+            node.top_files[i] = FileLeaf {
+                name: name.to_owned(),
+                size,
+            };
         }
     }
 
     pub fn finish(mut self) -> Vec<DirNode> {
-        for link in std::mem::take(&mut self.hardlinks).into_credits() {
-            self.account_file(link.parent as usize, link.name, link.size, link.logical);
-        }
         for node in &mut self.nodes {
             trim_top(&mut node.top_files);
         }
@@ -211,10 +214,10 @@ mod tests {
         let mut b = TreeBuilder::default();
         b.push_dir(0, "root".into(), 0, NodeFlags::default());
         b.push_dir(1, "small".into(), 0, NodeFlags::default());
-        b.add_file(2, "f".into(), 100, 90);
+        b.add_file(2, "f", 100, 90, None);
         b.push_dir(1, "big".into(), 0, NodeFlags::default());
-        b.add_file(2, "g".into(), 500, 400);
-        b.add_file(1, "top".into(), 7, 7);
+        b.add_file(2, "g", 500, 400, None);
+        b.add_file(1, "top", 7, 7, None);
         let n = b.finish();
         assert_eq!(
             (n[0].size, n[0].logical_size, n[0].file_count),
@@ -229,7 +232,7 @@ mod tests {
         let mut b = TreeBuilder::default();
         b.push_dir(0, "root".into(), 0, NodeFlags::default());
         for i in 0..100u64 {
-            b.add_file(1, format!("f{i:03}"), i, i);
+            b.add_file(1, &format!("f{i:03}"), i, i, None);
         }
         let n = b.finish();
         assert_eq!(n[0].top_files.len(), 20);
@@ -239,16 +242,29 @@ mod tests {
     }
 
     #[test]
-    fn linked_file_credited_once_to_smallest_path_dir() {
+    fn linked_file_counted_once_at_first_sighting() {
         let mut b = TreeBuilder::default();
         b.push_dir(0, "root".into(), 0, NodeFlags::default());
         b.push_dir(1, "a".into(), 0, NodeFlags::default());
-        b.add_linked_file(2, "x".into(), "/r/a/x".into(), 1, 9, 4096, 10);
+        b.add_file(2, "x", 4096, 10, Some((1, 9)));
         b.push_dir(1, "b".into(), 0, NodeFlags::default());
-        b.add_linked_file(2, "y".into(), "/r/b/y".into(), 1, 9, 4096, 10);
+        b.add_file(2, "y", 4096, 10, Some((1, 9)));
         let n = b.finish();
-        assert_eq!(n[0].size, 4096);
+        assert_eq!((n[0].size, n[0].file_count), (4096, 1));
         assert_eq!(n[1].size, 4096);
         assert_eq!(n[2].size, 0);
+    }
+
+    #[test]
+    fn top_file_ties_break_by_name() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        for i in (0..25).rev() {
+            b.add_file(1, &format!("f{i:02}"), 5, 5, None);
+        }
+        let n = b.finish();
+        let names: Vec<_> = n[0].top_files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names.first(), Some(&"f00"));
+        assert_eq!(names.last(), Some(&"f19"));
     }
 }
