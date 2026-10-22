@@ -1,6 +1,6 @@
 //! Runtime configuration from environment. Debug builds default to dry-run.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -8,58 +8,133 @@ pub struct Config {
     pub scan_root: Option<PathBuf>,
     /// `DISKLENS_DRY_RUN`: log cleanup actions without performing them.
     pub dry_run: bool,
+    /// `DISKLENS_DATA_DIR`, else `<scan_root>/../data` when sandboxed, else Application Support.
+    pub data_dir: PathBuf,
+}
+
+#[derive(Default)]
+struct Vars {
+    scan_root: Option<String>,
+    dry_run: Option<String>,
+    data_dir: Option<String>,
+    home: Option<String>,
+    debug_build: bool,
 }
 
 impl Config {
     pub fn from_env() -> Self {
-        Self::from_vars(
-            std::env::var("DISKLENS_SCAN_ROOT").ok(),
-            std::env::var("DISKLENS_DRY_RUN").ok(),
-            cfg!(debug_assertions),
-        )
+        let var = |k| std::env::var(k).ok();
+        Self::from_vars(Vars {
+            scan_root: var("DISKLENS_SCAN_ROOT"),
+            dry_run: var("DISKLENS_DRY_RUN"),
+            data_dir: var("DISKLENS_DATA_DIR"),
+            home: var("HOME"),
+            debug_build: cfg!(debug_assertions),
+        })
     }
 
-    fn from_vars(root: Option<String>, dry_run: Option<String>, debug_build: bool) -> Self {
-        let dry_run = match dry_run.as_deref() {
+    /// The folder to scan: the override, else the home folder.
+    pub fn root(&self) -> Option<PathBuf> {
+        self.scan_root
+            .clone()
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+    }
+
+    fn from_vars(v: Vars) -> Self {
+        let dry_run = match v.dry_run.as_deref() {
             Some("1" | "true") => true,
             Some("0" | "false") => false,
-            _ => debug_build,
+            _ => v.debug_build,
         };
+        let scan_root = v.scan_root.filter(|r| !r.is_empty()).map(PathBuf::from);
+        let data_dir = v
+            .data_dir
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| scan_root.as_deref().and_then(sandbox_data_dir))
+            .unwrap_or_else(|| {
+                Path::new(v.home.as_deref().unwrap_or("."))
+                    .join("Library/Application Support/DiskLens")
+            });
         Self {
-            scan_root: root.filter(|r| !r.is_empty()).map(PathBuf::from),
+            scan_root,
             dry_run,
+            data_dir,
         }
     }
+}
+
+/// Sibling `data` folder of the scan root, so sandboxed runs never touch real Library.
+fn sandbox_data_dir(root: &Path) -> Option<PathBuf> {
+    root.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.join("data"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn cfg(f: impl FnOnce(&mut Vars)) -> Config {
+        let mut v = Vars {
+            home: Some("/Users/x".into()),
+            debug_build: true,
+            ..Default::default()
+        };
+        f(&mut v);
+        Config::from_vars(v)
+    }
+
     #[test]
     fn debug_build_defaults_to_dry_run() {
-        assert!(Config::from_vars(None, None, true).dry_run);
-        assert!(!Config::from_vars(None, None, false).dry_run);
+        assert!(cfg(|_| {}).dry_run);
+        assert!(!cfg(|v| v.debug_build = false).dry_run);
     }
 
     #[test]
     fn explicit_value_overrides_default() {
-        assert!(Config::from_vars(None, Some("1".into()), false).dry_run);
-        assert!(!Config::from_vars(None, Some("0".into()), true).dry_run);
+        assert!(
+            cfg(|v| {
+                v.debug_build = false;
+                v.dry_run = Some("1".into());
+            })
+            .dry_run
+        );
+        assert!(!cfg(|v| v.dry_run = Some("0".into())).dry_run);
     }
 
     #[test]
     fn unrecognised_value_keeps_default() {
-        assert!(Config::from_vars(None, Some("maybe".into()), true).dry_run);
+        assert!(cfg(|v| v.dry_run = Some("maybe".into())).dry_run);
     }
 
     #[test]
     fn scan_root_override() {
-        let c = Config::from_vars(Some("./.sandbox/home".into()), None, true);
+        let c = cfg(|v| v.scan_root = Some("./.sandbox/home".into()));
         assert_eq!(c.scan_root, Some(PathBuf::from("./.sandbox/home")));
+        assert_eq!(cfg(|v| v.scan_root = Some(String::new())).scan_root, None);
+    }
+
+    #[test]
+    fn data_dir_defaults_to_application_support() {
         assert_eq!(
-            Config::from_vars(Some(String::new()), None, true).scan_root,
-            None
+            cfg(|_| {}).data_dir,
+            PathBuf::from("/Users/x/Library/Application Support/DiskLens")
         );
+    }
+
+    #[test]
+    fn sandboxed_scan_root_redirects_data_dir() {
+        let c = cfg(|v| v.scan_root = Some("./.sandbox/home".into()));
+        assert_eq!(c.data_dir, PathBuf::from("./.sandbox/data"));
+    }
+
+    #[test]
+    fn explicit_data_dir_wins() {
+        let c = cfg(|v| {
+            v.scan_root = Some("./.sandbox/home".into());
+            v.data_dir = Some("/tmp/d".into());
+        });
+        assert_eq!(c.data_dir, PathBuf::from("/tmp/d"));
     }
 }
