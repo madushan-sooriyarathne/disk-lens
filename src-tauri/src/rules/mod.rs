@@ -1,8 +1,10 @@
 //! Rules engine: `rules.toml` model, validation, categories and matching (RULES.md).
 
 pub mod category;
+pub mod guards;
 pub mod load;
 pub mod model;
+pub mod tools;
 pub mod validate;
 
 use globset::{Glob, GlobBuilder};

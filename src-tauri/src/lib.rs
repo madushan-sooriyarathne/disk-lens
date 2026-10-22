@@ -2,6 +2,7 @@ pub mod cleanup;
 pub mod commands;
 pub mod config;
 pub mod error;
+pub mod platform;
 pub mod recommend;
 pub mod rules;
 pub mod scanner;
