@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@theme {
+	--font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "Geist Mono Variable", ui-monospace, monospace;
+}
+
+:root {
+	--bg: #f7f7f8;
+	--card: #ffffff;
+	--card-border: #e6e6e9;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	font-family: var(--font-sans);
+}
