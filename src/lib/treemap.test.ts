@@ -122,7 +122,9 @@ describe("labels", () => {
 		expect(labelVisibility(59, 40)).toEqual({ name: false, size: false });
 		expect(labelVisibility(60, 28)).toEqual({ name: true, size: false });
 		expect(labelVisibility(80, 43)).toEqual({ name: true, size: false });
-		expect(labelVisibility(80, 44)).toEqual({ name: true, size: true });
+		expect(labelVisibility(80, 48)).toEqual({ name: true, size: false }); // would overlap the name
+		expect(labelVisibility(80, 49)).toEqual({ name: true, size: true });
+		expect(labelVisibility(70, 60)).toEqual({ name: true, size: false });
 	});
 
 	it("scales the size font from 13 to 22 px with area", () => {

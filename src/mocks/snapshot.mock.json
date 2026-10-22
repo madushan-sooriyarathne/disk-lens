@@ -117,7 +117,7 @@
     "path": "~/.ollama",
     "size": 16700000000,
     "category": "ai_models",
-    "tier": "review",
+    "tier": "Review",
     "rule_id": "ollama-models",
     "kind": "Dir",
     "children": [
@@ -162,7 +162,7 @@
     "path": "~/.npm",
     "size": 13400000000,
     "category": "package_caches",
-    "tier": "safe",
+    "tier": "Safe",
     "rule_id": "npm-cache",
     "kind": "Dir",
     "children": []
@@ -183,7 +183,7 @@
       "path": "~/.android/Emulator images",
       "size": 7300000000,
       "category": "mobile_sdks",
-      "tier": "review",
+      "tier": "Review",
       "rule_id": "android-sdk-emulators",
       "kind": "Dir",
       "children": []
@@ -206,7 +206,7 @@
       "path": "~/.gradle/caches",
       "size": 6100000000,
       "category": "package_caches",
-      "tier": "safe",
+      "tier": "Safe",
       "rule_id": "gradle-caches",
       "kind": "Dir",
       "children": []
@@ -240,7 +240,7 @@
       "path": "~/Library/Android SDK",
       "size": 9900000000,
       "category": "mobile_sdks",
-      "tier": "review",
+      "tier": "Review",
       "rule_id": "android-sdk-emulators",
       "kind": "Dir",
       "children": []
@@ -251,7 +251,7 @@
       "path": "~/Library/Xcode DerivedData",
       "size": 6500000000,
       "category": "mobile_sdks",
-      "tier": "safe",
+      "tier": "Safe",
       "rule_id": "xcode-derived-data",
       "kind": "Dir",
       "children": []
@@ -385,7 +385,7 @@
       "path": "~/.cache/uv",
       "size": 1800000000,
       "category": "package_caches",
-      "tier": "safe",
+      "tier": "Safe",
       "rule_id": "uv-puppeteer",
       "kind": "Dir",
       "children": []
@@ -396,7 +396,7 @@
       "path": "~/.cache/puppeteer",
       "size": 1200000000,
       "category": "package_caches",
-      "tier": "safe",
+      "tier": "Safe",
       "rule_id": "uv-puppeteer",
       "kind": "Dir",
       "children": []

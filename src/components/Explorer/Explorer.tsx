@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ViewMode } from "../../lib/bindings/ViewMode";
+import { useScan } from "../../store/scan";
 import { useView } from "../../store/view";
 import { Breadcrumb } from "./Breadcrumb";
 import { Legend } from "./Legend";
@@ -65,13 +66,27 @@ export function Explorer() {
 						Your home folder, sized by space used. Click a tile to open it.
 					</p>
 				</div>
-				<ModeToggle />
+				<div className="flex items-center gap-2">
+					<button
+						type="button"
+						onClick={() => void useScan.getState().start()}
+						className="rounded-lg px-3 py-1 text-[13px] text-[var(--muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
+					>
+						Rescan
+					</button>
+					<ModeToggle />
+				</div>
 			</header>
 			<div className="mt-3 border-t border-[var(--divider)]">
 				<Breadcrumb />
 			</div>
 			<div ref={ref} className="min-h-0 flex-1 px-5">
-				{view && width > 0 && (
+				{view && view.children.length === 0 && (
+					<p className="pt-10 text-center text-[13px] text-[var(--muted)]">
+						Nothing to show here. Press Esc to go back.
+					</p>
+				)}
+				{view && view.children.length > 0 && width > 0 && (
 					<Treemap view={view} mode={mode} width={width} height={height} />
 				)}
 			</div>

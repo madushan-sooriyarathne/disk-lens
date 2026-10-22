@@ -82,9 +82,17 @@ export function layoutView(
 	return out;
 }
 
-/** The name hides below 60x28 px and the size below 80x44 px. */
+const NAME_BAND = 28; // top inset plus one line of name
+const SIZE_BAND = 21; // 13 px size label plus its bottom inset
+
+/**
+ * The name hides below 60x28 px and the size below 80x44 px. The size also hides
+ * when it would overlap the name (name band + size band must fit in the height).
+ */
 export function labelVisibility(w: number, h: number) {
-	return { name: w >= 60 && h >= 28, size: w >= 80 && h >= 44 };
+	const name = w >= 60 && h >= NAME_BAND;
+	const room = name ? h >= NAME_BAND + SIZE_BAND : true;
+	return { name, size: w >= 80 && h >= 44 && room };
 }
 
 const MIN_FONT = 13;

@@ -49,3 +49,12 @@ body {
 	--tier-safe-fill: #dff3ea;
 	--tier-review-fill: #fbefd9;
 }
+
+@keyframes slide {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(300%);
+	}
+}
