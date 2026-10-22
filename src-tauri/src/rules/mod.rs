@@ -3,6 +3,7 @@
 pub mod category;
 pub mod guards;
 pub mod load;
+pub mod matcher;
 pub mod model;
 pub mod tools;
 pub mod validate;
