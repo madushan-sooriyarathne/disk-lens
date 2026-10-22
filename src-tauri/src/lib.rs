@@ -24,6 +24,8 @@ pub fn run() {
             commands::cancel_scan,
             commands::load_last_snapshot,
             commands::get_view,
+            commands::get_recommendations,
+            commands::get_item_details,
             commands::reveal_in_finder,
         ])
         .run(tauri::generate_context!())

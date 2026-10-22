@@ -33,7 +33,7 @@ pub fn items(at: &Found) -> Vec<ProviderItem> {
     let root = at.path.join("manifests");
     let mut manifests = Vec::new();
     collect(&root, 0, &mut manifests);
-    let mut models: Vec<(String, PathBuf, Vec<String>)> = manifests
+    let mut models: Vec<(String, Vec<String>)> = manifests
         .into_iter()
         .filter_map(|path| {
             let rel = path.strip_prefix(&root).ok()?;
@@ -46,7 +46,7 @@ pub fn items(at: &Found) -> Vec<ProviderItem> {
                 .chain(m.layers)
                 .map(|l| l.digest)
                 .collect();
-            Some((name, path, digests))
+            Some((name, digests))
         })
         .collect();
     models.sort_by(|a, b| a.0.cmp(&b.0));
@@ -54,7 +54,7 @@ pub fn items(at: &Found) -> Vec<ProviderItem> {
     let mut seen = HashSet::new();
     models
         .into_iter()
-        .map(|(name, path, digests)| {
+        .map(|(name, digests)| {
             let size = digests
                 .iter()
                 .filter(|d| seen.insert((*d).clone()))
@@ -65,7 +65,8 @@ pub fn items(at: &Found) -> Vec<ProviderItem> {
             ProviderItem {
                 key: name.clone(),
                 name,
-                path,
+                // Models are removed by name; the models folder is what Finder can show.
+                path: at.path.to_path_buf(),
                 size,
                 node: None,
                 main_repo: None,

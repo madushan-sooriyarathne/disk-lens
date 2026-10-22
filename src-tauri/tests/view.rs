@@ -38,12 +38,12 @@ fn drill_down_over_a_real_scan() {
     }
     let snap = scanned(&root);
 
-    let top = build_view(&snap, &root, ViewMode::Category).unwrap();
+    let top = build_view(&snap, &root, ViewMode::Category, None).unwrap();
     assert_eq!(top.size, snap.meta.scanned_size);
     assert_eq!(top.children[0].name, "apps", "largest first");
     assert_sums(&top);
 
-    let apps = build_view(&snap, &root.join("apps"), ViewMode::Category).unwrap();
+    let apps = build_view(&snap, &root.join("apps"), ViewMode::Category, None).unwrap();
     assert_eq!(apps.children[0].name, "web");
     let file = &apps.children[0].children[0];
     assert_eq!((file.name.as_str(), file.kind), ("f.bin", ViewKind::File));
@@ -51,7 +51,7 @@ fn drill_down_over_a_real_scan() {
         validated_path(&snap, Path::new(&file.path)).unwrap(),
         root.join("apps/web/f.bin")
     );
-    assert!(build_view(&snap, &root.join("apps/missing"), ViewMode::Category).is_err());
+    assert!(build_view(&snap, &root.join("apps/missing"), ViewMode::Category, None).is_err());
 }
 
 #[test]
@@ -63,9 +63,9 @@ fn sandbox_view_is_consistent() {
     }
     let root = fs::canonicalize(root).unwrap();
     let snap = scanned(&root);
-    let v = build_view(&snap, &root, ViewMode::Category).unwrap();
+    let v = build_view(&snap, &root, ViewMode::Category, None).unwrap();
     assert_sums(&v);
     assert!(v.children.iter().any(|c| c.name == "Desktop"));
-    let desktop = build_view(&snap, &root.join("Desktop"), ViewMode::Cleanup).unwrap();
+    let desktop = build_view(&snap, &root.join("Desktop"), ViewMode::Cleanup, None).unwrap();
     assert_sums(&desktop);
 }

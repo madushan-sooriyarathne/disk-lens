@@ -10,6 +10,8 @@ pub enum Error {
     Root(String),
     #[error("no scan loaded")]
     NoSnapshot,
+    #[error("no recommendation {0} in the current scan")]
+    UnknownRow(String),
     #[error("path is not part of the scan: {0}")]
     NotInSnapshot(String),
     #[error("io error: {0}")]

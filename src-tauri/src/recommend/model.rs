@@ -50,3 +50,26 @@ pub struct Recommendation {
     pub size_is_estimate: bool,
     pub items: Vec<RecItem>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Subfolder {
+    pub name: String,
+    pub path: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+/// Everything the detail drawer shows beyond the row itself (PRD section 7.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ItemDetails {
+    pub row_id: String,
+    /// "What it is".
+    pub description: String,
+    /// "What happens if removed".
+    pub regenerates: String,
+    pub items: Vec<RecItem>,
+    /// The five largest subfolders across the row's items.
+    pub largest_subfolders: Vec<Subfolder>,
+}

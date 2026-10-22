@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::recommend::build::Analysis;
 use crate::recommend::model::Tier;
+use crate::rules::model::Rules;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -48,8 +50,45 @@ use crate::scanner::tree::{DirNode, Snapshot};
 /// Children smaller than this share of their parent merge into "Other".
 const MIN_SHARE_PERMILLE: u64 = 5;
 const MAX_CHILDREN: usize = 24;
-/// Placeholder until the rules engine resolves categories (Phase 3).
+/// Category when no analysis is available.
 const DEFAULT_CATEGORY: &str = "dev_tools";
+
+/// Rules and the current analysis, to fill category, tier and rule per tile.
+pub type Annotate<'a> = Option<(&'a Rules, &'a Analysis)>;
+
+/// How a tile is colored.
+#[derive(Clone)]
+struct Look {
+    category: String,
+    tier: Option<Tier>,
+    rule_id: Option<String>,
+}
+
+fn look(snap: &Snapshot, id: u32, ann: Annotate) -> Look {
+    let Some((rules, analysis)) = ann else {
+        return Look {
+            category: DEFAULT_CATEGORY.to_owned(),
+            tier: None,
+            rule_id: None,
+        };
+    };
+    match analysis.rule_of(snap, id) {
+        // Matched folders and everything inside them take the rule's category.
+        Some(r) => {
+            let rule = &rules.rules[r];
+            Look {
+                category: rule.category.clone(),
+                tier: Some(rule.tier),
+                rule_id: Some(rule.id.clone()),
+            }
+        }
+        None => Look {
+            category: analysis.categories.of(snap, id).to_owned(),
+            tier: None,
+            rule_id: None,
+        },
+    }
+}
 
 /// Where a path lands in the snapshot.
 enum Target {
@@ -116,10 +155,16 @@ pub fn validated_path(snap: &Snapshot, path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// The folder at `path` plus two levels below it.
-pub fn build_view(snap: &Snapshot, path: &Path, _mode: ViewMode) -> Result<ViewNode> {
+/// The folder at `path` plus two levels below it. Mode only changes colors,
+/// which the frontend applies.
+pub fn build_view(
+    snap: &Snapshot,
+    path: &Path,
+    _mode: ViewMode,
+    ann: Annotate,
+) -> Result<ViewNode> {
     match resolve(snap, path) {
-        Some(Target::Dir(id)) => Ok(dir_view(snap, id, 2, None)),
+        Some(Target::Dir(id)) => Ok(dir_view(snap, id, 2, ann)),
         _ => Err(Error::NotInSnapshot(path.display().to_string())),
     }
 }
@@ -144,30 +189,32 @@ impl Cand<'_> {
     }
 }
 
-fn leaf(id: String, name: &str, path: String, size: u64, kind: ViewKind) -> ViewNode {
+fn leaf(id: String, name: &str, path: String, size: u64, kind: ViewKind, look: &Look) -> ViewNode {
     ViewNode {
         id,
         name: name.to_owned(),
         path,
         size,
-        category: DEFAULT_CATEGORY.to_owned(),
-        tier: None,
-        rule_id: None,
+        category: look.category.clone(),
+        tier: look.tier,
+        rule_id: look.rule_id.clone(),
         kind,
         children: Vec::new(),
     }
 }
 
-fn dir_view(snap: &Snapshot, id: u32, levels: u8, name_override: Option<&str>) -> ViewNode {
+fn dir_view(snap: &Snapshot, id: u32, levels: u8, ann: Annotate) -> ViewNode {
     let node = &snap.nodes[id as usize];
     let path = dir_path(snap, id);
     let path_str = path.display().to_string();
+    let look = look(snap, id, ann);
     let mut view = leaf(
         id.to_string(),
-        name_override.unwrap_or(&node.name),
+        &node.name,
         path_str.clone(),
         node.size,
         ViewKind::Dir,
+        &look,
     );
     if levels == 0 {
         return view;
@@ -191,13 +238,14 @@ fn dir_view(snap: &Snapshot, id: u32, levels: u8, name_override: Option<&str>) -
         }
         shown += cand.size();
         view.children.push(match cand {
-            Cand::Dir(n) => dir_view(snap, n.id, levels - 1, None),
+            Cand::Dir(n) => dir_view(snap, n.id, levels - 1, ann),
             Cand::File(name, size) => leaf(
                 format!("{id}:f:{name}"),
                 name,
                 path.join(name).display().to_string(),
                 *size,
                 ViewKind::File,
+                &look,
             ),
         });
     }
@@ -210,6 +258,7 @@ fn dir_view(snap: &Snapshot, id: u32, levels: u8, name_override: Option<&str>) -
             path_str,
             rest,
             ViewKind::Other,
+            &look,
         ));
     }
     view
@@ -243,7 +292,7 @@ mod tests {
     }
 
     fn view(s: &Snapshot, p: &str) -> ViewNode {
-        build_view(s, Path::new(p), ViewMode::Category).unwrap()
+        build_view(s, Path::new(p), ViewMode::Category, None).unwrap()
     }
 
     #[test]
@@ -334,7 +383,7 @@ mod tests {
         });
         for p in ["/r/nope", "/other", "/r/a/../a", "/r/../etc", "relative"] {
             assert!(
-                build_view(&s, Path::new(p), ViewMode::Category).is_err(),
+                build_view(&s, Path::new(p), ViewMode::Category, None).is_err(),
                 "{p}"
             );
             assert!(validated_path(&s, Path::new(p)).is_err(), "{p}");
@@ -352,6 +401,6 @@ mod tests {
             PathBuf::from("/r/a/big.bin")
         );
         assert!(validated_path(&s, Path::new("/r/a/unlisted.bin")).is_err());
-        assert!(build_view(&s, Path::new("/r/a/big.bin"), ViewMode::Category).is_err());
+        assert!(build_view(&s, Path::new("/r/a/big.bin"), ViewMode::Category, None).is_err());
     }
 }
