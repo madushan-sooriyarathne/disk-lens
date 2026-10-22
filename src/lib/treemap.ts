@@ -43,7 +43,9 @@ export function layoutView(
 	const root = hierarchy(view, (n) => n.children)
 		.sum((n) => (n.children.length === 0 ? n.size : 0))
 		.sort(
-			(a, b) => b.value! - a.value! || a.data.name.localeCompare(b.data.name),
+			(a, b) =>
+				(b.value ?? 0) - (a.value ?? 0) ||
+				a.data.name.localeCompare(b.data.name),
 		);
 	const isGroup = (d: { depth: number; children?: unknown }) =>
 		d.depth === 1 && !!d.children;

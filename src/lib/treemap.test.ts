@@ -11,6 +11,11 @@ import {
 	tileColors,
 } from "./treemap";
 
+function must<T>(v: T | undefined): T {
+	if (v === undefined) throw new Error("expected a value");
+	return v;
+}
+
 const node = (
 	name: string,
 	size: number,
@@ -41,7 +46,7 @@ describe("layoutView", () => {
 		const rects = layoutView(flat([600, 300, 100]), 1000, 500, { gap: 0 });
 		const total = rects.reduce((s, r) => s + r.w * r.h, 0);
 		expect(total).toBeCloseTo(500_000, -3);
-		const big = rects.find((r) => r.node.name === "n0")!;
+		const big = must(rects.find((r) => r.node.name === "n0"));
 		expect((big.w * big.h) / total).toBeCloseTo(0.6, 1);
 	});
 
@@ -71,8 +76,8 @@ describe("layoutView", () => {
 			node("g", 100, [node("a", 60), node("b", 40)], { kind: "Dir" }),
 		]);
 		const rects = layoutView(view, 400, 300, { header: 30, groupPad: 8 });
-		const g = rects.find((r) => r.node.name === "g")!;
-		const a = rects.find((r) => r.node.name === "a")!;
+		const g = must(rects.find((r) => r.node.name === "g"));
+		const a = must(rects.find((r) => r.node.name === "a"));
 		expect(g.group).toBe(true);
 		expect(a.parentId).toBe("g");
 		expect(a.y).toBeGreaterThanOrEqual(g.y + 30);
