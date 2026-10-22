@@ -1,0 +1,746 @@
+{
+ "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09).",
+ "meta": {
+  "id": "mock",
+  "root": "~",
+  "scanned_at": 0,
+  "duration_ms": 41000,
+  "volume": {
+   "total": 462500000000,
+   "available": 39500000000
+  },
+  "scanned_size": 135000000000,
+  "inaccessible_count": 0
+ },
+ "view": {
+  "id": "0",
+  "name": "~ Home",
+  "path": "~",
+  "size": 135000000000,
+  "category": "dev_tools",
+  "tier": null,
+  "rule_id": null,
+  "kind": "Dir",
+  "children": [
+   {
+    "id": "1",
+    "name": "Desktop",
+    "path": "~/Desktop",
+    "size": 41500000000,
+    "category": "code_projects",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "2",
+      "name": "atlas",
+      "path": "~/Desktop/atlas",
+      "size": 16600000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "3",
+      "name": "pebble",
+      "path": "~/Desktop/pebble",
+      "size": 8200000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "4",
+      "name": "orbit",
+      "path": "~/Desktop/orbit",
+      "size": 3000000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "5",
+      "name": "side-quest",
+      "path": "~/Desktop/side-quest",
+      "size": 4200000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "6",
+      "name": "old-saas",
+      "path": "~/Desktop/old-saas",
+      "size": 2800000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "7",
+      "name": "sandbox",
+      "path": "~/Desktop/sandbox",
+      "size": 2500000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "8",
+      "name": "Other",
+      "path": "~/Desktop/Other",
+      "size": 4200000000,
+      "category": "code_projects",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Other",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "9",
+    "name": ".ollama",
+    "path": "~/.ollama",
+    "size": 16700000000,
+    "category": "ai_models",
+    "tier": "review",
+    "rule_id": "ollama-models",
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "10",
+      "name": "deepseek-coder",
+      "path": "~/.ollama/deepseek-coder",
+      "size": 8300000000,
+      "category": "ai_models",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "11",
+      "name": "llama3.1:8b",
+      "path": "~/.ollama/llama3.1:8b",
+      "size": 4600000000,
+      "category": "ai_models",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "12",
+      "name": "mistral:7b-instruct",
+      "path": "~/.ollama/mistral:7b-instruct",
+      "size": 3800000000,
+      "category": "ai_models",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "13",
+    "name": ".npm",
+    "path": "~/.npm",
+    "size": 13400000000,
+    "category": "package_caches",
+    "tier": "safe",
+    "rule_id": "npm-cache",
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "14",
+    "name": ".android",
+    "path": "~/.android",
+    "size": 7300000000,
+    "category": "mobile_sdks",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "15",
+      "name": "Emulator images",
+      "path": "~/.android/Emulator images",
+      "size": 7300000000,
+      "category": "mobile_sdks",
+      "tier": "review",
+      "rule_id": "android-sdk-emulators",
+      "kind": "Dir",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "16",
+    "name": ".gradle",
+    "path": "~/.gradle",
+    "size": 6600000000,
+    "category": "package_caches",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "17",
+      "name": "caches",
+      "path": "~/.gradle/caches",
+      "size": 6100000000,
+      "category": "package_caches",
+      "tier": "safe",
+      "rule_id": "gradle-caches",
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "18",
+      "name": "Other",
+      "path": "~/.gradle/Other",
+      "size": 500000000,
+      "category": "package_caches",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Other",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "19",
+    "name": "Library",
+    "path": "~/Library",
+    "size": 17100000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "20",
+      "name": "Android SDK",
+      "path": "~/Library/Android SDK",
+      "size": 9900000000,
+      "category": "mobile_sdks",
+      "tier": "review",
+      "rule_id": "android-sdk-emulators",
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "21",
+      "name": "Xcode DerivedData",
+      "path": "~/Library/Xcode DerivedData",
+      "size": 6500000000,
+      "category": "mobile_sdks",
+      "tier": "safe",
+      "rule_id": "xcode-derived-data",
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "22",
+      "name": "Other",
+      "path": "~/Library/Other",
+      "size": 700000000,
+      "category": "dev_tools",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Other",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "23",
+    "name": "Documents",
+    "path": "~/Documents",
+    "size": 5500000000,
+    "category": "documents_media",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "24",
+    "name": "Pictures",
+    "path": "~/Pictures",
+    "size": 4000000000,
+    "category": "documents_media",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "25",
+      "name": "Photos Library",
+      "path": "~/Pictures/Photos Library",
+      "size": 3200000000,
+      "category": "documents_media",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "26",
+      "name": "Other",
+      "path": "~/Pictures/Other",
+      "size": 800000000,
+      "category": "documents_media",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Other",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "27",
+    "name": "Downloads",
+    "path": "~/Downloads",
+    "size": 3000000000,
+    "category": "documents_media",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "28",
+    "name": "Music",
+    "path": "~/Music",
+    "size": 3500000000,
+    "category": "documents_media",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "29",
+    "name": ".vscode",
+    "path": "~/.vscode",
+    "size": 3200000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "30",
+    "name": "Other dotfolders",
+    "path": "~/Other dotfolders",
+    "size": 3000000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "31",
+    "name": ".cursor",
+    "path": "~/.cursor",
+    "size": 2600000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "32",
+    "name": ".cache",
+    "path": "~/.cache",
+    "size": 3400000000,
+    "category": "package_caches",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": [
+     {
+      "id": "33",
+      "name": "uv",
+      "path": "~/.cache/uv",
+      "size": 1800000000,
+      "category": "package_caches",
+      "tier": "safe",
+      "rule_id": "uv-puppeteer",
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "34",
+      "name": "puppeteer",
+      "path": "~/.cache/puppeteer",
+      "size": 1200000000,
+      "category": "package_caches",
+      "tier": "safe",
+      "rule_id": "uv-puppeteer",
+      "kind": "Dir",
+      "children": []
+     },
+     {
+      "id": "35",
+      "name": "Other",
+      "path": "~/.cache/Other",
+      "size": 400000000,
+      "category": "package_caches",
+      "tier": null,
+      "rule_id": null,
+      "kind": "Other",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "36",
+    "name": ".mintlify",
+    "path": "~/.mintlify",
+    "size": 1400000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Dir",
+    "children": []
+   },
+   {
+    "id": "37",
+    "name": "Other",
+    "path": "~/Other",
+    "size": 2800000000,
+    "category": "dev_tools",
+    "tier": null,
+    "rule_id": null,
+    "kind": "Other",
+    "children": []
+   }
+  ]
+ },
+ "recommendations": [
+  {
+   "row_id": "npm-cache",
+   "rule_id": "npm-cache",
+   "label": "npm cache",
+   "paths_hint": "~/.npm",
+   "tier": "Safe",
+   "size": 13400000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "npm-cache:2",
+     "path": "~/.npm/_cacache",
+     "name": "_cacache",
+     "size": 13400000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "next-turbo-build",
+   "rule_id": "next-turbo-build",
+   "label": "Next.js & Turbo build output",
+   "paths_hint": "~/Desktop/*/.next, .turbo",
+   "tier": "Safe",
+   "size": 12300000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "next-turbo-build:10",
+     "path": "~/Desktop/atlas/.next",
+     "name": "atlas/.next",
+     "size": 7100000000,
+     "status": "Ready",
+     "method": "Delete"
+    },
+    {
+     "item_id": "next-turbo-build:11",
+     "path": "~/Desktop/pebble/.next",
+     "name": "pebble/.next",
+     "size": 5200000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "gradle-caches",
+   "rule_id": "gradle-caches",
+   "label": "Gradle caches",
+   "paths_hint": "~/.gradle",
+   "tier": "Safe",
+   "size": 6600000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "gradle-caches:5",
+     "path": "~/.gradle/caches",
+     "name": "caches",
+     "size": 6100000000,
+     "status": "Ready",
+     "method": "Delete"
+    },
+    {
+     "item_id": "gradle-caches:12",
+     "path": "~/.gradle/wrapper/dists",
+     "name": "dists",
+     "size": 500000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "xcode-derived-data",
+   "rule_id": "xcode-derived-data",
+   "label": "Xcode DerivedData",
+   "paths_hint": "~/Library/Developer/Xcode",
+   "tier": "Safe",
+   "size": 6400000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "xcode-derived-data:20",
+     "path": "~/Library/Developer/Xcode/DerivedData",
+     "name": "DerivedData",
+     "size": 6400000000,
+     "status": {
+      "Blocked": {
+       "reason": "Quit Xcode to clean"
+      }
+     },
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "uv-puppeteer",
+   "rule_id": "uv-puppeteer",
+   "label": "uv & Puppeteer caches",
+   "paths_hint": "~/.cache/uv, ~/.cache/puppeteer",
+   "tier": "Safe",
+   "size": 3000000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "uv-puppeteer:30",
+     "path": "~/.cache/uv",
+     "name": "uv",
+     "size": 1800000000,
+     "status": "Ready",
+     "method": "Delete"
+    },
+    {
+     "item_id": "uv-puppeteer:31",
+     "path": "~/.cache/puppeteer",
+     "name": "puppeteer",
+     "size": 1200000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "android-sdk-emulators",
+   "rule_id": "android-sdk-emulators",
+   "label": "Android SDK & emulators",
+   "paths_hint": "~/Library/Android, ~/.android",
+   "tier": "Review",
+   "size": 17200000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "android-sdk-emulators:40",
+     "path": "~/Library/Android/sdk",
+     "name": "sdk",
+     "size": 9900000000,
+     "status": "Ready",
+     "method": "Trash"
+    },
+    {
+     "item_id": "android-sdk-emulators:41",
+     "path": "~/.android/avd",
+     "name": "avd",
+     "size": 7300000000,
+     "status": "Ready",
+     "method": "Trash"
+    }
+   ]
+  },
+  {
+   "row_id": "ollama-models",
+   "rule_id": "ollama-models",
+   "label": "Ollama models",
+   "paths_hint": "~/.ollama/models",
+   "tier": "Review",
+   "size": 16700000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "ollama-models:deepseek-coder",
+     "path": "~/.ollama/models",
+     "name": "deepseek-coder",
+     "size": 8300000000,
+     "status": "Ready",
+     "method": {
+      "Command": {
+       "display": "ollama rm deepseek-coder"
+      }
+     }
+    },
+    {
+     "item_id": "ollama-models:llama3.1",
+     "path": "~/.ollama/models",
+     "name": "llama3.1:8b",
+     "size": 4600000000,
+     "status": "Ready",
+     "method": {
+      "Command": {
+       "display": "ollama rm llama3.1:8b"
+      }
+     }
+    },
+    {
+     "item_id": "ollama-models:mistral",
+     "path": "~/.ollama/models",
+     "name": "mistral:7b-instruct",
+     "size": 3800000000,
+     "status": "Ready",
+     "method": {
+      "Command": {
+       "display": "ollama rm mistral:7b-instruct"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "row_id": "agent-worktrees:atlas",
+   "rule_id": "agent-worktrees",
+   "label": "atlas worktrees",
+   "paths_hint": "~/Desktop/atlas/.claude/worktrees",
+   "tier": "Review",
+   "size": 9000000000,
+   "size_is_estimate": true,
+   "items": [
+    {
+     "item_id": "agent-worktrees:w1",
+     "path": "~/Desktop/atlas/.claude/worktrees/wt-clean",
+     "name": "wt-clean",
+     "size": 9000000000,
+     "status": "Ready",
+     "method": {
+      "Command": {
+       "display": "git worktree remove"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "row_id": "node-modules-idle",
+   "rule_id": "node-modules-idle",
+   "label": "node_modules in idle projects",
+   "paths_hint": "~/Desktop/*/node_modules",
+   "tier": "Review",
+   "size": 6600000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "node-modules-idle:50",
+     "path": "~/Desktop/old-saas/node_modules",
+     "name": "old-saas/node_modules",
+     "size": 6600000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "xcode-archives",
+   "rule_id": "xcode-archives",
+   "label": "Xcode archives",
+   "paths_hint": "~/Library/Developer/Xcode/Archives",
+   "tier": "Review",
+   "size": 3100000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "xcode-archives:60",
+     "path": "~/Library/Developer/Xcode/Archives",
+     "name": "Archives",
+     "size": 3100000000,
+     "status": "Ready",
+     "method": "Trash"
+    }
+   ]
+  },
+  {
+   "row_id": "ios-device-support",
+   "rule_id": "ios-device-support",
+   "label": "Device support files",
+   "paths_hint": "~/Library/Developer/Xcode/iOS DeviceSupport",
+   "tier": "Review",
+   "size": 2000000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "ios-device-support:61",
+     "path": "~/Library/Developer/Xcode/iOS DeviceSupport",
+     "name": "iOS DeviceSupport",
+     "size": 2000000000,
+     "status": "Ready",
+     "method": "Delete"
+    }
+   ]
+  },
+  {
+   "row_id": "ios-backups",
+   "rule_id": "ios-backups",
+   "label": "iPhone & iPad backups",
+   "paths_hint": "~/Library/Application Support/MobileSync",
+   "tier": "Review",
+   "size": 1400000000,
+   "size_is_estimate": false,
+   "items": [
+    {
+     "item_id": "ios-backups:62",
+     "path": "~/Library/Application Support/MobileSync/Backup/0000-1111",
+     "name": "0000-1111",
+     "size": 1400000000,
+     "status": "Ready",
+     "method": "Trash"
+    }
+   ]
+  }
+ ],
+ "preselected": [
+  "npm-cache",
+  "next-turbo-build",
+  "gradle-caches",
+  "uv-puppeteer",
+  "android-sdk-emulators"
+ ]
+}
