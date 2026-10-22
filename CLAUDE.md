@@ -7,7 +7,6 @@ DiskLens: macOS disk space analyzer and safe cleaner. Tauri v2 (Rust backend, `s
 ## Source of truth
 
 Read these before any task. If they conflict or are unclear, ask the user; do not guess.
-
 - `docs/PRD.md` - requirements, safety rules S-01..S-10, visual spec
 - `docs/RULES.md` - classification and cleanup rules; section 7 is the starter `rules.toml`
 - `docs/PLAN.md` - stack, repo layout, data contracts, tauri commands, phases
@@ -53,7 +52,7 @@ Every phase ends with `pnpm lint && pnpm test && cargo test` plus clippy passing
 
 ## Environment variables
 
-| Var | Effect |
-|-----|--------|
-| `DISKLENS_SCAN_ROOT` | Scan root override (dev only, point at `./.sandbox/home`) |
-| `DISKLENS_DRY_RUN` | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release |
+| Var                  | Effect                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `DISKLENS_SCAN_ROOT` | Scan root override (dev only, point at `./.sandbox/home`)                                                  |
+| `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release |
