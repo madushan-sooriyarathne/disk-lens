@@ -194,6 +194,10 @@ pub fn walk(
         }
     }
 
+    // The callback stops descending once cancelled, so the loop can end early without noticing.
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Error::Cancelled);
+    }
     Ok(WalkResult {
         nodes: tree.finish(),
         inaccessible_count: inaccessible,
