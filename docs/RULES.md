@@ -69,7 +69,15 @@ Matching runs once per snapshot over directory nodes, in depth-first order from 
    3. Stop descending.
 4. Otherwise, descend into children.
 
-Globs use `globset` with `literal_separator(true)`, matched against the absolute path after expanding `~`. Item size is the node's allocated size. With `target = "contents"` the item size is the same, but the action iterates children.
+Globs use `globset` with `literal_separator(true)`, matched against the absolute path after expanding `~` (the scan root is escaped, so glob characters in it are literal). Item size is the node's allocated size. With `target = "contents"` the item size is the same, but the action iterates children.
+
+Glob semantics, pinned by tests:
+
+- `*` never crosses `/`.
+- `**` matches zero or more whole segments, so `~/**/.next` also matches `~/.next`.
+- A trailing `/**` needs at least one more segment. `**/node_modules/**` matches paths inside a `node_modules` folder but not the folder itself, which is what lets `node-modules-idle` match a project's `node_modules` while excluding nested ones.
+
+Inaccessible folders, symlinks and mount points also stop the walk, like protected paths.
 
 ### 4.2 Guards
 
@@ -78,7 +86,7 @@ Guards fall into three classes, and each class changes the outcome differently.
 | Guard | Value | Class | Behavior |
 |-------|-------|-------|----------|
 | `sibling_exists` | string array | match-time | Any of these names must exist in the parent folder, otherwise no match |
-| `project_idle_days` | integer | match-time | The parent project must be idle this many days, otherwise no match. Idle means the newest of the last commit time, `package.json` mtime and lockfile mtime |
+| `project_idle_days` | integer | match-time | The parent project must be idle this many days, otherwise no match. Idle means the newest of the last commit time, `package.json` mtime and lockfile mtime. Only a git repository below the scan root counts: a repository enclosing the root (a dotfiles repo in home) is ignored. With no evidence at all the project is not idle |
 | `requires_tool` | string | match-time | The tool must resolve to a binary. Otherwise `fallback_method` is used, or the rule is hidden |
 | `quiet_minutes` | integer | blocking | Blocked if the target or any immediate child was modified within N minutes |
 | `process_not_running` | string array | blocking | Blocked if any process command line contains one of these substrings |
@@ -87,18 +95,20 @@ Guards fall into three classes, and each class changes the outcome differently.
 | `requires_running` | string array | blocking | Blocked unless a process containing one of these substrings is running |
 | `git_clean` | bool | safety | Blocked if a worktree has uncommitted or untracked changes, or commits not on any remote branch |
 
-Blocked items appear in the list with a disabled checkbox and a reason, for example "Quit Xcode to clean", "Start Docker Desktop to clean" or "Has uncommitted changes".
+Blocked items appear in the list with a disabled checkbox and a reason, for example "Quit Xcode to clean", "Start Docker Desktop to clean" or "Has uncommitted changes". A check that cannot complete (git fails, for example) blocks the item rather than allowing it.
 
 ### 4.3 Providers
 
 Some data can't be cleaned by deleting a matched folder. A provider replaces the default enumeration with tool-aware items.
 
+In sandbox mode (`DISKLENS_SCAN_ROOT` set) only `git` resolves as a tool. The `ollama`, `simctl_unavailable` and `docker` providers act on machine-wide state, so they return nothing there, and rules that require another tool use their `fallback_method` or are hidden.
+
 | Provider | Enumeration | Item command |
 |----------|-------------|--------------|
-| `ollama` | `ollama list`. If the server is down, read manifests under `~/.ollama/models/manifests` to list models but mark them blocked. One item per model, sized from shared blobs, counted once | `ollama rm {name}` |
+| `ollama` | Manifests under `<matched folder>/manifests` (no `ollama list`), whether or not the server runs; the `requires_running` guard blocks removal while it is down. One item per model, sized from its blobs. Blobs shared by several models count once, for the first model by name | `ollama rm {name}` |
 | `git_worktrees` | Each child of the matched folder whose `.git` is a file containing `gitdir:`. Resolves `{main_repo}` and `{project}` (main repo folder name) | `git -C {main_repo} worktree remove {path}` (never `--force`) |
 | `simctl_unavailable` | `xcrun simctl list devices unavailable -j`, sizing each device folder from the snapshot | `xcrun simctl delete unavailable` once for all items |
-| `docker` | `docker system df --format json`. Reclaimable size, always an estimate | `docker system prune -a -f` (volumes are kept) |
+| `docker` | `docker system df --format json`. Reclaimable size of images, containers and build cache (volumes excluded), always an estimate. When Docker does not answer, the matched folder's size stands in as the upper bound | `docker system prune -a -f` (volumes are kept) |
 
 ## 5. Hardcoded protections (Rust, not configurable)
 
@@ -117,6 +127,8 @@ The protected list is identical to the `[[protect]]` entries in section 7, plus 
 Categories drive treemap colors. They are resolved for every node, including nodes that no rule matches.
 
 **Resolution order:** walk from the node up to the root. At each level, check whether the folder has a project marker (`code_projects`) or equals a category `paths` entry. The first hit wins.
+
+The scan root itself is not checked for project markers, so a dotfiles repository in the home folder does not turn every unclaimed folder into a code project. Nodes inside a matched recommendation take that rule's category.
 
 **Fallback:** if nothing hits, the node is `documents_media` when at least 60% of its bytes are in `media_extensions`, and `dev_tools` otherwise.
 
