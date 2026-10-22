@@ -1,4 +1,4 @@
-//! Recommendation types (PLAN.md section 3). Logic arrives in Phase 3.
+//! Recommendation types (PLAN.md section 3).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

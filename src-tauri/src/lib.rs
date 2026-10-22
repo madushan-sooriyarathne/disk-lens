@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod recommend;
+pub mod rules;
 pub mod scanner;
 pub mod state;
 pub mod view;
@@ -10,6 +11,8 @@ use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Validates the bundled rules once at startup; an invalid file is a build defect.
+    rules::model::Rules::embedded();
     let state = Arc::new(state::AppState::new(config::Config::from_env()));
     tauri::Builder::default()
         .manage(state)

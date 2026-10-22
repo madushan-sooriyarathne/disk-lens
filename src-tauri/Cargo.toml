@@ -33,6 +33,11 @@ tracing-appender = "0.2.5"
 libc = "0.2.191"
 objc2 = "0.6.5"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSURL", "NSString", "NSArray", "NSDictionary", "NSError", "NSValue", "NSObject"] }
+toml = "1.1.8"
+globset = "0.4.20"
+wait-timeout = "0.2.1"
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
