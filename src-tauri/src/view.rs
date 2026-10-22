@@ -84,7 +84,16 @@ fn resolve(snap: &Snapshot, path: &Path) -> Option<Target> {
     Some(Target::Dir(id))
 }
 
-fn dir_path(snap: &Snapshot, id: u32) -> PathBuf {
+/// The node id of the scanned directory at `path`.
+pub fn dir_id(snap: &Snapshot, path: &Path) -> Option<u32> {
+    match resolve(snap, path)? {
+        Target::Dir(id) => Some(id),
+        Target::File(..) => None,
+    }
+}
+
+/// Absolute path of directory node `id`.
+pub fn dir_path(snap: &Snapshot, id: u32) -> PathBuf {
     let mut names = Vec::new();
     let mut cur = id;
     while let Some(parent) = snap.nodes[cur as usize].parent {

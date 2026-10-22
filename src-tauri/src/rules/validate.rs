@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use super::category;
 use super::model::{Method, Rules};
 use super::{compile, expand};
 
@@ -19,6 +20,11 @@ pub fn validate(r: &Rules) -> Vec<String> {
     }
 
     let mut category_ids = HashSet::new();
+    for required in [category::MEDIA, category::OTHER] {
+        if !r.categories.iter().any(|c| c.id == required) {
+            errors.push(format!("missing fallback category `{required}`"));
+        }
+    }
     for c in &r.categories {
         if !category_ids.insert(c.id.as_str()) {
             errors.push(format!("duplicate category id `{}`", c.id));
@@ -134,6 +140,18 @@ fill = "#000000"
 border = "#000000"
 paths = ["~/.npm"]
 
+[[category]]
+id = "documents_media"
+label = "Media"
+fill = "#000000"
+border = "#000000"
+
+[[category]]
+id = "dev_tools"
+label = "Other"
+fill = "#000000"
+border = "#000000"
+
 [[protect]]
 path = "~/.ssh"
 reason = "keys"
@@ -234,6 +252,16 @@ method = "trash"
             Rules::parse(&r)
                 .unwrap_err()
                 .contains("unknown category `nope`")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_fallback_category() {
+        let r = BASE.replace("id = \"dev_tools\"", "id = \"misc\"");
+        assert!(
+            Rules::parse(&r)
+                .unwrap_err()
+                .contains("missing fallback category `dev_tools`")
         );
     }
 
