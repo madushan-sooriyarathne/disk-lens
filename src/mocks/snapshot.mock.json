@@ -1,5 +1,5 @@
 {
- "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09).",
+ "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09). All items Ready to match mockup counts (blocked states arrive with Phase 3 data).",
  "meta": {
   "id": "mock",
   "root": "~",
@@ -526,11 +526,7 @@
      "path": "~/Library/Developer/Xcode/DerivedData",
      "name": "DerivedData",
      "size": 6400000000,
-     "status": {
-      "Blocked": {
-       "reason": "Quit Xcode to clean"
-      }
-     },
+     "status": "Ready",
      "method": "Delete"
     }
    ]

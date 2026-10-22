@@ -7,14 +7,40 @@
 	--font-mono: "Geist Mono Variable", ui-monospace, monospace;
 }
 
+/* Colors are tokens so dark mode (Phase 5) only redefines them. */
 :root {
 	--bg: #f7f7f8;
 	--card: #ffffff;
 	--card-border: #e6e6e9;
+	--text: #18181b;
+	--muted: #6b6b73;
+	--divider: #ececef;
+
+	--safe: #22a06b;
+	--review: #e2a03f;
+
+	--cat-code_projects-fill: #e6e4fb;
+	--cat-code_projects-border: #8e84e8;
+	--cat-ai_models-fill: #fbdde6;
+	--cat-ai_models-border: #e58aa7;
+	--cat-mobile_sdks-fill: #d9eef4;
+	--cat-mobile_sdks-border: #6fb7cc;
+	--cat-package_caches-fill: #dce5f7;
+	--cat-package_caches-border: #7c9bd8;
+	--cat-documents_media-fill: #fce6d8;
+	--cat-documents_media-border: #efa57a;
+	--cat-dev_tools-fill: #eeeef0;
+	--cat-dev_tools-border: #c4c4c9;
 }
 
 body {
 	margin: 0;
 	background: var(--bg);
+	color: var(--text);
 	font-family: var(--font-sans);
+	overflow: hidden;
+}
+
+#root {
+	height: 100vh;
 }
