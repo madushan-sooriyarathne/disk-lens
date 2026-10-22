@@ -1,8 +1,10 @@
 pub mod commands;
 pub mod config;
 pub mod error;
+pub mod recommend;
 pub mod scanner;
 pub mod state;
+pub mod view;
 
 use std::sync::Arc;
 
