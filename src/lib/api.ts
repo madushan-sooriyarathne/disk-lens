@@ -25,8 +25,7 @@ const tauriApi: Api = {
 	},
 	cancelScan: () => invoke("cancel_scan"),
 	getView: (nodePath, mode) => invoke("get_view", { nodePath, mode }),
-	// The rules engine arrives in Phase 3; there is nothing to recommend yet.
-	getRecommendations: async () => [],
+	getRecommendations: () => invoke("get_recommendations"),
 	revealInFinder: (nodePath) => invoke("reveal_in_finder", { nodePath }),
 };
 
