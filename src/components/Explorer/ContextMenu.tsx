@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { api } from "../../lib/api";
 import type { ViewNode } from "../../lib/bindings/ViewNode";
+import { rowForNode } from "../../lib/selection";
 import { useSelection } from "../../store/selection";
 
 export interface MenuState {
@@ -17,9 +18,7 @@ export function ContextMenu({
 	onClose: () => void;
 }) {
 	const recs = useSelection((s) => s.recommendations);
-	const row = menu.node.rule_id
-		? recs.find((r) => r.rule_id === menu.node.rule_id)
-		: undefined;
+	const row = rowForNode(recs, menu.node);
 
 	useEffect(() => {
 		const close = () => onClose();

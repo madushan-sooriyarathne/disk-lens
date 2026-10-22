@@ -58,3 +58,23 @@ body {
 		transform: translateX(300%);
 	}
 }
+
+/* Detail drawer slides over the recommendations panel. */
+.drawer {
+	animation: drawer-in 160ms ease-out;
+}
+
+@keyframes drawer-in {
+	from {
+		transform: translateX(100%);
+	}
+	to {
+		transform: translateX(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.drawer {
+		animation: none;
+	}
+}

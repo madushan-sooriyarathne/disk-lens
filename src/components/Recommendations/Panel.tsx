@@ -3,6 +3,7 @@ import { formatBytes } from "../../lib/format";
 import { computeStats } from "../../lib/stats";
 import { useScan } from "../../store/scan";
 import { useSelection } from "../../store/selection";
+import { DetailDrawer } from "./DetailDrawer";
 import { Footer } from "./Footer";
 import { Row } from "./Row";
 
@@ -24,6 +25,9 @@ const SECTIONS: { tier: Tier; label: string; color: string; fill: string }[] = [
 export function Panel() {
 	const meta = useScan((s) => s.meta);
 	const recs = useSelection((s) => s.recommendations);
+	const focused = useSelection((s) =>
+		s.recommendations.find((r) => r.row_id === s.focusedRow),
+	);
 	if (!meta) return null;
 	const stats = computeStats(meta, recs, new Set());
 	const total = { Safe: stats.safe.size, Review: stats.review.size };
@@ -70,6 +74,7 @@ export function Panel() {
 				})}
 			</div>
 			<Footer />
+			{focused && <DetailDrawer row={focused} />}
 		</section>
 	);
 }

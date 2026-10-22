@@ -1,4 +1,5 @@
 import type { Recommendation } from "./bindings/Recommendation";
+import type { ViewNode } from "./bindings/ViewNode";
 
 export type RowState = "none" | "some" | "all";
 
@@ -61,4 +62,24 @@ export function blockedReason(row: Recommendation): string | null {
 	return first && typeof first.status === "object"
 		? first.status.Blocked.reason
 		: null;
+}
+
+const within = (path: string, dir: string) =>
+	path === dir || path.startsWith(`${dir}/`);
+
+/** The row a matched tile belongs to: same rule, and an item at, above or below
+ * the tile (split rows share a rule). */
+export function rowForNode(
+	recs: Recommendation[],
+	node: ViewNode,
+): Recommendation | undefined {
+	if (!node.rule_id) return undefined;
+	const rows = recs.filter((r) => r.rule_id === node.rule_id);
+	return (
+		rows.find((r) =>
+			r.items.some(
+				(i) => within(node.path, i.path) || within(i.path, node.path),
+			),
+		) ?? rows[0]
+	);
 }

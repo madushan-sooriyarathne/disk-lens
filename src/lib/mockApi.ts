@@ -1,5 +1,6 @@
 import raw from "../mocks/snapshot.mock.json";
 import type { Api } from "./api";
+import type { ItemDetails } from "./bindings/ItemDetails";
 import type { Recommendation } from "./bindings/Recommendation";
 import type { ScanEvent } from "./bindings/ScanEvent";
 import type { SnapshotMeta } from "./bindings/SnapshotMeta";
@@ -69,6 +70,23 @@ export const mockApi: Api = {
 		return truncate(hit, LEVELS);
 	},
 	getRecommendations: async () => mock.recommendations,
+	async getItemDetails(rowId): Promise<ItemDetails> {
+		const row = mock.recommendations.find((r) => r.row_id === rowId);
+		if (!row) throw new Error(`no recommendation ${rowId}`);
+		const subfolders = row.items
+			.flatMap((i) => find(mock.view, i.path)?.children ?? [])
+			.filter((c) => c.kind === "Dir")
+			.sort((a, b) => b.size - a.size)
+			.slice(0, 5)
+			.map((c) => ({ name: c.name, path: c.path, size: c.size }));
+		return {
+			row_id: row.row_id,
+			description: `What ${row.label} holds (mock text; real text comes from rules.toml).`,
+			regenerates: "What happens after removal (mock text).",
+			items: row.items,
+			largest_subfolders: subfolders,
+		};
+	},
 	revealInFinder: async (p) => {
 		console.info("[mock] reveal in Finder:", p);
 	},

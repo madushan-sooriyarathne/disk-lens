@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Recommendation } from "./bindings/Recommendation";
+import type { ViewNode } from "./bindings/ViewNode";
 import {
 	blockedReason,
 	pruneSelection,
+	rowForNode,
 	rowState,
 	selectSafe,
 	toggleRow,
@@ -77,5 +79,48 @@ describe("blockedReason", () => {
 	it("only for rows with nothing ready", () => {
 		expect(blockedReason(xcode)).toBe("Quit Xcode to clean");
 		expect(blockedReason(npm)).toBeNull();
+	});
+});
+
+describe("rowForNode", () => {
+	const wt = (project: string, id: string): Recommendation => ({
+		...rec(`wt:${project}`, "Review", [[id]]),
+		rule_id: "wt",
+	});
+	const atlas = wt("atlas", "home/atlas/.claude/worktrees/a");
+	const pebble = wt("pebble", "home/pebble/.claude/worktrees/b");
+	const tile = (path: string, rule: string | null): ViewNode => ({
+		id: path,
+		name: path,
+		path,
+		size: 1,
+		category: "code_projects",
+		tier: rule ? "Review" : null,
+		rule_id: rule,
+		kind: "Dir",
+		children: [],
+	});
+
+	it("picks the split row whose item contains or is inside the tile", () => {
+		const recs = [atlas, pebble];
+		expect(
+			rowForNode(recs, tile("/home/pebble/.claude/worktrees/b", "wt")),
+		).toBe(pebble);
+		expect(
+			rowForNode(recs, tile("/home/pebble/.claude/worktrees/b/src", "wt")),
+		).toBe(pebble);
+		expect(rowForNode(recs, tile("/home/atlas/.claude/worktrees", "wt"))).toBe(
+			atlas,
+		);
+	});
+
+	it("ignores unmatched tiles and prefix look-alikes", () => {
+		expect(rowForNode([atlas], tile("/home/atlas", null))).toBeUndefined();
+		expect(
+			rowForNode(
+				[atlas, pebble],
+				tile("/home/pebble/.claude/worktrees/bb", "wt"),
+			),
+		).toBe(atlas);
 	});
 });

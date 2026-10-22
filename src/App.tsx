@@ -6,11 +6,22 @@ import { Panel } from "./components/Recommendations/Panel";
 import { ScanProgress } from "./components/ScanProgress";
 import { StatCards } from "./components/StatCards";
 import { useScan } from "./store/scan";
+import { useSelection } from "./store/selection";
 
 export default function App() {
 	const phase = useScan((s) => s.phase);
 	useEffect(() => {
 		void useScan.getState().init();
+	}, []);
+	// Blocked states depend on running apps: re-check when the window regains focus.
+	useEffect(() => {
+		const onFocus = () => {
+			if (useScan.getState().phase === "ready") {
+				void useSelection.getState().refresh();
+			}
+		};
+		window.addEventListener("focus", onFocus);
+		return () => window.removeEventListener("focus", onFocus);
 	}, []);
 	if (phase !== "ready") {
 		return (

@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import type { ItemDetails } from "./bindings/ItemDetails";
 import type { Recommendation } from "./bindings/Recommendation";
 import type { ScanEvent } from "./bindings/ScanEvent";
 import type { SnapshotMeta } from "./bindings/SnapshotMeta";
@@ -13,6 +14,7 @@ export interface Api {
 	cancelScan(): Promise<void>;
 	getView(nodePath: string, mode: ViewMode): Promise<ViewNode>;
 	getRecommendations(): Promise<Recommendation[]>;
+	getItemDetails(rowId: string): Promise<ItemDetails>;
 	revealInFinder(nodePath: string): Promise<void>;
 }
 
@@ -26,6 +28,7 @@ const tauriApi: Api = {
 	cancelScan: () => invoke("cancel_scan"),
 	getView: (nodePath, mode) => invoke("get_view", { nodePath, mode }),
 	getRecommendations: () => invoke("get_recommendations"),
+	getItemDetails: (rowId) => invoke("get_item_details", { rowId }),
 	revealInFinder: (nodePath) => invoke("reveal_in_finder", { nodePath }),
 };
 
