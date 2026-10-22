@@ -1,3 +1,5 @@
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -8,6 +10,7 @@ use crate::error::{Error, Result};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::scanner::{self, snapshot};
 use crate::state::AppState;
+use crate::view::{self, ViewMode, ViewNode};
 
 /// Starts a scan on a blocking thread and returns immediately; progress and the
 /// result arrive on `channel`.
@@ -68,4 +71,34 @@ pub fn load_last_snapshot(state: State<'_, Arc<AppState>>) -> Option<SnapshotMet
     let meta = snap.meta.clone();
     *state.snapshot.write().expect("snapshot lock") = Some(Arc::new(snap));
     Some(meta)
+}
+
+fn current(state: &AppState) -> Result<Arc<crate::scanner::tree::Snapshot>> {
+    state
+        .snapshot
+        .read()
+        .expect("snapshot lock")
+        .clone()
+        .ok_or(Error::NoSnapshot)
+}
+
+/// The folder at `node_path` plus two levels below it.
+#[tauri::command]
+pub fn get_view(
+    state: State<'_, Arc<AppState>>,
+    node_path: String,
+    mode: ViewMode,
+) -> Result<ViewNode> {
+    let snap = current(&state)?;
+    view::build_view(&snap, Path::new(&node_path), mode)
+}
+
+/// Shows a scanned folder or large file in Finder. Paths outside the snapshot are refused.
+#[tauri::command]
+pub fn reveal_in_finder(state: State<'_, Arc<AppState>>, node_path: String) -> Result<()> {
+    let snap = current(&state)?;
+    let path = view::validated_path(&snap, Path::new(&node_path))?;
+    // argv, no shell.
+    Command::new("/usr/bin/open").arg("-R").arg(path).status()?;
+    Ok(())
 }
