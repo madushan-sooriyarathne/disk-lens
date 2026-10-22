@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Bump when the fixture changes; sandbox_rows.rs refuses a stale fixture.
-FIXTURE_VERSION=2
+FIXTURE_VERSION=3
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SANDBOX="$REPO/.sandbox"
@@ -118,8 +118,10 @@ mkdir -p Desktop/gitrepo
   G add package.json
   G commit -q -m init
 )
-# atlas has two agent worktrees. wt-clean is pushed to a remote, so it is ready;
-# wt-dirty has uncommitted changes and is blocked.
+# atlas has four agent worktrees. wt-clean is pushed and wt-local has an
+# unpushed commit on its branch: both are ready, because git worktree remove keeps
+# the branch. wt-dirty has uncommitted changes and wt-detached has a commit on no
+# branch: both are blocked.
 G init -q --bare "$OUTSIDE/atlas-remote.git"
 mkdir -p Desktop/atlas
 (
@@ -135,7 +137,15 @@ mkdir -p Desktop/atlas
   mkdir -p .claude/worktrees
   G worktree add -q -b wt-clean .claude/worktrees/wt-clean
   G worktree add -q -b wt-dirty .claude/worktrees/wt-dirty
+  G worktree add -q -b wt-local .claude/worktrees/wt-local
+  G worktree add -q --detach .claude/worktrees/wt-detached
   G -C .claude/worktrees/wt-clean push -q origin wt-clean
+  echo "local" > .claude/worktrees/wt-local/local.txt
+  G -C .claude/worktrees/wt-local add local.txt
+  G -C .claude/worktrees/wt-local commit -q -m "local work"
+  echo "detached" > .claude/worktrees/wt-detached/detached.txt
+  G -C .claude/worktrees/wt-detached add detached.txt
+  G -C .claude/worktrees/wt-detached commit -q -m "detached work"
   echo "uncommitted" > .claude/worktrees/wt-dirty/dirty.txt
 )
 

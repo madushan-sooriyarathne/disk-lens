@@ -93,7 +93,7 @@ Guards fall into three classes, and each class changes the outcome differently.
 | `app_not_running` | string array | blocking | Blocked if an app with one of these bundle IDs is running |
 | `owner_app_not_running` | bool | blocking | Treats the folder name as a bundle ID or process name and blocks while it runs |
 | `requires_running` | string array | blocking | Blocked unless a process containing one of these substrings is running |
-| `git_clean` | bool | safety | Blocked if a worktree has uncommitted or untracked changes, or commits not on any remote branch |
+| `git_clean` | bool | safety | Blocked if a worktree has uncommitted or untracked changes, or commits on no branch (a detached HEAD ahead of every local and remote branch). Commits on a local branch do not block: `git worktree remove` keeps the branch |
 
 Blocked items appear in the list with a disabled checkbox and a reason, for example "Quit Xcode to clean", "Start Docker Desktop to clean" or "Has uncommitted changes". A check that cannot complete (git fails, for example) blocks the item rather than allowing it.
 

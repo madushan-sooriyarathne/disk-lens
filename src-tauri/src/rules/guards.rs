@@ -149,14 +149,16 @@ fn process_name(substring: &str) -> &str {
         .map_or(substring.trim(), |(_, name)| name)
 }
 
-/// Uncommitted or untracked changes, or commits not on any remote branch.
+/// Uncommitted or untracked changes, or commits on no branch (a detached HEAD
+/// ahead of every branch). `git worktree remove` keeps the worktree's branch, so
+/// commits on a local branch survive and do not block.
 fn git_unclean(path: &Path, env: &Env) -> Option<String> {
     let Some(git) = Git::new(env) else {
         return Some("Git not found".into());
     };
-    match (git.dirty(path), git.unpushed(path)) {
+    match (git.dirty(path), git.off_branch(path)) {
         (Some(true), _) => Some("Has uncommitted changes".into()),
-        (Some(false), Some(true)) => Some("Has commits not on a remote".into()),
+        (Some(false), Some(true)) => Some("Has commits on no branch".into()),
         (Some(false), Some(false)) => None,
         _ => Some("Could not check git status".into()),
     }
@@ -229,10 +231,18 @@ impl<'a> Git<'a> {
         )
     }
 
-    fn unpushed(&self, dir: &Path) -> Option<bool> {
+    /// HEAD has commits no local or remote branch contains.
+    fn off_branch(&self, dir: &Path) -> Option<bool> {
         let out = self.query(
             dir,
-            &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
+            &[
+                "rev-list",
+                "--max-count=1",
+                "HEAD",
+                "--not",
+                "--branches",
+                "--remotes",
+            ],
         )?;
         Some(!out.trim().is_empty())
     }
@@ -479,7 +489,7 @@ mod tests {
             blocked(&g, &wt, &env)
         };
         let status = format!("git -C {w} status --porcelain");
-        let revs = format!("git -C {w} rev-list --max-count=1 HEAD --not --remotes");
+        let revs = format!("git -C {w} rev-list --max-count=1 HEAD --not --branches --remotes");
         assert_eq!(
             check(
                 FakeRunner::default()
@@ -502,7 +512,7 @@ mod tests {
                     .with(&status, true, "")
                     .with(&revs, true, "abc123\n")
             ),
-            Some("Has commits not on a remote".into())
+            Some("Has commits on no branch".into())
         );
         assert_eq!(
             check(FakeRunner::default().with(&status, false, "")),

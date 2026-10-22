@@ -20,7 +20,7 @@ use disklens_lib::scanner::tree::Snapshot;
 use disklens_lib::scanner::{ScanOptions, scan};
 use disklens_lib::view::{ViewMode, ViewNode, build_view};
 
-const FIXTURE_VERSION: &str = "2";
+const FIXTURE_VERSION: &str = "3";
 const MB: u64 = 1_000_000;
 
 fn sandbox() -> Option<PathBuf> {
@@ -95,7 +95,7 @@ fn sandbox_rows_tiers_statuses_and_totals() {
         ("cocoapods-cache", Tier::Safe, 1),
         ("go-build-cache", Tier::Safe, 1),
         ("android-sdk-emulators", Tier::Review, 3),
-        ("agent-worktrees:atlas", Tier::Review, 2),
+        ("agent-worktrees:atlas", Tier::Review, 4),
         ("huggingface-cache", Tier::Review, 1),
         ("lmstudio-models", Tier::Review, 1),
         ("node-modules-idle", Tier::Review, 1),
@@ -136,21 +136,31 @@ fn sandbox_rows_tiers_statuses_and_totals() {
     assert_eq!(rows[0].row_id, "app-caches", "the 50 MB app cache leads");
     assert!(ids["app-caches"].size >= 50 * MB);
 
-    // Everything is ready except the worktree with uncommitted changes.
-    let blocked: Vec<(&str, &ItemStatus)> = rows
+    // Everything is ready except two worktrees: one with uncommitted changes and
+    // one with a commit on no branch. Pushed and local-branch worktrees are ready.
+    let mut blocked: Vec<(&str, &ItemStatus)> = rows
         .iter()
         .flat_map(|r| r.items.iter())
         .filter(|i| i.status != ItemStatus::Ready)
         .map(|i| (i.name.as_str(), &i.status))
         .collect();
+    blocked.sort_by_key(|(name, _)| *name);
     assert_eq!(
         blocked,
-        [(
-            "wt-dirty",
-            &ItemStatus::Blocked {
-                reason: "Has uncommitted changes".into()
-            }
-        )]
+        [
+            (
+                "wt-detached",
+                &ItemStatus::Blocked {
+                    reason: "Has commits on no branch".into()
+                }
+            ),
+            (
+                "wt-dirty",
+                &ItemStatus::Blocked {
+                    reason: "Has uncommitted changes".into()
+                }
+            ),
+        ]
     );
 
     // Sandbox runs can only ever run git; brew falls back to delete.
