@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use jwalk::{ClientState, DirEntry, WalkDirGeneric};
 
-use super::tree::{DirNode, NodeFlags, TreeBuilder};
+use super::tree::{DirNode, MediaExtensions, NodeFlags, TreeBuilder};
 use crate::error::{Error, Result};
 
 /// `SF_DATALESS`: the file's data lives in the cloud and is not on disk.
@@ -66,6 +66,7 @@ fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
 
 pub fn walk(
     root: &Path,
+    media: &MediaExtensions,
     cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<WalkResult> {
@@ -118,7 +119,7 @@ pub fn walk(
             }
         });
 
-    let mut tree = TreeBuilder::default();
+    let mut tree = TreeBuilder::with_media(media.clone());
     let mut inaccessible = 0u32;
     let (mut files, mut bytes) = (0u64, 0u64);
     let mut last_emit = Instant::now();

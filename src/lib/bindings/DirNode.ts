@@ -10,4 +10,9 @@ size: number, logical_size: number, file_count: number, children: Array<number>,
 /**
  * Resolved in Phase 3; empty after scanning.
  */
-category: string, };
+category: string, 
+/**
+ * Allocated bytes of files whose extension is in `media_extensions`, aggregated
+ * over the subtree. Snapshots from before this field read as 0.
+ */
+media_bytes: number, };

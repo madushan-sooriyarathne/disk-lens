@@ -10,17 +10,33 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
-use tree::{Snapshot, SnapshotMeta, VolumeInfo};
+use tree::{MediaExtensions, Snapshot, SnapshotMeta, VolumeInfo};
 pub use walk::Progress;
+
+/// What the scan records besides sizes.
+#[derive(Debug, Clone, Default)]
+pub struct ScanOptions {
+    /// Files with these extensions count towards `DirNode::media_bytes`.
+    pub media: MediaExtensions,
+}
+
+impl ScanOptions {
+    pub fn from_rules(rules: &crate::rules::model::Rules) -> Self {
+        Self {
+            media: MediaExtensions::new(&rules.media_extensions),
+        }
+    }
+}
 
 /// Scan `root` and return the snapshot. Setting `cancel` aborts with `Error::Cancelled`.
 pub fn scan(
     root: &Path,
+    options: &ScanOptions,
     cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<Snapshot> {
     let started = Instant::now();
-    let walked = walk::walk(root, cancel, on_progress)?;
+    let walked = walk::walk(root, &options.media, cancel, on_progress)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();

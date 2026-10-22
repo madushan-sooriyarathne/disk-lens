@@ -8,15 +8,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use disklens_lib::error::Error;
-use disklens_lib::scanner::scan;
 use disklens_lib::scanner::tree::{DirNode, Snapshot};
+use disklens_lib::scanner::{ScanOptions, scan};
 
 fn no_cancel() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
 }
 
 fn scan_dir(root: &Path) -> Snapshot {
-    scan(root, &no_cancel(), &mut |_| {}).expect("scan")
+    scan(root, &ScanOptions::default(), &no_cancel(), &mut |_| {}).expect("scan")
 }
 
 /// Writes a file whose size is a multiple of the 4 KiB APFS block.
@@ -134,7 +134,7 @@ fn cancel_before_start_returns_cancelled() {
     put(&t.path().join("a.bin"), 1);
     let cancel = Arc::new(AtomicBool::new(true));
     assert!(matches!(
-        scan(t.path(), &cancel, &mut |_| {}),
+        scan(t.path(), &ScanOptions::default(), &cancel, &mut |_| {}),
         Err(Error::Cancelled)
     ));
 }
@@ -155,7 +155,7 @@ fn cancel_mid_walk_stops_within_a_second() {
         flag.store(true, Ordering::Relaxed);
     });
     let started = Instant::now();
-    let r = scan(t.path(), &cancel, &mut |_| {});
+    let r = scan(t.path(), &ScanOptions::default(), &cancel, &mut |_| {});
     handle.join().unwrap();
     assert!(started.elapsed() < Duration::from_secs(1));
     assert!(matches!(r, Err(Error::Cancelled)) || r.is_ok());
@@ -165,9 +165,14 @@ fn cancel_mid_walk_stops_within_a_second() {
 fn progress_is_throttled_to_100ms() {
     let stamps = std::cell::RefCell::new(Vec::new());
     let started = Instant::now();
-    scan(Path::new("/usr"), &no_cancel(), &mut |_| {
-        stamps.borrow_mut().push(Instant::now());
-    })
+    scan(
+        Path::new("/usr"),
+        &ScanOptions::default(),
+        &no_cancel(),
+        &mut |_| {
+            stamps.borrow_mut().push(Instant::now());
+        },
+    )
     .expect("scan /usr");
     let stamps = stamps.into_inner();
     for w in stamps.windows(2) {
@@ -224,4 +229,18 @@ fn sandbox_fixture_smoke() {
         "symlink to sandbox/outside must not be followed"
     );
     assert!(s.nodes.iter().any(|n| n.name == "Keychains"));
+}
+
+#[test]
+fn media_bytes_follow_rules_media_extensions() {
+    let t = tempfile::tempdir().unwrap();
+    put(&t.path().join("photos/a.HEIC"), 4);
+    put(&t.path().join("photos/clip.mov"), 2);
+    put(&t.path().join("photos/notes.txt"), 1);
+    put(&t.path().join("code/main.rs"), 3);
+    let opts = ScanOptions::from_rules(disklens_lib::rules::model::Rules::embedded());
+    let s = scan(t.path(), &opts, &no_cancel(), &mut |_| {}).unwrap();
+    assert_eq!(node(&s, "photos").media_bytes, 6 * 4096);
+    assert_eq!(node(&s, "code").media_bytes, 0);
+    assert_eq!(s.nodes[0].media_bytes, 6 * 4096);
 }

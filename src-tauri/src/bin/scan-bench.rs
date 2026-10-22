@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use disklens_lib::scanner;
+use disklens_lib::rules::model::Rules;
+use disklens_lib::scanner::{self, ScanOptions};
 
 const TOLERANCE_PCT: f64 = 1.0;
 
@@ -17,14 +18,19 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let started = Instant::now();
-    let snap = match scanner::scan(&path, &Arc::new(AtomicBool::new(false)), &mut |p| {
-        eprintln!(
-            "{} files, {} MB, {}",
-            p.files,
-            p.bytes / 1_000_000,
-            p.current
-        )
-    }) {
+    let snap = match scanner::scan(
+        &path,
+        &ScanOptions::from_rules(Rules::embedded()),
+        &Arc::new(AtomicBool::new(false)),
+        &mut |p| {
+            eprintln!(
+                "{} files, {} MB, {}",
+                p.files,
+                p.bytes / 1_000_000,
+                p.current
+            )
+        },
+    ) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("scan failed: {e}");

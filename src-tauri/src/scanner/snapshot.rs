@@ -69,6 +69,7 @@ mod tests {
                 top_files: vec![],
                 flags: NodeFlags::default(),
                 category: String::new(),
+                media_bytes: 4096,
             }],
         }
     }
@@ -78,6 +79,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         save(dir.path(), &sample()).unwrap();
         assert_eq!(load(dir.path()), Some(sample()));
+    }
+
+    #[test]
+    fn snapshot_without_media_bytes_loads_as_zero() {
+        let mut json = serde_json::to_value(sample()).unwrap();
+        json["nodes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("media_bytes");
+        let old: Snapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(old.nodes[0].media_bytes, 0);
     }
 
     #[test]

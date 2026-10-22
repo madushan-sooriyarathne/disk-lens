@@ -7,8 +7,9 @@ use tauri::State;
 use tauri::ipc::Channel;
 
 use crate::error::{Error, Result};
+use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
-use crate::scanner::{self, snapshot};
+use crate::scanner::{self, ScanOptions, snapshot};
 use crate::state::AppState;
 use crate::view::{self, ViewMode, ViewNode};
 
@@ -34,7 +35,8 @@ pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) 
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let progress = channel.clone();
-        let result = scanner::scan(&root, &cancel, &mut |p| {
+        let options = ScanOptions::from_rules(Rules::embedded());
+        let result = scanner::scan(&root, &options, &cancel, &mut |p| {
             let _ = progress.send(ScanEvent::Progress {
                 files: p.files,
                 bytes: p.bytes,

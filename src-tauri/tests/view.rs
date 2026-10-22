@@ -5,11 +5,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use disklens_lib::scanner::scan;
+use disklens_lib::scanner::{ScanOptions, scan};
 use disklens_lib::view::{ViewKind, ViewMode, ViewNode, build_view, validated_path};
 
 fn scanned(root: &Path) -> disklens_lib::scanner::tree::Snapshot {
-    scan(root, &Arc::new(AtomicBool::new(false)), &mut |_| {}).unwrap()
+    scan(
+        root,
+        &ScanOptions::default(),
+        &Arc::new(AtomicBool::new(false)),
+        &mut |_| {},
+    )
+    .unwrap()
 }
 
 fn assert_sums(node: &ViewNode) {
