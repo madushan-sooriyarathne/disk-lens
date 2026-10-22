@@ -44,3 +44,8 @@ body {
 #root {
 	height: 100vh;
 }
+
+:root {
+	--tier-safe-fill: #dff3ea;
+	--tier-review-fill: #fbefd9;
+}
