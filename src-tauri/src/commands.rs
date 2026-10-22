@@ -20,6 +20,9 @@ pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) 
         .config
         .root()
         .ok_or_else(|| Error::Root("no home folder".into()))?;
+    // Absolute and symlink-free, so paths in views and snapshots are unambiguous.
+    let root = std::fs::canonicalize(&root)
+        .map_err(|e| Error::Root(format!("{}: {e}", root.display())))?;
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut running = state.scan.lock().expect("scan lock");

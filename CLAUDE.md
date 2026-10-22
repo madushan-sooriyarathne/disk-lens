@@ -19,6 +19,7 @@ Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait 
 ```bash
 pnpm install
 pnpm tauri dev                 # run app (Vite on :1420 + Rust)
+pnpm dev                       # frontend only in a browser; http://localhost:1420/?mock[&preselect] uses mock data
 pnpm build                     # tsc + vite build
 pnpm lint                      # biome check .   (pnpm format = --write)
 pnpm test                      # vitest run
@@ -33,7 +34,7 @@ Every phase ends with `pnpm lint && pnpm test && cargo test` plus clippy passing
 
 ## Safety rules (non-negotiable)
 
-- Never delete, trash or run cleanup against the real home folder. Develop against the fixture sandbox: `DISKLENS_SCAN_ROOT=./.sandbox/home`.
+- Never delete, trash or run cleanup against the real home folder. Develop against the fixture sandbox: `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home pnpm tauri dev` (use an absolute path: `tauri dev` runs cargo from `src-tauri/`).
 - Debug builds default to `DISKLENS_DRY_RUN=1` (see `src-tauri/src/config.rs`).
 - Do not run `rm`, `git clean` or any cleanup command outside this repository.
 - Real cleanup execution is enabled only in Phase 4, on a single safe item (the npm cache), and only when the user explicitly says so.
