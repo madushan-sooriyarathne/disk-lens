@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, tauri commands, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-2 (scaffold, scanner, explorer UI) committed; do not start Phase 3 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3 (scaffold, scanner, explorer UI, rules engine and recommendations) committed; do not start Phase 4 unprompted.
 
 ## Commands
 
@@ -27,7 +27,7 @@ pnpm vitest run src/lib/format.test.ts      # single TS test file
 pnpm test:rust                 # cargo test in src-tauri
 cargo test --manifest-path src-tauri/Cargo.toml <name>   # single Rust test
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-scripts/make-fixture.sh        # rebuild .sandbox/home (idempotent)
+scripts/make-fixture.sh        # rebuild .sandbox/home (idempotent); tests/sandbox_rows.rs needs it current
 cargo run --release --manifest-path src-tauri/Cargo.toml --bin scan-bench -- <path>   # read-only scan, compares size with du (1% goal)
 ```
 
@@ -37,14 +37,17 @@ Every phase ends with `pnpm lint && pnpm test && cargo test` plus clippy passing
 
 Backend (`src-tauri/src/`):
 - `lib.rs` builds one `Arc<AppState>` (`state.rs`: config, current `Snapshot`, cancel flag of the single running scan) and registers the commands in `commands.rs`.
-- `start_scan` canonicalizes the scan root, runs `scanner::scan` on `spawn_blocking`, and streams `ScanEvent` (progress / finished / failed) over a Tauri `Channel`. On success it saves the snapshot (zstd JSON, `scanner/snapshot.rs`) to the data dir and swaps it into state. `load_last_snapshot` restores it at startup.
+- `start_scan` canonicalizes the scan root, runs `scanner::scan` on `spawn_blocking`, and streams `ScanEvent` (progress / finished / failed) over a Tauri `Channel`. On success it saves the snapshot (zstd JSON, `scanner/snapshot.rs`), runs the analysis and swaps both into state as `Current`. `load_last_snapshot` does the same at startup.
 - `scanner/`: `walk.rs` (parallel lstat walk, no symlink following, same-device only), `hardlinks.rs` (each inode counted once), `tree.rs` (arena `Vec<DirNode>` with bottom-up sizes; also the contract types), `volume.rs` (capacity).
-- `view.rs`: `get_view` builds the treemap model on demand from the snapshot: the requested folder plus two levels, small siblings merged into "Other". Paths from the frontend are resolved against the snapshot (`validated_path`); anything outside it is refused. Category is a placeholder until the Phase 3 rules engine.
-- `recommend/model.rs`: recommendation contract types only so far.
+- `rules/`: `rules.toml` embedded and validated at startup (`model`, `load`, `validate`), `matcher` (one DFS per snapshot, RULES.md 4.1), `category` (section 6, markers checked lazily on disk), `guards` (match-time, blocking, safety), `tools` (login-shell PATH; sandbox mode resolves only `git`).
+- `platform/`: `System` (processes, running apps) and `Runner` (argv commands with timeout) traits with real and fake implementations; tests describe the machine with the fakes.
+- `providers/`: ollama, git worktrees, simctl and docker item enumeration. `cleanup/protected.rs`: hardcoded protect list (equality test with `[[protect]]`).
+- `recommend/build.rs`: `analyze` (matches, providers, min size) runs once per snapshot; rows are rebuilt on every `get_recommendations` because blocking guards depend on what runs now. `get_item_details` adds description, regenerates and largest subfolders.
+- `view.rs`: `get_view` builds the treemap model on demand from the snapshot: the requested folder plus two levels, small siblings merged into "Other", with category, tier and rule filled from the analysis. Paths from the frontend are resolved against the snapshot (`validated_path`); anything outside it is refused.
 
 Frontend (`src/`):
-- `lib/api.ts` defines the `Api` interface with a Tauri implementation and `lib/mockApi.ts` (backed by `mocks/snapshot.mock.json`). The mock is used when not running inside Tauri or with `?mock`. `getRecommendations` returns `[]` until Phase 3.
-- Zustand stores: `store/scan.ts` drives the app phase (loading / idle / scanning / ready / error) that `App.tsx` switches on; `store/view.ts` holds the explorer path and mode; `store/selection.ts` holds selected recommendation IDs.
+- `lib/api.ts` defines the `Api` interface with a Tauri implementation and `lib/mockApi.ts` (backed by `mocks/snapshot.mock.json`). The mock is used when not running inside Tauri or with `?mock`.
+- Zustand stores: `store/scan.ts` drives the app phase (loading / idle / scanning / ready / error) that `App.tsx` switches on; `store/view.ts` holds the explorer path and mode; `store/selection.ts` holds recommendations, selected item IDs (ready items only; pure logic in `lib/selection.ts`) and the drawer row; it refreshes on window focus.
 - Pure logic lives in `lib/` (`treemap.ts` layout with d3-hierarchy, `stats.ts`, `format.ts`) with Vitest tests beside it; components stay presentational.
 
 ## Safety rules (non-negotiable)
