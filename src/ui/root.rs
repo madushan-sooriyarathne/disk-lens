@@ -50,9 +50,11 @@ impl Render for AppModel {
         };
         body.key_context(CONTEXT)
             .track_focus(&self.focus_handle)
-            // Esc closes the detail drawer first, otherwise goes up one folder.
+            // Esc closes the context menu, then the detail drawer, otherwise goes up one folder.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if this.focused_row.is_some() {
+                if this.explorer.close_menu() {
+                    cx.notify();
+                } else if this.focused_row.is_some() {
                     this.focus_row(None, cx);
                 } else {
                     this.up(cx);

@@ -41,6 +41,13 @@ pub struct ExplorerState {
     menu: Option<Menu>,
 }
 
+impl ExplorerState {
+    /// Closes the context menu; true if one was open (Esc closes it before going up).
+    pub fn close_menu(&mut self) -> bool {
+        self.menu.take().is_some()
+    }
+}
+
 /// Identity of a view's layout input: node ids and sizes. Tiers, categories and
 /// the mode do not move tiles, so they are not part of it.
 fn fingerprint(view: &ViewNode) -> u64 {
