@@ -1,5 +1,3 @@
-use serde::Serialize;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("scan already running")]
@@ -21,10 +19,3 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-/// Tauri commands return the message string to the frontend.
-impl Serialize for Error {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&self.to_string())
-    }
-}

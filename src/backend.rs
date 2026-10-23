@@ -3,9 +3,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tauri::State;
-use tauri::ipc::Channel;
-
 use crate::error::{Error, Result};
 use crate::platform::Facts;
 use crate::recommend::build::analyze;
@@ -16,10 +13,12 @@ use crate::scanner::{self, ScanOptions, snapshot};
 use crate::state::{AppState, Current};
 use crate::view::{self, ViewMode, ViewNode};
 
-/// Starts a scan on a blocking thread and returns immediately; progress and the
-/// result arrive on `channel`.
-#[tauri::command]
-pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) -> Result<()> {
+/// Starts a scan on its own thread and returns immediately; progress and the
+/// result arrive through `on_event`, called on that thread.
+pub fn start_scan(
+    state: &Arc<AppState>,
+    mut on_event: impl FnMut(ScanEvent) + Send + 'static,
+) -> Result<()> {
     let root = state
         .config
         .root()
@@ -35,12 +34,12 @@ pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) 
         }
         *running = Some(cancel.clone());
     }
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let progress = channel.clone();
+    let state = state.clone();
+    // A scan blocks for a long time, so it gets a thread rather than a UI executor slot.
+    std::thread::spawn(move || {
         let options = ScanOptions::from_rules(Rules::embedded());
         let result = scanner::scan(&root, &options, &cancel, &mut |p| {
-            let _ = progress.send(ScanEvent::Progress {
+            on_event(ScanEvent::Progress {
                 files: p.files,
                 bytes: p.bytes,
                 current: p.current.clone(),
@@ -51,7 +50,7 @@ pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) 
                 if let Err(e) = snapshot::save(&state.config.data_dir, &snap) {
                     tracing::warn!("could not save snapshot: {e}");
                 }
-                let _ = progress.send(ScanEvent::Progress {
+                on_event(ScanEvent::Progress {
                     files: snap.nodes[0].file_count,
                     bytes: snap.meta.scanned_size,
                     current: "Finding recommendations…".into(),
@@ -65,7 +64,7 @@ pub fn start_scan(state: State<'_, Arc<AppState>>, channel: Channel<ScanEvent>) 
             },
         };
         *state.scan.lock().expect("scan lock") = None;
-        let _ = channel.send(event);
+        on_event(event);
     });
     Ok(())
 }
@@ -87,19 +86,17 @@ fn install(state: &AppState, snap: Snapshot) {
     }));
 }
 
-#[tauri::command]
-pub fn cancel_scan(state: State<'_, Arc<AppState>>) {
+pub fn cancel_scan(state: &Arc<AppState>) {
     if let Some(cancel) = state.scan.lock().expect("scan lock").as_ref() {
         cancel.store(true, Ordering::Relaxed);
     }
 }
 
 /// Loads the saved snapshot into state and returns its metadata.
-#[tauri::command(async)]
-pub fn load_last_snapshot(state: State<'_, Arc<AppState>>) -> Option<SnapshotMeta> {
+pub fn load_last_snapshot(state: &Arc<AppState>) -> Option<SnapshotMeta> {
     let snap = snapshot::load(&state.config.data_dir)?;
     let meta = snap.meta.clone();
-    install(&state, snap);
+    install(state, snap);
     Some(meta)
 }
 
@@ -113,13 +110,8 @@ fn current(state: &AppState) -> Result<Arc<Current>> {
 }
 
 /// The folder at `node_path` plus two levels below it.
-#[tauri::command(async)]
-pub fn get_view(
-    state: State<'_, Arc<AppState>>,
-    node_path: String,
-    mode: ViewMode,
-) -> Result<ViewNode> {
-    let cur = current(&state)?;
+pub fn get_view(state: &Arc<AppState>, node_path: String, mode: ViewMode) -> Result<ViewNode> {
+    let cur = current(state)?;
     view::build_view(
         &cur.snapshot,
         Path::new(&node_path),
@@ -130,18 +122,16 @@ pub fn get_view(
 
 /// Rows for the current snapshot. Blocking guards are evaluated now, so calling
 /// this again (for example on window focus) refreshes blocked states.
-#[tauri::command(async)]
-pub fn get_recommendations(state: State<'_, Arc<AppState>>) -> Result<Vec<Recommendation>> {
-    let cur = current(&state)?;
+pub fn get_recommendations(state: &Arc<AppState>) -> Result<Vec<Recommendation>> {
+    let cur = current(state)?;
     let facts = state.machine.system.facts();
     Ok(cur
         .analysis
         .recommendations(Rules::embedded(), &state.machine.env(&facts)))
 }
 
-#[tauri::command(async)]
-pub fn get_item_details(state: State<'_, Arc<AppState>>, row_id: String) -> Result<ItemDetails> {
-    let cur = current(&state)?;
+pub fn get_item_details(state: &Arc<AppState>, row_id: String) -> Result<ItemDetails> {
+    let cur = current(state)?;
     let facts = state.machine.system.facts();
     cur.analysis
         .details(
@@ -154,9 +144,8 @@ pub fn get_item_details(state: State<'_, Arc<AppState>>, row_id: String) -> Resu
 }
 
 /// Shows a scanned folder or large file in Finder. Paths outside the snapshot are refused.
-#[tauri::command(async)]
-pub fn reveal_in_finder(state: State<'_, Arc<AppState>>, node_path: String) -> Result<()> {
-    let cur = current(&state)?;
+pub fn reveal_in_finder(state: &Arc<AppState>, node_path: String) -> Result<()> {
+    let cur = current(state)?;
     let path = view::validated_path(&cur.snapshot, Path::new(&node_path))?;
     // argv, no shell.
     Command::new("/usr/bin/open").arg("-R").arg(path).status()?;

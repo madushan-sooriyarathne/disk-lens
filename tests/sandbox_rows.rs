@@ -24,7 +24,7 @@ const FIXTURE_VERSION: &str = "3";
 const MB: u64 = 1_000_000;
 
 fn sandbox() -> Option<PathBuf> {
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.sandbox");
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join(".sandbox");
     if !base.join("home").exists() {
         eprintln!("skipping: run scripts/make-fixture.sh first");
         return None;

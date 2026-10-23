@@ -1,21 +1,18 @@
 //! Treemap view model sent to the frontend (PLAN.md section 3).
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::recommend::build::Analysis;
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewMode {
     Category,
     Cleanup,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewKind {
     Dir,
     File,
@@ -23,13 +20,11 @@ pub enum ViewKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewNode {
     pub id: String,
     pub name: String,
     pub path: String,
-    #[ts(type = "number")]
     pub size: u64,
     pub category: String,
     pub tier: Option<Tier>,

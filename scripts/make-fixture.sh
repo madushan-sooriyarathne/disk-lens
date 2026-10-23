@@ -4,7 +4,7 @@
 #
 # Rule targets are at least 1 MB (50 MB for app-caches) so they survive each
 # rule's min_size_mb, and everything is aged so quiet_minutes guards pass;
-# src-tauri/tests/sandbox_rows.rs asserts the rows this produces.
+# tests/sandbox_rows.rs asserts the rows this produces.
 set -euo pipefail
 
 # Bump when the fixture changes; sandbox_rows.rs refuses a stale fixture.

@@ -56,7 +56,7 @@ fn drill_down_over_a_real_scan() {
 
 #[test]
 fn sandbox_view_is_consistent() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.sandbox/home");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".sandbox/home");
     if !root.exists() {
         eprintln!("skipping: run scripts/make-fixture.sh first");
         return;

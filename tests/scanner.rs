@@ -217,7 +217,7 @@ fn other_filesystems_are_not_entered() {
 
 #[test]
 fn sandbox_fixture_smoke() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.sandbox/home");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".sandbox/home");
     if !root.exists() {
         eprintln!("skipping: run scripts/make-fixture.sh first");
         return;

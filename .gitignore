@@ -1,8 +1,7 @@
-node_modules
-dist
-src-tauri/target
-src-tauri/gen
+/target
 .sandbox/
 *.log
 .DS_Store
-src-tauri/bindings
+# Old React build output, removed with legacy-web/ at the end of Phase 3.5.
+node_modules
+dist

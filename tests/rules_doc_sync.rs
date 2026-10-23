@@ -2,7 +2,7 @@
 
 #[test]
 fn rules_toml_matches_rules_md_section_7() {
-    let doc = include_str!("../../docs/RULES.md");
+    let doc = include_str!("../docs/RULES.md");
     let section = doc
         .split("## 7. Starter rules")
         .nth(1)
