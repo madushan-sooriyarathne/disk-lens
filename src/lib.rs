@@ -8,4 +8,5 @@ pub mod recommend;
 pub mod rules;
 pub mod scanner;
 pub mod state;
+pub mod ui;
 pub mod view;

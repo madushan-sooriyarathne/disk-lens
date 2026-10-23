@@ -1,3 +1,3 @@
 fn main() {
-    // The GPUI window is added in the next commit.
+    disklens_lib::ui::run()
 }
