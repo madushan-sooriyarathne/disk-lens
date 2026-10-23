@@ -2,6 +2,57 @@
 
 Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 
+## Status and roadmap (as of 2026-10-23)
+
+| Phase | State | Notes |
+|-------|-------|-------|
+| 0 Scaffold | Done | |
+| 1 Scanner | Done | Within 1% of `du -skx`; full home scan of 3.8M files in about 31 s, peak about 444 MB |
+| 2 Explorer UI | Done, approved | |
+| 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. Still to do: compare the mock-mode panel with the mockup in the browser pane, and the user checks real rows in the native window |
+| 4 Cleanup engine | Next, not started | Needs a task breakdown approved in plan mode first |
+| 5 Permissions, persistence, polish | Not started | |
+| 6 Packaging and release | Not started | |
+
+Last gate run: `pnpm lint`, `pnpm test` (31 Vitest), `cargo test` (142 Rust) and `cargo clippy -D warnings` all pass.
+
+### What is left
+
+**Phase 4: cleanup engine** (section 5, Phase 4)
+- Add the `trash` and `shell-escape` crates.
+- `cleanup/protected.rs`: add the remaining RULES.md section 5 checks (it only has the list and the equality test today).
+- New modules `cleanup/plan.rs`, `revalidate.rs`, `execute.rs`, `script.rs`, `audit.rs`. The `CleanupPlan` and `CleanupEvent` contracts from section 3 are not defined yet.
+- Commands `build_cleanup_plan`, `export_script`, `execute_cleanup`. Plans are invalidated by any rescan.
+- Audit log at `~/Library/Logs/DiskLens/cleanup.log` (S-07), honouring dry run (S-08).
+- UI: `components/Cleanup/{ConfirmDialog,Progress,Results}.tsx`. Enable Copy script and Clean selected in `Recommendations/Footer.tsx` (disabled today). Toast for Copy script. Rescan the affected parent folders after cleanup.
+- `tests/cleanup_adversarial.rs` (every case in Phase 4 step 8) and `tests/script.rs`.
+- `docs/QA.md` manual checklist (section 6).
+- One supervised real run on the npm cache, only when the user says so.
+
+**Phase 5: permissions, persistence, polish**
+- `check_permissions` and `open_fda_settings` commands, `Onboarding.tsx`, FDA recheck on window focus (PRD 7.8).
+- `settings.json` in Application Support (PRD 7.9). Nothing reads or writes it yet.
+- Dark mode token set in `styles.css` (tokens exist, no dark values).
+- Keyboard navigation for tiles and rows, VoiceOver labels, focus rings, WCAG AA contrast check.
+- Performance pass on a synthetic 2M-file tree: peak memory under 400 MB (the real 3.8M-file scan peaked at about 444 MB), treemap layout under 16 ms for 400 tiles.
+- Already done from this phase: "Scanned X ago" with Rescan, and the inaccessible-folders banner. Verify both against the acceptance checks.
+- Decide how G2 is met: only rule-matched rows carry a description today. Nodes of 1 GB or more without a rule have a category but no one-line description. Options: a description per `[[category]]` in `rules.toml` (with the matching RULES.md change), or narrow G2.
+
+**Phase 6: packaging and release**
+- Final icon, bundle identifier (placeholder today) and version 1.0.0.
+- Hardened runtime, Developer ID signing and notarization.
+- Universal build and DMG, bundle under 25 MB.
+- Tauri updater plugin with signed updates on GitHub Releases. Needs a GitHub remote; nothing is pushed yet.
+- PRD section 12 release criteria, including launch on a clean macOS 13 machine.
+
+**Housekeeping**
+- The `_note` in `src/mocks/snapshot.mock.json` still says blocked states arrive with Phase 3. Update it or add a blocked item to the mock.
+- Section 2 layout differs from the code: `platform/` is one `mod.rs` with the `System` and `Runner` traits instead of `fda.rs`, `apps.rs` and `finder.rs`, and `reveal_in_finder` lives in `view.rs`. Phase 5 adds FDA code there.
+
+### After v1
+
+PRD section 13 lists the v2 candidates: large and old files finder, duplicate finder, clone-aware sizes, menu bar indicator, scheduled safe-tier cleanup, and a user-editable rules file.
+
 ## 0. Working agreement
 
 - The three documents in `docs/` are the source of truth. If they conflict or something is unclear, ask before guessing.
