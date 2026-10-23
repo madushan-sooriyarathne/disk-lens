@@ -151,7 +151,7 @@ Opens from the chevron and slides over the recommendations panel. It contains:
 
 These are non-negotiable and each one has automated tests.
 
-- **S-01** Only items produced by the rules engine for the current snapshot can be cleaned. The frontend sends item IDs, never paths.
+- **S-01** Only items produced by the rules engine for the current snapshot can be cleaned. The UI sends item IDs, never paths.
 - **S-02** Hardcoded protected paths (RULES.md section 5) are refused in code regardless of `rules.toml`.
 - **S-03** Each item is revalidated immediately before it runs. It is skipped as "changed since scan" if any of these fail:
   - the canonical path is inside home
