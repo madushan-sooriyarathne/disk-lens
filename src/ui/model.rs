@@ -481,7 +481,6 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "needs ui::selection (A1)"]
     fn preselect_selects_the_mockup_rows(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, true);
         model.read_with(cx, |m, _| {
@@ -573,7 +572,6 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "needs ui::selection (A1)"]
     fn toggle_item_ignores_blocked_and_unknown_ids(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         let (ready, blocked) = model.update(cx, |m, cx| {
@@ -600,7 +598,6 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "needs ui::selection (A1)"]
     fn toggle_row_selects_then_clears(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, cx| m.toggle_row("npm-cache", cx));
@@ -610,7 +607,6 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "needs ui::selection (A1)"]
     fn select_safe_skips_blocked_items(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         let blocked_id = model.update(cx, |m, cx| {
@@ -641,7 +637,6 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "needs ui::selection (A1)"]
     fn refresh_prunes_ids_that_disappeared(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         let kept = model.update(cx, |m, cx| {
