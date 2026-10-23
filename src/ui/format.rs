@@ -1,4 +1,4 @@
-//! Size formatting (owner: A1). Port of `legacy-web/src/lib/format.ts`.
+//! Size formatting.
 
 const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
 

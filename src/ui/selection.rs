@@ -1,4 +1,4 @@
-//! Selection rules (owner: A1). Port of `legacy-web/src/lib/selection.ts`.
+//! Selection rules: only ready items can be selected.
 
 use std::collections::HashSet;
 

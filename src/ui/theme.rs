@@ -1,6 +1,4 @@
-//! Colors, fonts and tile colors (owner: A3). Port of `legacy-web/src/styles.css`
-//! tokens, `legacy-web/src/lib/categories.ts`, and `tileColors` from
-//! `legacy-web/src/lib/treemap.ts`. Category colors come from `rules.toml`.
+//! Colors, fonts and tile colors. Category colors and labels come from `rules.toml`.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -59,7 +57,7 @@ impl Theme {
 }
 
 /// The theme for the window's appearance. Light only until Phase 5 adds dark.
-pub fn current(window: &Window) -> Theme {
+pub fn current(_window: &Window) -> Theme {
     Theme::light()
 }
 

@@ -1,5 +1,5 @@
 //! Recommendations card: tier sections, rows, footer and the detail drawer
-//! (owner: B3). Port of `legacy-web/src/components/Recommendations/*`.
+//! (PRD sections 7.4 and 7.5).
 
 use std::collections::HashSet;
 use std::time::Duration;

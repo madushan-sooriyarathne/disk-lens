@@ -1,5 +1,4 @@
-//! Full-window states and the notice banner (owner: B1). Port of
-//! `legacy-web/src/components/{EmptyState,ScanProgress,Banner}.tsx`.
+//! Full-window states (idle, scanning, error) and the notice banner.
 
 use std::time::Duration;
 

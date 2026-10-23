@@ -1,8 +1,5 @@
-//! Where the UI gets its data (owner: A4): the real backend, or the mock
-//! snapshot when `DISKLENS_MOCK` is set. Replaces `legacy-web/src/lib/{api,mockApi}.ts`.
-//!
-//! Frozen contract: the public items below. Methods block; the model calls
-//! them off the UI thread. `MockData` internals are up to the owner.
+//! Where the UI gets its data: the real backend, or the mock snapshot when
+//! `DISKLENS_MOCK` is set. Methods block; the model calls them off the UI thread.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -265,7 +262,7 @@ mod tests {
         assert!((a - b).abs() <= tol, "{a} != {b} (+-{tol})");
     }
 
-    // Port of legacy-web/src/mocks/snapshot.mock.test.ts.
+    // The mock mirrors the mockup's numbers.
     #[test]
     fn tier_totals_and_counts_match_the_mockup() {
         let m = MockData::new(false);

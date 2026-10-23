@@ -10,14 +10,19 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 1 Scanner | Done | Within 1% of `du -skx`; full home scan of 3.8M files in about 31 s, peak about 444 MB |
 | 2 Explorer UI | Done, approved | |
 | 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. The UI review moves to the GPUI build (Phase 3.5) |
-| 3.5 GPUI migration | In progress | Replaces Tauri and React with GPUI on branch `gpui-migration`. See Phase 3.5 in section 5 |
+| 3.5 GPUI migration | Done, awaiting review | Tauri and React replaced by GPUI on branch `gpui-migration`. Interactions still need a check in the native window (see What is left) |
 | 4 Cleanup engine | Not started, after 3.5 | Needs a task breakdown approved in plan mode first |
 | 5 Permissions, persistence, polish | Not started | |
 | 6 Packaging and release | Not started | |
 
-Last gate run before the GPUI migration: `pnpm lint`, `pnpm test` (31 Vitest), `cargo test` (142 Rust) and `cargo clippy -D warnings` all pass.
+Last gate run (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (188 tests) all pass.
 
 ### What is left
+
+**Phase 3.5 review**
+- Check in the native window what screenshots could not: drill-down, breadcrumb, Esc (closes the menu, then the drawer, then goes up), mode toggle, Rescan, tile tooltip, right-click menu, row and item checkboxes, Select safe, drawer open and close, Reveal in Finder, window resize, scan progress animation, and the idle screen.
+- Mockup differences to decide: "92.0 GB" vs "92 GB" in Free after cleanup, and "up to 9.0 GB" vs "~9.0 GB" for estimates (both come from the size formatter, unchanged from the React app); check marks and arrows are text glyphs, not icons.
+- The drawer shows "Loading details…" forever if loading details fails; the model only logs the error.
 
 **Phase 4: cleanup engine** (section 5, Phase 4)
 - Add the `trash` and `shell-escape` crates.

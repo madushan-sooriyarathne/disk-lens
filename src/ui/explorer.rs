@@ -1,5 +1,5 @@
 //! Explorer card: header, breadcrumb, treemap, legend, tooltip and context
-//! menu (owner: B2). Port of `legacy-web/src/components/Explorer/*`.
+//! menu.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;

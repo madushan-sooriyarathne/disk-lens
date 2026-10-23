@@ -1,5 +1,5 @@
-//! Treemap layout and label helpers (owner: A2). Port of
-//! `legacy-web/src/lib/treemap.ts` without the color helpers (those live in theme.rs).
+//! Treemap layout and label helpers, ported from d3's squarified treemap.
+//! Tile colors live in theme.rs.
 //! Pure: called only when the view or the container size changes, never on hover.
 
 use crate::view::ViewNode;

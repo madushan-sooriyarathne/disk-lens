@@ -1,4 +1,4 @@
-//! Stat card numbers (owner: A1). Port of `legacy-web/src/lib/stats.ts`.
+//! Stat card numbers.
 
 use std::collections::HashSet;
 

@@ -1,8 +1,5 @@
-//! App state and actions (owner: A4). Replaces the React stores
-//! `legacy-web/src/store/{scan,view,selection}.ts`.
-//!
-//! Frozen contract: the public fields and method signatures below. Private
-//! fields and helpers may be added freely.
+//! App state and actions: scan phase, explorer path and mode, recommendations,
+//! selection and the open drawer. Views read the public fields and call the methods.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -285,7 +282,7 @@ impl AppModel {
         }
     }
 
-    pub fn cancel_scan(&mut self, cx: &mut Context<Self>) {
+    pub fn cancel_scan(&mut self, _cx: &mut Context<Self>) {
         self.source.cancel_scan();
     }
 

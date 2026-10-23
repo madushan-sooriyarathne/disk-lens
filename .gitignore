@@ -2,6 +2,4 @@
 .sandbox/
 *.log
 .DS_Store
-# Old React build output, removed with legacy-web/ at the end of Phase 3.5.
-node_modules
-dist
+.claude/worktrees/

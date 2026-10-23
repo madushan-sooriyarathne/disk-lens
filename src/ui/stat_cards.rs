@@ -1,4 +1,4 @@
-//! The four stat cards (owner: B1). Port of `legacy-web/src/components/StatCards.tsx`.
+//! The four stat cards (PRD section 7.2).
 
 use gpui::{Context, Div, FontWeight, Hsla, Window, div, prelude::*, px};
 

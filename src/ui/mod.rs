@@ -1,9 +1,6 @@
 //! Native UI drawn with GPUI. `AppModel` (model.rs) is the single entity;
 //! the other modules are pure logic or render functions over it.
 
-// Phase 3.5 skeleton: stubs are filled module by module. Removed when the port is done.
-#![allow(dead_code, unused_variables)]
-
 pub mod explorer;
 pub mod format;
 pub mod model;
