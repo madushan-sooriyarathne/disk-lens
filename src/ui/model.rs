@@ -58,6 +58,8 @@ pub struct AppModel {
     pub focused_row: Option<String>,
     /// Details of `focused_row`, once loaded.
     pub details: Option<ItemDetails>,
+    /// Why the details of `focused_row` could not be loaded.
+    pub details_error: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
     pub focus_handle: FocusHandle,
     pub explorer: ExplorerState,
@@ -136,6 +138,7 @@ impl AppModel {
             selected: HashSet::new(),
             focused_row: None,
             details: None,
+            details_error: None,
             focus_handle,
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
@@ -184,6 +187,7 @@ impl AppModel {
                         this.selected = selected;
                         this.focused_row = None;
                         this.details = None;
+                        this.details_error = None;
                         this.error = None;
                         this.phase = Phase::Ready;
                     }
@@ -366,6 +370,7 @@ impl AppModel {
     pub fn focus_row(&mut self, row_id: Option<String>, cx: &mut Context<Self>) {
         self.focused_row = row_id.clone();
         self.details = None;
+        self.details_error = None;
         cx.notify();
         let Some(row_id) = row_id else { return };
         let wanted = row_id.clone();
@@ -380,7 +385,10 @@ impl AppModel {
                 }
                 match loaded {
                     Ok(details) => this.details = Some(details),
-                    Err(e) => tracing::warn!("could not load details of {row_id}: {e}"),
+                    Err(e) => {
+                        tracing::warn!("could not load details of {row_id}: {e}");
+                        this.details_error = Some(e.to_string());
+                    }
                 }
             },
         );
@@ -565,6 +573,19 @@ mod tests {
         model.read_with(cx, |m, _| {
             assert!(m.focused_row.is_none());
             assert!(m.details.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn failed_details_load_reports_the_error(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.focus_row(Some("nope".into()), cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            assert_eq!(
+                m.details_error.as_deref(),
+                Some("no recommendation nope in the current scan")
+            );
         });
     }
 

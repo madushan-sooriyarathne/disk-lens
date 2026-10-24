@@ -129,6 +129,7 @@ pub fn render(
             &t,
             r,
             model.details.as_ref().filter(|d| d.row_id == r.row_id),
+            model.details_error.as_deref(),
             &model.selected,
             &meta.root,
             cx,
@@ -444,6 +445,7 @@ fn drawer(
     t: &Theme,
     r: &Recommendation,
     details: Option<&ItemDetails>,
+    details_error: Option<&str>,
     selected: &HashSet<String>,
     root: &str,
     cx: &mut Context<AppModel>,
@@ -471,13 +473,12 @@ fn drawer(
         Some(d) => content
             .child(section(t, "What it is", d.description.clone()))
             .child(section(t, "What happens if removed", d.regenerates.clone())),
-        None => content.child(
-            div()
-                .mt_4()
-                .text_size(px(13.))
-                .text_color(t.muted)
-                .child("Loading details…"),
-        ),
+        None => content.child(div().mt_4().text_size(px(13.)).text_color(t.muted).child(
+            match details_error {
+                Some(e) => format!("Could not load details: {e}"),
+                None => "Loading details…".into(),
+            },
+        )),
     };
     content = content
         .child(section(
