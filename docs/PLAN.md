@@ -2,7 +2,7 @@
 
 Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 
-## Status and roadmap (as of 2026-10-23)
+## Status and roadmap (as of 2026-10-24)
 
 | Phase | State | Notes |
 |-------|-------|-------|
@@ -10,29 +10,25 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 1 Scanner | Done | Within 1% of `du -skx`; full home scan of 3.8M files in about 31 s, peak about 444 MB |
 | 2 Explorer UI | Done, approved | |
 | 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. The UI review moves to the GPUI build (Phase 3.5) |
-| 3.5 GPUI migration | Done, awaiting review | Tauri and React replaced by GPUI on branch `gpui-migration`. Interactions still need a check in the native window (see What is left) |
-| 4 Cleanup engine | Not started, after 3.5 | Needs a task breakdown approved in plan mode first |
+| 3.5 GPUI migration | Done, merged | Interactions still need a check in the native window (see What is left) |
+| 4 Cleanup engine | Code done, awaiting macOS verification | Built in a Linux cloud session: type-checked for `aarch64-apple-darwin`, backend tests run on Linux. GPUI tests, the native window, the real Trash and the supervised npm run need a Mac (see What is left) |
 | 5 Permissions, persistence, polish | Not started | |
 | 6 Packaging and release | Not started | |
 
-Last gate run (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (188 tests) all pass.
+Last full gate run on macOS (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (188 tests) all pass. Phase 4 still needs that run on a Mac.
 
 ### What is left
 
 **Phase 3.5 review**
 - Check in the native window what screenshots could not: drill-down, breadcrumb, Esc (closes the menu, then the drawer, then goes up), mode toggle, Rescan, tile tooltip, right-click menu, row and item checkboxes, Select safe, drawer open and close, Reveal in Finder, window resize, scan progress animation, and the idle screen.
-- Mockup differences to decide: "92.0 GB" vs "92 GB" in Free after cleanup, and "up to 9.0 GB" vs "~9.0 GB" for estimates (both come from the size formatter, unchanged from the React app); check marks and arrows are text glyphs, not icons.
-- The drawer shows "Loading details…" forever if loading details fails; the model only logs the error.
+- Mockup differences, decided: keep "92.0 GB" (the formatter shows one decimal below 100) and "up to 9.0 GB" (RULES.md section 3 says estimates read "up to"); the mockup's "92 GB" and "~9.0 GB" are not followed. Check marks and arrows stay text glyphs.
+- Done: the drawer shows the error when details fail to load.
 
 **Phase 4: cleanup engine** (section 5, Phase 4)
-- Add the `trash` and `shell-escape` crates.
-- `cleanup/protected.rs`: add the remaining RULES.md section 5 checks (it only has the list and the equality test today).
-- New modules `cleanup/plan.rs`, `revalidate.rs`, `execute.rs`, `script.rs`, `audit.rs`. The `CleanupPlan` and `CleanupEvent` contracts from section 3 are not defined yet.
-- Commands `build_cleanup_plan`, `export_script`, `execute_cleanup`. Plans are invalidated by any rescan.
-- Audit log at `~/Library/Logs/DiskLens/cleanup.log` (S-07), honouring dry run (S-08).
-- UI: `src/ui/cleanup.rs` (confirm dialog, progress, results). Enable Copy script and Clean selected in the footer of `src/ui/recommendations.rs` (disabled today). Toast for Copy script. Rescan the affected parent folders after cleanup.
-- `tests/cleanup_adversarial.rs` (every case in Phase 4 step 8) and `tests/script.rs`.
-- `docs/QA.md` manual checklist (section 6).
+- Built: `cleanup/` (`model`, `protected` refusals, `plan`, `revalidate`, `execute`, `audit`, `script`), the backend functions, and `src/ui/cleanup.rs` (confirm, progress, results, toast). Copy script and Clean selected are enabled.
+- Decisions: after a cleanup the whole scan root is rescanned (not only the parent folders); "inside home" means inside the scan root, so sandboxed runs work; sandboxed audit logs go to `<scan root>/../logs` (`.sandbox/logs`).
+- Verified in the Linux session: the cleanup unit tests, `tests/cleanup_adversarial.rs`, `tests/cleanup_engine.rs`, `tests/cleanup_backend.rs` and `tests/script.rs` pass on a Linux build with the UI and macOS calls stubbed out; a full real cleanup of `.sandbox` (31 ready items, Trash redirected into `.sandbox/`) removed every ready item, left blocked and protected paths alone, and the audit log had one line per item.
+- Left for a Mac: the full gate (`cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`, including the new `AppModel` cleanup tests); the native-window checks in `docs/QA.md`; trashing through `NSFileManager`; a mount-point refusal (cannot be built in a test).
 - One supervised real run on the npm cache, only when the user says so.
 
 **Phase 5: permissions, persistence, polish**
@@ -52,8 +48,7 @@ Last gate run (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -
 - PRD section 12 release criteria, including launch on a clean macOS 13 machine.
 
 **Housekeeping**
-- The `_note` in `assets/mock/snapshot.mock.json` still says blocked states arrive with Phase 3. Update it or add a blocked item to the mock.
-- `platform/` is one `mod.rs` with the `System` and `Runner` traits. Phase 5 adds FDA code there.
+- `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
 ### After v1
 
@@ -106,7 +101,7 @@ Git operations shell out to the `git` binary.
 ```
 disklens/
   Cargo.toml, rust-toolchain.toml, CLAUDE.md
-  docs/                 PRD.md, RULES.md, PLAN.md
+  docs/                 PRD.md, RULES.md, PLAN.md, QA.md
   scripts/
     make-fixture.sh     builds .sandbox/home with realistic and adversarial cases
   rules/rules.toml
@@ -120,14 +115,15 @@ disklens/
     rules/    model.rs, load.rs, validate.rs, category.rs, matcher.rs, guards.rs, tools.rs
     providers/ ollama.rs, git_worktrees.rs, simctl.rs, docker.rs
     recommend/ build.rs, model.rs
-    cleanup/  protected.rs, plan.rs, revalidate.rs, execute.rs, script.rs, audit.rs
+    cleanup/  model.rs, protected.rs, plan.rs, revalidate.rs, execute.rs, script.rs, audit.rs
     platform/ mod.rs
     ui/       mod.rs, root.rs, model.rs, source.rs, theme.rs, format.rs, stats.rs,
               selection.rs, treemap.rs, screens.rs, stat_cards.rs, explorer.rs,
-              recommendations.rs, cleanup.rs (Phase 4)
+              recommendations.rs, cleanup.rs
     bin/scan-bench.rs
   tests/      scanner.rs, rules.rs, rules_doc_sync.rs, sandbox_rows.rs, view.rs,
-              cleanup_adversarial.rs, script.rs
+              cleanup_adversarial.rs, cleanup_engine.rs, cleanup_backend.rs, script.rs,
+              support/mod.rs (temporary scan roots under target/tmp)
 ```
 
 ## 3. Data contracts
@@ -171,15 +167,24 @@ pub struct RecItem {
 }
 
 pub struct CleanupPlan {
-    pub plan_id: String, pub actions: Vec<PlannedAction>, pub total: u64,
-    pub trash_total: u64, pub warnings: Vec<String>,
+    pub plan_id: String, pub snapshot_id: String, pub actions: Vec<PlannedAction>,
+    pub total: u64, pub trash_total: u64, pub permanent_available: bool,
+    pub warnings: Vec<String>, // requested items left out, with the reason
+}
+pub struct PlannedAction {
+    pub item_id: String, pub rule_id: String, pub label: String, pub name: String,
+    pub tier: Tier, pub path: String, pub matched: String, pub size: u64,
+    pub size_is_estimate: bool, pub measurable: bool,
+    pub method: PlannedMethod, // Delete | DeleteContents | Trash | TrashContents | Command { argv }
 }
 
 pub enum ScanEvent { Progress { files: u64, bytes: u64, current: String }, Finished { meta: SnapshotMeta }, Failed { message: String } }
 pub enum CleanupEvent { ItemStarted { item_id: String }, ItemFinished { item_id: String, freed: u64, outcome: Outcome }, Finished { summary: CleanupSummary } }
+pub enum Outcome { Deleted, Trashed, CommandRan, DryRun, Skipped { reason: String }, Failed { error: String } }
+pub struct CleanupSummary { pub freed: u64, pub trashed: u64, pub done: u32, pub skipped: Vec<SkippedItem>, pub dry_run: bool }
 ```
 
-Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for providers). They are valid only for the snapshot that produced them.
+Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for providers). They are valid only for the snapshot that produced them, so `build_cleanup_plan` also takes the snapshot ID the selection was made in and refuses any other.
 
 ## 4. Backend functions
 
@@ -193,9 +198,9 @@ Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for provid
 | `get_view` | `{ node_path: string, mode: ViewMode }` | `ViewNode` (root plus two levels, pruned) |
 | `get_recommendations` | none | `Vec<Recommendation>` |
 | `get_item_details` | `{ row_id }` | `{ items, largest_subfolders }` |
-| `build_cleanup_plan` | `{ item_ids, permanent_review: bool }` | `CleanupPlan` |
+| `build_cleanup_plan` | `{ snapshot_id, item_ids, permanent_review: bool }` | `CleanupPlan` |
 | `export_script` | `{ plan_id }` | `String` |
-| `execute_cleanup` | `{ plan_id, on_event: FnMut(CleanupEvent) }` | none |
+| `execute_cleanup` | `{ plan_id, on_event: FnMut(CleanupEvent) }` | none (a plan runs once, only while its snapshot is current) |
 | `reveal_in_finder` | `{ item_id or node_path }` | none (only paths inside the snapshot) |
 
 These are plain functions in `src/backend.rs` taking `&Arc<AppState>`. The UI calls them through `src/ui/source.rs`, off the UI thread (`cx.background_spawn`); scans and cleanups run on their own thread and report through the callback. Shared state lives in a `Mutex`/`RwLock` inside `AppState`.
