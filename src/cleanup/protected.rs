@@ -1,8 +1,10 @@
-//! Hardcoded protected subtrees (RULES.md section 5). The list mirrors the
+//! Hardcoded protections (RULES.md section 5). The protected list mirrors the
 //! `[[protect]]` entries in rules.toml and a test keeps them equal; when they
-//! disagree, both apply. Phase 4 adds the remaining section 5 checks.
+//! disagree, both apply. `Protected::refusal` adds the other section 5 checks
+//! and runs against the disk as it is now.
 
-use std::path::Path;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 
 use globset::{GlobSet, GlobSetBuilder};
 
@@ -31,7 +33,21 @@ pub const PROTECTED: [&str; 19] = [
     "~/.kube",
 ];
 
+/// Standard folders directly under the root that are never a target themselves.
+const STANDARD_FOLDERS: [&str; 9] = [
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Library",
+    "Pictures",
+    "Movies",
+    "Music",
+    "Public",
+    "Applications",
+];
+
 pub struct Protected {
+    root: PathBuf,
     set: GlobSet,
 }
 
@@ -47,8 +63,54 @@ impl Protected {
             b.add(compile(&expand(p, root)).expect("protect globs are validated"));
         }
         Self {
+            root: PathBuf::from(root),
             set: b.build().expect("protect set builds"),
         }
+    }
+
+    /// Why the cleanup engine must not touch `path`, or `None` when it may.
+    /// Reads the disk: `path` must exist, be its own canonical form (no symlink
+    /// anywhere in it), lie strictly inside the root, and be neither a standard
+    /// folder, a symlink, a mount point, a repository root nor protected.
+    pub fn refusal(&self, path: &Path) -> Option<String> {
+        let md = match path.symlink_metadata() {
+            Ok(md) => md,
+            Err(e) => return Some(format!("cannot be read ({e})")),
+        };
+        if md.file_type().is_symlink() {
+            return Some("is a symlink".into());
+        }
+        match std::fs::canonicalize(path) {
+            Ok(c) if c == path => {}
+            Ok(_) => return Some("its path now goes through a symlink".into()),
+            Err(e) => return Some(format!("cannot be resolved ({e})")),
+        }
+        let Ok(rel) = path.strip_prefix(&self.root) else {
+            return Some("is outside the scan root".into());
+        };
+        if rel.as_os_str().is_empty() {
+            return Some("is the scan root".into());
+        }
+        if rel.components().count() == 1 && STANDARD_FOLDERS.iter().any(|f| rel == Path::new(f)) {
+            return Some("is a standard folder".into());
+        }
+        match path.parent().map(Path::symlink_metadata) {
+            Some(Ok(parent)) if parent.dev() == md.dev() => {}
+            Some(Ok(_)) => return Some("is a mount point".into()),
+            Some(Err(e)) => return Some(format!("parent cannot be read ({e})")),
+            None => return Some("has no parent".into()),
+        }
+        if path
+            .join(".git")
+            .symlink_metadata()
+            .is_ok_and(|g| g.is_dir())
+        {
+            return Some("is a repository root".into());
+        }
+        if self.is_protected(path) {
+            return Some("is protected".into());
+        }
+        None
     }
 
     /// `path` is itself a protected path.
@@ -111,5 +173,116 @@ mod tests {
         assert!(p.is_protected(Path::new("/tmp/a[1]/Secret/x")));
         assert!(p.is_protected(Path::new("/tmp/a[1]/.kube")));
         assert!(!p.is_protected(Path::new("/tmp/a1/.kube")));
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    struct Home {
+        _t: tempfile::TempDir,
+        root: PathBuf,
+        protected: Protected,
+    }
+
+    fn home(dirs: &[&str]) -> Home {
+        let t = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(t.path()).unwrap().join("home");
+        for d in dirs {
+            fs::create_dir_all(root.join(d)).unwrap();
+        }
+        fs::create_dir_all(&root).unwrap();
+        let protected = Protected::new(&root.display().to_string(), &[]);
+        Home {
+            _t: t,
+            root,
+            protected,
+        }
+    }
+
+    impl Home {
+        fn refusal(&self, rel: &str) -> Option<String> {
+            self.protected.refusal(&self.root.join(rel))
+        }
+    }
+
+    #[test]
+    fn allows_an_ordinary_folder() {
+        let h = home(&[".npm/_cacache"]);
+        assert_eq!(h.refusal(".npm/_cacache"), None);
+    }
+
+    #[test]
+    fn refuses_the_scan_root() {
+        let h = home(&[]);
+        assert_eq!(h.refusal("").as_deref(), Some("is the scan root"));
+    }
+
+    #[test]
+    fn refuses_paths_outside_the_root() {
+        let h = home(&[]);
+        let outside = h.root.parent().unwrap().to_path_buf();
+        assert_eq!(
+            h.protected.refusal(&outside).as_deref(),
+            Some("is outside the scan root")
+        );
+    }
+
+    #[test]
+    fn refuses_standard_folders_but_not_their_children() {
+        let h = home(&["Library/Caches"]);
+        assert_eq!(
+            (h.refusal("Library").as_deref(), h.refusal("Library/Caches")),
+            (Some("is a standard folder"), None)
+        );
+    }
+
+    #[test]
+    fn refuses_a_symlink() {
+        let h = home(&["real"]);
+        symlink(h.root.join("real"), h.root.join("link")).unwrap();
+        assert_eq!(h.refusal("link").as_deref(), Some("is a symlink"));
+    }
+
+    #[test]
+    fn refuses_a_path_through_a_symlinked_parent() {
+        let h = home(&["real/cache"]);
+        symlink(h.root.join("real"), h.root.join("link")).unwrap();
+        assert_eq!(
+            h.refusal("link/cache").as_deref(),
+            Some("its path now goes through a symlink")
+        );
+    }
+
+    #[test]
+    fn refuses_a_repository_root() {
+        let h = home(&["code/app/.git"]);
+        assert_eq!(
+            h.refusal("code/app").as_deref(),
+            Some("is a repository root")
+        );
+    }
+
+    #[test]
+    fn allows_a_worktree_whose_git_is_a_file() {
+        let h = home(&["code/wt"]);
+        fs::write(h.root.join("code/wt/.git"), "gitdir: /x\n").unwrap();
+        assert_eq!(h.refusal("code/wt"), None);
+    }
+
+    #[test]
+    fn refuses_protected_paths_and_their_contents() {
+        let h = home(&[".ssh/keys"]);
+        assert_eq!(h.refusal(".ssh/keys").as_deref(), Some("is protected"));
+    }
+
+    #[test]
+    fn refuses_a_missing_path() {
+        let h = home(&[]);
+        assert!(h.refusal("gone").unwrap().starts_with("cannot be read"));
     }
 }
