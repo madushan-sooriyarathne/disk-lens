@@ -21,7 +21,7 @@ use crate::recommend::model::{ItemDetails, ItemStatus, MethodView, RecItem, Reco
 #[derive(Default)]
 pub struct PanelState {}
 
-const DISABLED_HINT: &str = "Available once the cleanup engine ships";
+const NOTHING_SELECTED: &str = "Select items to clean first";
 
 pub fn render(
     model: &mut AppModel,
@@ -145,7 +145,7 @@ fn tier_label(tier: Tier) -> &'static str {
     }
 }
 
-fn tier_pill(t: &Theme, tier: Tier) -> Div {
+pub(super) fn tier_pill(t: &Theme, tier: Tier) -> Div {
     let (color, fill) = match tier {
         Tier::Safe => (t.safe, t.safe_fill),
         Tier::Review => (t.review, t.review_fill),
@@ -171,7 +171,7 @@ fn method_words(m: &MethodView) -> String {
 }
 
 /// `/Users/x/.npm` -> `~/.npm` under the scan root.
-fn tilde(path: &str, root: &str) -> String {
+pub(super) fn tilde(path: &str, root: &str) -> String {
     match path.strip_prefix(root) {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
         _ => path.to_owned(),
@@ -207,7 +207,7 @@ fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
 }
 
 /// Checkbox drawn with divs: filled with a check when all, a bar when some.
-fn checkbox(
+pub(super) fn checkbox(
     t: &Theme,
     id: impl Into<ElementId>,
     state: RowState,
@@ -362,6 +362,7 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
             .child(label)
     };
     let bg = t.bg;
+    let nothing = rows == 0;
     div()
         .px_5()
         .py_4()
@@ -397,14 +398,18 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                         .hover(move |s| s.bg(bg))
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.select_safe(cx))),
                 )
-                // Script export and cleanup arrive with the cleanup engine (Phase 4).
-                .child(
+                .child(if nothing {
                     secondary("copy-script", "Copy script")
                         .opacity(0.4)
-                        .tooltip(tip(DISABLED_HINT.into())),
-                )
-                .child(
-                    div()
+                        .tooltip(tip(NOTHING_SELECTED.into()))
+                } else {
+                    secondary("copy-script", "Copy script")
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(bg))
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_script(cx)))
+                })
+                .child({
+                    let clean = div()
                         .id("clean-selected")
                         .ml_auto()
                         .px_3()
@@ -414,10 +419,15 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                         .text_color(t.card)
                         .text_size(px(13.))
                         .font_weight(FontWeight::MEDIUM)
-                        .opacity(0.4)
-                        .tooltip(tip(DISABLED_HINT.into()))
-                        .child("Clean selected"),
-                ),
+                        .child("Clean selected");
+                    if nothing {
+                        clean.opacity(0.4).tooltip(tip(NOTHING_SELECTED.into()))
+                    } else {
+                        clean.cursor_pointer().on_click(
+                            cx.listener(|this, _: &ClickEvent, _, cx| this.open_cleanup(cx)),
+                        )
+                    }
+                }),
         )
 }
 

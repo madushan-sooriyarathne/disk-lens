@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
-use gpui::{AppContext, Context, FocusHandle, Subscription, Task, Window};
+use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
 use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
+use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary};
 use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
@@ -19,6 +20,8 @@ use crate::view::{ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
+/// How long a toast stays up.
+const TOAST: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -27,6 +30,28 @@ pub enum Phase {
     Scanning,
     Ready,
     Error,
+}
+
+/// The cleanup dialog (PRD section 7.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Cleanup {
+    /// Waiting for the plan.
+    Planning,
+    Confirm {
+        plan: CleanupPlan,
+        /// "Delete permanently instead of moving to Trash".
+        permanent: bool,
+    },
+    Running {
+        plan: CleanupPlan,
+        /// Items finished so far.
+        done: usize,
+        /// Item being cleaned.
+        current: Option<String>,
+    },
+    Results {
+        summary: CleanupSummary,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -60,6 +85,10 @@ pub struct AppModel {
     pub details: Option<ItemDetails>,
     /// Why the details of `focused_row` could not be loaded.
     pub details_error: Option<String>,
+    /// Open cleanup dialog, if any.
+    pub cleanup: Option<Cleanup>,
+    /// Short notice at the bottom of the window ("Script copied").
+    pub toast: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
     pub focus_handle: FocusHandle,
     pub explorer: ExplorerState,
@@ -68,6 +97,10 @@ pub struct AppModel {
     view_seq: u64,
     /// Polls the running scan's events; dropped when a new scan starts.
     scan_task: Option<Task<()>>,
+    /// Polls the running cleanup's events.
+    cleanup_task: Option<Task<()>>,
+    /// Bumped per toast, so an older toast's timer does not hide a newer one.
+    toast_seq: u64,
     _activation: Subscription,
 }
 
@@ -139,11 +172,15 @@ impl AppModel {
             focused_row: None,
             details: None,
             details_error: None,
+            cleanup: None,
+            toast: None,
             focus_handle,
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
             view_seq: 0,
             scan_task: None,
+            cleanup_task: None,
+            toast_seq: 0,
             _activation: activation,
         }
     }
@@ -422,6 +459,198 @@ impl AppModel {
                 }
             },
         );
+    }
+}
+
+impl AppModel {
+    fn snapshot_id(&self) -> String {
+        self.meta.as_ref().map(|m| m.id.clone()).unwrap_or_default()
+    }
+
+    fn selected_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.selected.iter().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// "Clean selected": builds the plan and opens the confirm dialog.
+    pub fn open_cleanup(&mut self, cx: &mut Context<Self>) {
+        if self.selected.is_empty() || self.cleanup.is_some() {
+            return;
+        }
+        self.request_plan(false, cx);
+    }
+
+    /// Rebuilds the plan with or without permanent deletion of review-tier trash items.
+    pub fn set_permanent(&mut self, permanent: bool, cx: &mut Context<Self>) {
+        if matches!(self.cleanup, Some(Cleanup::Confirm { .. })) {
+            self.request_plan(permanent, cx);
+        }
+    }
+
+    fn request_plan(&mut self, permanent: bool, cx: &mut Context<Self>) {
+        self.cleanup = Some(Cleanup::Planning);
+        cx.notify();
+        let (snapshot, ids) = (self.snapshot_id(), self.selected_ids());
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.build_plan(&snapshot, ids, permanent),
+            move |this, built, cx| {
+                // Cancelled while the plan was being built.
+                if this.cleanup != Some(Cleanup::Planning) {
+                    return;
+                }
+                match built {
+                    Ok(plan) => this.cleanup = Some(Cleanup::Confirm { plan, permanent }),
+                    Err(e) => {
+                        this.cleanup = None;
+                        this.show_toast(format!("Could not plan the cleanup: {e}"), cx);
+                    }
+                }
+            },
+        );
+    }
+
+    /// The confirm button: runs the plan with per-item progress.
+    pub fn confirm_cleanup(&mut self, cx: &mut Context<Self>) {
+        let Some(Cleanup::Confirm { plan, .. }) = self.cleanup.clone() else {
+            return;
+        };
+        if plan.actions.is_empty() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let started = self.source.execute_cleanup(&plan.plan_id, move |event| {
+            tx.send(event).ok();
+        });
+        if let Err(e) = started {
+            self.cleanup = None;
+            self.show_toast(format!("Could not start the cleanup: {e}"), cx);
+            return;
+        }
+        self.cleanup = Some(Cleanup::Running {
+            plan,
+            done: 0,
+            current: None,
+        });
+        cx.notify();
+        self.cleanup_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(SCAN_POLL).await;
+                let mut events = Vec::new();
+                let mut gone = false;
+                loop {
+                    match rx.try_recv() {
+                        Ok(event) => events.push(event),
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            gone = true;
+                            break;
+                        }
+                    }
+                }
+                let done = this.update(cx, |model, cx| {
+                    let mut done = false;
+                    for event in events {
+                        done |= model.on_cleanup_event(event);
+                    }
+                    if gone && !done {
+                        model.cleanup = Some(Cleanup::Results {
+                            summary: CleanupSummary::default(),
+                        });
+                        model.show_toast("The cleanup stopped unexpectedly".into(), cx);
+                        done = true;
+                    }
+                    cx.notify();
+                    done
+                });
+                if done.unwrap_or(true) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Applies one cleanup event; true when it ended the cleanup.
+    fn on_cleanup_event(&mut self, event: CleanupEvent) -> bool {
+        let Some(Cleanup::Running { done, current, .. }) = &mut self.cleanup else {
+            return matches!(event, CleanupEvent::Finished { .. });
+        };
+        match event {
+            CleanupEvent::ItemStarted { item_id } => {
+                *current = Some(item_id);
+                false
+            }
+            CleanupEvent::ItemFinished { .. } => {
+                *done += 1;
+                *current = None;
+                false
+            }
+            CleanupEvent::Finished { summary } => {
+                self.cleanup = Some(Cleanup::Results { summary });
+                true
+            }
+        }
+    }
+
+    /// Cancel in the confirm dialog, or Done in the results. After a cleanup
+    /// the selection is cleared and the scan root is rescanned, so sizes and
+    /// recommendations reflect the disk (PRD section 7.6, step 8).
+    pub fn close_cleanup(&mut self, cx: &mut Context<Self>) {
+        match self.cleanup {
+            Some(Cleanup::Running { .. }) | None => {}
+            Some(Cleanup::Results { .. }) => {
+                self.cleanup = None;
+                self.selected.clear();
+                self.start_scan(cx);
+            }
+            Some(Cleanup::Planning | Cleanup::Confirm { .. }) => {
+                self.cleanup = None;
+                cx.notify();
+            }
+        }
+    }
+
+    /// "Copy script": the selection's plan as a bash script on the clipboard.
+    pub fn copy_script(&mut self, cx: &mut Context<Self>) {
+        if self.selected.is_empty() {
+            return;
+        }
+        let (snapshot, ids) = (self.snapshot_id(), self.selected_ids());
+        off_thread(
+            &self.source,
+            cx,
+            move |s| {
+                let plan = s.build_plan(&snapshot, ids, false)?;
+                s.export_script(&plan.plan_id)
+            },
+            |this, script, cx| match script {
+                Ok(script) => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(script));
+                    this.show_toast("Cleanup script copied to the clipboard".into(), cx);
+                }
+                Err(e) => this.show_toast(format!("Could not export the script: {e}"), cx),
+            },
+        );
+    }
+
+    fn show_toast(&mut self, text: String, cx: &mut Context<Self>) {
+        self.toast_seq += 1;
+        let seq = self.toast_seq;
+        self.toast = Some(text);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TOAST).await;
+            this.update(cx, |model, cx| {
+                if model.toast_seq == seq {
+                    model.toast = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 
@@ -706,5 +935,112 @@ mod tests {
             assert_eq!(m.phase, Phase::Ready);
             assert_eq!(m.error.as_deref(), Some("Scan cancelled"));
         });
+    }
+
+    #[gpui::test]
+    fn open_cleanup_without_a_selection_does_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(m.cleanup.is_none()));
+    }
+
+    #[gpui::test]
+    fn open_cleanup_plans_the_selection(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            let Some(Cleanup::Confirm { plan, .. }) = &m.cleanup else {
+                panic!("expected the confirm dialog, got {:?}", m.cleanup);
+            };
+            let ids: HashSet<String> = plan.actions.iter().map(|a| a.item_id.clone()).collect();
+            assert_eq!(ids, m.selected);
+        });
+    }
+
+    #[gpui::test]
+    fn confirmed_cleanup_ends_in_results(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.confirm_cleanup(cx));
+        settle(cx, &model, |m| {
+            matches!(m.cleanup, Some(Cleanup::Results { .. }))
+        });
+        model.read_with(cx, |m, _| {
+            let Some(Cleanup::Results { summary }) = &m.cleanup else {
+                unreachable!()
+            };
+            assert!(summary.dry_run);
+        });
+    }
+
+    #[gpui::test]
+    fn closing_the_results_clears_the_selection_and_rescans(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.confirm_cleanup(cx));
+        settle(cx, &model, |m| {
+            matches!(m.cleanup, Some(Cleanup::Results { .. }))
+        });
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        model.read_with(cx, |m, _| {
+            assert_eq!((m.phase, m.selected.is_empty()), (Phase::Scanning, true));
+        });
+    }
+
+    #[gpui::test]
+    fn cancel_closes_the_confirm_dialog(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        model.read_with(cx, |m, _| assert!(m.cleanup.is_none()));
+    }
+
+    #[gpui::test]
+    fn permanent_toggle_replans_review_trash_as_delete(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            let row = m
+                .recommendations
+                .iter()
+                .find(|r| {
+                    r.tier == Tier::Review
+                        && r.items
+                            .iter()
+                            .any(|i| i.method == crate::recommend::model::MethodView::Trash)
+                })
+                .cloned()
+                .expect("the mock has a review-tier trash row");
+            m.toggle_row(&row.row_id, cx);
+            m.open_cleanup(cx);
+        });
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.set_permanent(true, cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            let Some(Cleanup::Confirm { plan, permanent }) = &m.cleanup else {
+                panic!("expected the confirm dialog, got {:?}", m.cleanup);
+            };
+            assert_eq!((*permanent, plan.trash_total), (true, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn copy_script_puts_the_script_on_the_clipboard(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.copy_script(cx));
+        cx.run_until_parked();
+        let text = cx
+            .read_from_clipboard()
+            .and_then(|c| c.text())
+            .unwrap_or_default();
+        assert!(
+            text.starts_with("#!/bin/bash\nset -euo pipefail\n"),
+            "{text}"
+        );
     }
 }
