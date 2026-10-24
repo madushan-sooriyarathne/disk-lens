@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
+use crate::cleanup::model::CleanupPlan;
 use crate::config::Config;
-use crate::platform::{Facts, MacSystem, ProcessRunner, Runner, System};
+use crate::platform::{Facts, MacSystem, MacTrash, ProcessRunner, Runner, System, Trash};
 use crate::recommend::build::Analysis;
 use crate::rules::guards::Env;
 use crate::rules::tools::Tools;
@@ -12,6 +14,8 @@ use crate::scanner::tree::Snapshot;
 
 /// Read-only probes (`git status`, `simctl list`, `docker system df`) give up after this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Cleanup commands (`brew cleanup`, `docker system prune`) give up after this (S-05).
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// A snapshot and its analysis; they are always replaced together.
 pub struct Current {
@@ -25,6 +29,11 @@ pub struct AppState {
     pub current: RwLock<Option<Arc<Current>>>,
     /// Cancel flag of the running scan, if any. Only one scan runs at a time.
     pub scan: Mutex<Option<Arc<AtomicBool>>>,
+    /// Plans by `plan_id`, for the current snapshot only; any new snapshot clears them.
+    pub plans: Mutex<HashMap<String, CleanupPlan>>,
+    pub plan_seq: AtomicU64,
+    /// A cleanup is running. Scans and other cleanups wait for it.
+    pub cleaning: AtomicBool,
     pub machine: Machine,
 }
 
@@ -35,6 +44,9 @@ impl AppState {
             config,
             current: RwLock::new(None),
             scan: Mutex::new(None),
+            plans: Mutex::new(HashMap::new()),
+            plan_seq: AtomicU64::new(0),
+            cleaning: AtomicBool::new(false),
             machine,
         }
     }
@@ -43,7 +55,11 @@ impl AppState {
 /// The running processes, command runner and tools the rules engine consults.
 pub struct Machine {
     pub system: Box<dyn System>,
+    /// Read-only probes for guards and providers.
     pub runner: Box<dyn Runner>,
+    /// Cleanup commands.
+    pub commands: Box<dyn Runner>,
+    pub trash: Box<dyn Trash>,
     /// The real home folder, where tools and their config live.
     home: PathBuf,
     sandbox: bool,
@@ -60,6 +76,11 @@ impl Machine {
                 timeout: PROBE_TIMEOUT,
                 home: home.display().to_string(),
             }),
+            commands: Box::new(ProcessRunner {
+                timeout: COMMAND_TIMEOUT,
+                home: home.display().to_string(),
+            }),
+            trash: Box::new(MacTrash),
             home,
             sandbox: config.scan_root.is_some(),
             tools: OnceLock::new(),
