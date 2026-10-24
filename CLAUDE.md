@@ -74,3 +74,31 @@ UI (`src/ui/`, GPUI):
 | `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release                                                                         |
 | `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens` |
 | `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows                                                                                       |
+
+## Workflow
+
+- Run `cargo check --all-targets` after a series of code changes; the full gate is in Commands.
+- Fix the root cause, not the symptom.
+- When unsure about approach, use plan mode (`Shift+Tab`) before coding.
+
+## Don'ts
+
+- Don't hand-edit generated files; regenerate them.
+
+# Communication style
+
+Caveman mode (`caveman` skill): terse replies, technical substance intact. Switch with `/caveman lite|full|ultra`; say "stop caveman" to revert.
+
+# Build discipline
+
+Ponytail mode (`ponytail` skill): smallest working change, reuse before writing. Switch with `/ponytail lite|full|ultra`; say "stop ponytail" to revert.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

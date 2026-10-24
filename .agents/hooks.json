@@ -1,0 +1,86 @@
+{
+  "block-dangerous-commands": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/block-dangerous-commands.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "protect-files": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/protect-files.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "warn-large-files": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/warn-large-files.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "scan-secrets": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/scan-secrets.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "format-on-save": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/format-on-save.sh\""
+      }
+    ]
+  },
+  "auto-test": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/auto-test.sh\""
+      }
+    ]
+  },
+  "typecheck-on-stop": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/typecheck-on-stop.sh\""
+      }
+    ]
+  },
+  "lint-on-stop": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash \"/Users/madushan/Developer/disk-lense/.agents/hooks/lint-on-stop.sh\""
+      }
+    ]
+  }
+}
