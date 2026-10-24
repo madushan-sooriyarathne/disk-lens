@@ -1,0 +1,274 @@
+//! Full-window states (idle, scanning, error) and the notice banner.
+
+use std::time::Duration;
+
+use gpui::{
+    Animation, AnimationExt, Context, Div, FontWeight, Hsla, Stateful, Window, div, ease_in_out,
+    prelude::*, px, relative, rgb,
+};
+
+use super::format::format_bytes;
+use super::model::AppModel;
+use super::theme::{self, Theme};
+
+const CARD_WIDTH: f32 = 480.;
+/// Tailwind `red-600`, the error text color.
+const ERROR_TEXT: u32 = 0xdc2626;
+
+/// Centered 480 px card (`m-auto w-[480px] rounded-xl border p-6`).
+fn centered(t: &Theme, content: Div) -> Div {
+    div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            content
+                .w(px(CARD_WIDTH))
+                .p_6()
+                .rounded(px(12.))
+                .border_1()
+                .border_color(t.card_border)
+                .bg(t.card),
+        )
+}
+
+fn title(text: &'static str) -> Div {
+    div()
+        .text_size(px(15.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(text)
+}
+
+/// The Tailwind `mt-5 rounded-lg px-4 py-1.5 text-[13px] font-medium` button.
+fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .mt_5()
+        .px_4()
+        .py(px(6.))
+        .rounded_lg()
+        .text_size(px(13.))
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .child(label)
+}
+
+fn message(
+    t: Theme,
+    heading: &'static str,
+    body: String,
+    body_color: Hsla,
+    action: &'static str,
+    cx: &mut Context<AppModel>,
+) -> Div {
+    let go = button("scan", action)
+        .bg(t.text)
+        .text_color(t.card)
+        .on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)));
+    let body = div()
+        .mt(px(6.))
+        .text_size(px(13.))
+        .text_color(body_color)
+        .child(body);
+    centered(
+        &t,
+        div()
+            .child(title(heading))
+            .child(body)
+            .child(div().flex().child(go)),
+    )
+}
+
+/// No scan yet, or a cancelled first scan.
+pub fn idle(
+    model: &mut AppModel,
+    window: &mut Window,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    let t = theme::current(window);
+    let body = model.error.clone().unwrap_or_else(|| {
+        "DiskLens reads folder sizes only. It never opens your files and removes nothing until you choose."
+            .into()
+    });
+    message(
+        t,
+        "Scan your home folder",
+        body,
+        t.muted,
+        "Scan home folder",
+        cx,
+    )
+}
+
+pub fn scanning(
+    model: &mut AppModel,
+    window: &mut Window,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    let t = theme::current(window);
+    let p = &model.progress;
+    let (_, bar) = theme::category_colors("code_projects");
+    let stat = |label: &'static str, value: String| {
+        div()
+            .flex_1()
+            .child(div().text_size(px(13.)).text_color(t.muted).child(label))
+            .child(
+                div()
+                    .font_family(theme::MONO)
+                    .text_size(px(22.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(value),
+            )
+    };
+    let current = if p.current.is_empty() {
+        "Starting…".to_string()
+    } else {
+        p.current.clone()
+    };
+    // `slide`: the third-width bar runs from -100% to 300% of its own width.
+    let slider = div()
+        .h_full()
+        .w(relative(1. / 3.))
+        .rounded_full()
+        .bg(bar)
+        .with_animation(
+            "scan-slide",
+            Animation::new(Duration::from_millis(1200))
+                .repeat()
+                .with_easing(ease_in_out),
+            |bar, d| bar.ml(relative((-1. + 4. * d) / 3.)),
+        );
+    let cancel = button("cancel", "Cancel")
+        .border_1()
+        .border_color(t.card_border)
+        .hover(|s| s.bg(t.bg))
+        .on_click(cx.listener(|this, _, _, cx| this.cancel_scan(cx)));
+    centered(
+        &t,
+        div()
+            .child(title("Scanning…"))
+            .child(
+                div()
+                    .mt(px(4.))
+                    .h(px(4.))
+                    .overflow_hidden()
+                    .rounded_full()
+                    .bg(t.bg)
+                    .child(slider),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .flex()
+                    .gap_4()
+                    .child(stat("Files counted", group_digits(p.files)))
+                    .child(stat("Size so far", format_bytes(p.bytes))),
+            )
+            .child(
+                div()
+                    .mt_4()
+                    .truncate()
+                    .font_family(theme::MONO)
+                    .text_xs()
+                    .text_color(t.muted)
+                    .child(current),
+            )
+            .child(div().flex().child(cancel)),
+    )
+}
+
+pub fn error(
+    model: &mut AppModel,
+    window: &mut Window,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    let t = theme::current(window);
+    let body = model
+        .error
+        .clone()
+        .unwrap_or_else(|| "Something went wrong.".into());
+    message(
+        t,
+        "Scan failed",
+        body,
+        rgb(ERROR_TEXT).into(),
+        "Try again",
+        cx,
+    )
+}
+
+/// Notice above the stat cards: a cancelled rescan, or unreadable folders. Empty otherwise.
+pub fn banner(
+    model: &mut AppModel,
+    window: &mut Window,
+    _cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    let t = theme::current(window);
+    let unreadable = model.meta.as_ref().map_or(0, |m| m.inaccessible_count);
+    let text = model
+        .error
+        .clone()
+        .or_else(|| unreadable_notice(unreadable));
+    match text {
+        None => div(),
+        Some(text) => div()
+            .px_4()
+            .py_2()
+            .rounded_lg()
+            .border_1()
+            .border_color(t.review)
+            .bg(t.review_fill)
+            .text_size(px(13.))
+            .child(text),
+    }
+}
+
+fn unreadable_notice(n: u32) -> Option<String> {
+    (n > 0).then(|| {
+        let noun = if n == 1 { "folder" } else { "folders" };
+        format!("{n} {noun} couldn't be read. Granting Full Disk Access lets DiskLens see them.")
+    })
+}
+
+/// `Number.toLocaleString()` for en-US: `1,234,567`.
+fn group_digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_digits() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1000), "1,000");
+        assert_eq!(group_digits(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn unreadable_notice_pluralizes() {
+        assert_eq!(unreadable_notice(0), None);
+        assert!(
+            unreadable_notice(1)
+                .unwrap()
+                .starts_with("1 folder couldn't")
+        );
+        assert!(
+            unreadable_notice(3)
+                .unwrap()
+                .starts_with("3 folders couldn't")
+        );
+    }
+}

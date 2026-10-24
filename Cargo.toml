@@ -1,0 +1,43 @@
+[package]
+name = "disklens"
+version = "0.1.0"
+description = "macOS disk space analyzer and safe cleaner"
+authors = ["Madushan"]
+edition = "2024"
+default-run = "disklens"
+
+[lib]
+name = "disklens_lib"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jwalk = "0.9.0"
+rayon = "1.12.0"
+zstd = "0.14.3"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+libc = "0.2.191"
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSURL", "NSString", "NSArray", "NSDictionary", "NSError", "NSValue", "NSObject", "NSEnumerator"] }
+toml = "1.1.8"
+globset = "0.4.20"
+wait-timeout = "0.2.1"
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication"] }
+# GPUI ships as exact snapshots of Zed's crates; bump both together in their own commit.
+gpui = { package = "gpui-pre", version = "=0.3.9" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }

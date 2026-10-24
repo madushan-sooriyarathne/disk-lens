@@ -2,6 +2,63 @@
 
 Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 
+## Status and roadmap (as of 2026-10-23)
+
+| Phase | State | Notes |
+|-------|-------|-------|
+| 0 Scaffold | Done | |
+| 1 Scanner | Done | Within 1% of `du -skx`; full home scan of 3.8M files in about 31 s, peak about 444 MB |
+| 2 Explorer UI | Done, approved | |
+| 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. The UI review moves to the GPUI build (Phase 3.5) |
+| 3.5 GPUI migration | Done, awaiting review | Tauri and React replaced by GPUI on branch `gpui-migration`. Interactions still need a check in the native window (see What is left) |
+| 4 Cleanup engine | Not started, after 3.5 | Needs a task breakdown approved in plan mode first |
+| 5 Permissions, persistence, polish | Not started | |
+| 6 Packaging and release | Not started | |
+
+Last gate run (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (188 tests) all pass.
+
+### What is left
+
+**Phase 3.5 review**
+- Check in the native window what screenshots could not: drill-down, breadcrumb, Esc (closes the menu, then the drawer, then goes up), mode toggle, Rescan, tile tooltip, right-click menu, row and item checkboxes, Select safe, drawer open and close, Reveal in Finder, window resize, scan progress animation, and the idle screen.
+- Mockup differences to decide: "92.0 GB" vs "92 GB" in Free after cleanup, and "up to 9.0 GB" vs "~9.0 GB" for estimates (both come from the size formatter, unchanged from the React app); check marks and arrows are text glyphs, not icons.
+- The drawer shows "Loading details…" forever if loading details fails; the model only logs the error.
+
+**Phase 4: cleanup engine** (section 5, Phase 4)
+- Add the `trash` and `shell-escape` crates.
+- `cleanup/protected.rs`: add the remaining RULES.md section 5 checks (it only has the list and the equality test today).
+- New modules `cleanup/plan.rs`, `revalidate.rs`, `execute.rs`, `script.rs`, `audit.rs`. The `CleanupPlan` and `CleanupEvent` contracts from section 3 are not defined yet.
+- Commands `build_cleanup_plan`, `export_script`, `execute_cleanup`. Plans are invalidated by any rescan.
+- Audit log at `~/Library/Logs/DiskLens/cleanup.log` (S-07), honouring dry run (S-08).
+- UI: `src/ui/cleanup.rs` (confirm dialog, progress, results). Enable Copy script and Clean selected in the footer of `src/ui/recommendations.rs` (disabled today). Toast for Copy script. Rescan the affected parent folders after cleanup.
+- `tests/cleanup_adversarial.rs` (every case in Phase 4 step 8) and `tests/script.rs`.
+- `docs/QA.md` manual checklist (section 6).
+- One supervised real run on the npm cache, only when the user says so.
+
+**Phase 5: permissions, persistence, polish**
+- `check_permissions` and `open_fda_settings` backend functions, an onboarding screen in `src/ui/screens.rs`, FDA recheck on window focus (PRD 7.8).
+- `settings.json` in Application Support (PRD 7.9). Nothing reads or writes it yet.
+- Dark mode tokens in `src/ui/theme.rs` (light tokens exist, no dark values), chosen from `window.appearance()`.
+- Keyboard navigation for tiles and rows, VoiceOver labels, focus rings, WCAG AA contrast check.
+- Performance pass on a synthetic 2M-file tree: peak memory under 400 MB (the real 3.8M-file scan peaked at about 444 MB), treemap layout under 16 ms for 400 tiles.
+- Already done from this phase: "Scanned X ago" with Rescan, and the inaccessible-folders banner. Verify both against the acceptance checks.
+- Decide how G2 is met: only rule-matched rows carry a description today. Nodes of 1 GB or more without a rule have a category but no one-line description. Options: a description per `[[category]]` in `rules.toml` (with the matching RULES.md change), or narrow G2.
+
+**Phase 6: packaging and release**
+- Final icon, bundle identifier (placeholder today) and version 1.0.0.
+- Hardened runtime, Developer ID signing and notarization.
+- Universal build and DMG, bundle under 25 MB.
+- Packaging without Tauri: build the `.app` and DMG and add signed updates on GitHub Releases. `cargo-packager` (bundler plus updater) is the first candidate; confirm against its docs in this phase. Needs a GitHub remote; nothing is pushed yet.
+- PRD section 12 release criteria, including launch on a clean macOS 13 machine.
+
+**Housekeeping**
+- The `_note` in `assets/mock/snapshot.mock.json` still says blocked states arrive with Phase 3. Update it or add a blocked item to the mock.
+- `platform/` is one `mod.rs` with the `System` and `Runner` traits. Phase 5 adds FDA code there.
+
+### After v1
+
+PRD section 13 lists the v2 candidates: large and old files finder, duplicate finder, clone-aware sizes, menu bar indicator, scheduled safe-tier cleanup, and a user-editable rules file.
+
 ## 0. Working agreement
 
 - The three documents in `docs/` are the source of truth. If they conflict or something is unclear, ask before guessing.
@@ -17,22 +74,20 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 
 | Layer | Choice |
 |-------|--------|
-| Shell | Tauri v2, macOS only, minimum macOS 13 |
-| Backend | Rust stable, edition 2024 |
-| Frontend | React 19, TypeScript (strict), Vite |
-| Styling | Tailwind CSS v4 via `@tailwindcss/vite`; CSS tokens for colors and dark mode |
-| State | zustand |
-| Treemap | `d3-hierarchy` (`treemapSquarify`), rendered as positioned divs |
-| Fonts | `@fontsource-variable/geist`, `@fontsource-variable/geist-mono` |
-| Icons | `lucide-react` |
-| Tooling | pnpm, Biome v2, Vitest |
-| Type bridge | `ts-rs` generating TS types into `src/lib/bindings/` |
+| Platform | macOS only, minimum macOS 13 |
+| Language | Rust stable (pinned in `rust-toolchain.toml`), edition 2024. One crate at the repo root |
+| UI | GPUI, Zed's GPU UI framework: `gpui-pre` and `gpui-pre-platform` pinned to an exact snapshot version (`=0.3.9`), imported as `gpui` and `gpui_platform`. No component library |
+| Styling | Theme tokens in `src/ui/theme.rs`; category colors come from `rules.toml` |
+| State | One GPUI entity, `AppModel` (`src/ui/model.rs`) |
+| Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
+| Fonts | Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/` |
+| Tooling | cargo (`fmt`, `clippy`, `test`) |
 
 **Rust crates**
 
 | Purpose | Crates |
 |---------|--------|
-| App shell | `tauri` |
+| UI | `gpui`, `gpui_platform` |
 | Serialization | `serde`, `serde_json`, `toml`, `zstd` |
 | Rule matching | `globset` |
 | Scanning | `jwalk`, `rayon`, `libc` |
@@ -50,40 +105,34 @@ Git operations shell out to the `git` binary.
 
 ```
 disklens/
+  Cargo.toml, rust-toolchain.toml, CLAUDE.md
   docs/                 PRD.md, RULES.md, PLAN.md
-  CLAUDE.md
   scripts/
     make-fixture.sh     builds .sandbox/home with realistic and adversarial cases
-  src-tauri/
-    rules/rules.toml
-    src/
-      main.rs, lib.rs, commands.rs, state.rs, error.rs
-      scanner/  walk.rs, tree.rs, hardlinks.rs, volume.rs, snapshot.rs
-      rules/    model.rs, load.rs, validate.rs, category.rs, matcher.rs, guards.rs, tools.rs
-      providers/ ollama.rs, git_worktrees.rs, simctl.rs, docker.rs
-      recommend/ build.rs
-      cleanup/  protected.rs, plan.rs, revalidate.rs, execute.rs, script.rs, audit.rs
-      platform/ fda.rs, apps.rs, finder.rs
-    tests/      scanner.rs, rules.rs, cleanup_adversarial.rs, script.rs
-    src/bin/scan-bench.rs
+  rules/rules.toml
+  assets/
+    fonts/              Geist, Geist Mono (OFL)
+    mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
+    icons/
   src/
-    main.tsx, App.tsx, styles.css
-    lib/bindings/      generated types
-    lib/api.ts         typed wrappers over invoke and channels
-    lib/format.ts      bytes, relative time
-    lib/treemap.ts     layout helpers
-    store/             scan.ts, selection.ts, view.ts
-    components/
-      StatCards.tsx, Explorer/{Explorer,Treemap,Tile,Breadcrumb,Legend,Tooltip}.tsx
-      Recommendations/{Panel,Row,Footer,DetailDrawer}.tsx
-      Cleanup/{ConfirmDialog,Progress,Results}.tsx
-      Onboarding.tsx, ScanProgress.tsx, Banner.tsx
-    mocks/snapshot.mock.json   matches the mockup numbers
+    main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs
+    scanner/  walk.rs, tree.rs, hardlinks.rs, volume.rs, snapshot.rs
+    rules/    model.rs, load.rs, validate.rs, category.rs, matcher.rs, guards.rs, tools.rs
+    providers/ ollama.rs, git_worktrees.rs, simctl.rs, docker.rs
+    recommend/ build.rs, model.rs
+    cleanup/  protected.rs, plan.rs, revalidate.rs, execute.rs, script.rs, audit.rs
+    platform/ mod.rs
+    ui/       mod.rs, root.rs, model.rs, source.rs, theme.rs, format.rs, stats.rs,
+              selection.rs, treemap.rs, screens.rs, stat_cards.rs, explorer.rs,
+              recommendations.rs, cleanup.rs (Phase 4)
+    bin/scan-bench.rs
+  tests/      scanner.rs, rules.rs, rules_doc_sync.rs, sandbox_rows.rs, view.rs,
+              cleanup_adversarial.rs, script.rs
 ```
 
 ## 3. Data contracts
 
-Rust types derive `Serialize` and `ts_rs::TS`. TypeScript types are generated, never hand-written.
+Rust types derive `Serialize` and `Deserialize` (snapshot persistence and the mock). The UI uses these types directly; there is no separate frontend contract.
 
 ```rust
 pub struct VolumeInfo { pub total: u64, pub available: u64 }
@@ -132,26 +181,28 @@ pub enum CleanupEvent { ItemStarted { item_id: String }, ItemFinished { item_id:
 
 Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for providers). They are valid only for the snapshot that produced them.
 
-## 4. Tauri commands
+## 4. Backend functions
 
 | Command | Input | Output |
 |---------|-------|--------|
 | `check_permissions` | none | `{ full_disk_access: bool }` |
 | `open_fda_settings` | none | none |
 | `load_last_snapshot` | none | `Option<SnapshotMeta>` |
-| `start_scan` | `Channel<ScanEvent>` | none |
+| `start_scan` | `on_event: FnMut(ScanEvent)` | none |
 | `cancel_scan` | none | none |
 | `get_view` | `{ node_path: string, mode: ViewMode }` | `ViewNode` (root plus two levels, pruned) |
 | `get_recommendations` | none | `Vec<Recommendation>` |
 | `get_item_details` | `{ row_id }` | `{ items, largest_subfolders }` |
 | `build_cleanup_plan` | `{ item_ids, permanent_review: bool }` | `CleanupPlan` |
 | `export_script` | `{ plan_id }` | `String` |
-| `execute_cleanup` | `{ plan_id, channel: Channel<CleanupEvent> }` | none |
+| `execute_cleanup` | `{ plan_id, on_event: FnMut(CleanupEvent) }` | none |
 | `reveal_in_finder` | `{ item_id or node_path }` | none (only paths inside the snapshot) |
 
-Long work runs on blocking threads (`tauri::async_runtime::spawn_blocking`). Shared state lives in a `Mutex`/`RwLock` inside Tauri managed state.
+These are plain functions in `src/backend.rs` taking `&Arc<AppState>`. The UI calls them through `src/ui/source.rs`, off the UI thread (`cx.background_spawn`); scans and cleanups run on their own thread and report through the callback. Shared state lives in a `Mutex`/`RwLock` inside `AppState`.
 
 ## 5. Phases
+
+Phases 0 to 3 were built on Tauri and React. Their steps are kept as history; Phase 3.5 replaced that stack with GPUI.
 
 ### Phase 0: Scaffold
 
@@ -178,7 +229,7 @@ Long work runs on blocking threads (`tauri::async_runtime::spawn_blocking`). Sha
 2. `hardlinks.rs`: for files with `st_nlink > 1`, record `(dev, ino) → (smallest path, size)`, then credit each inode once after the walk.
 3. `tree.rs`: arena `Vec<DirNode>` with path interning, bottom-up aggregation, top 20 files per directory.
 4. `volume.rs` reads capacity through `NSURL` resource values, falling back to `statfs`.
-5. Progress is throttled to 100 ms over a Tauri `Channel`. Cancellation uses an `AtomicBool` checked inside the walk.
+5. Progress is throttled to 100 ms and reported through a callback. Cancellation uses an `AtomicBool` checked inside the walk.
 6. `snapshot.rs` saves and loads zstd-compressed JSON in Application Support.
 7. Add the `start_scan`, `cancel_scan` and `load_last_snapshot` commands.
 8. Add a `scan-bench` binary that scans a path, prints duration, files, directories and size, and compares the result with `du -sk`.
@@ -205,7 +256,7 @@ Long work runs on blocking threads (`tauri::async_runtime::spawn_blocking`). Sha
 **Acceptance:**
 - With mock data, a screenshot is compared side by side with the mockup and differences are listed.
 - Drill-down and breadcrumb work on a real scan.
-- `lib/treemap.ts` helpers have Vitest tests.
+- Treemap helpers have unit tests. (Since Phase 3.5: `src/ui/treemap.rs`, and the mock runs with `DISKLENS_MOCK=preselect cargo run`.)
 - No layout work runs on hover.
 
 ### Phase 3: Rules engine and recommendations
@@ -224,6 +275,21 @@ Long work runs on blocking threads (`tauri::async_runtime::spawn_blocking`). Sha
 - Validation tests reject malformed TOML.
 - The sandbox produces the expected rows and totals.
 - A test asserts the hardcoded and TOML protect lists are equal.
+
+### Phase 3.5: GPUI migration
+
+Replaces the Tauri shell and the React frontend with GPUI, before Phase 4 so the cleanup UI is built once.
+
+1. Spike: GPUI window with Geist, a hatched tile, tooltip and context menu; release binary 5.2 MB (arm64). Done.
+2. Docs, then restructure into one crate at the repo root (`src-tauri/` removed, React kept in `legacy-web/` as a reference until the end).
+3. `commands.rs` becomes `backend.rs` (plain functions, scan progress through a callback).
+4. GPUI skeleton with frozen module interfaces in `src/ui/`, then the pure logic (format, stats, selection, treemap, theme, model) and the views (screens, stat cards, explorer, recommendations) are ported from the React app.
+5. Delete `legacy-web/`.
+
+**Acceptance:**
+- The Vitest suite is ported to Rust unit tests, and `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass.
+- The mock (`DISKLENS_MOCK=preselect`) is compared side by side with the mockup, and differences are listed.
+- Phase 2 and 3 behaviour works on a sandbox scan in the native window.
 
 ### Phase 4: Cleanup engine
 
@@ -270,22 +336,22 @@ Long work runs on blocking threads (`tauri::async_runtime::spawn_blocking`). Sha
 ### Phase 6: Packaging and release
 
 1. App icon, final bundle identifier, version 1.0.0.
-2. Hardened runtime, no sandbox, Developer ID signing and notarization through Tauri's Apple environment variables.
+2. Hardened runtime, no sandbox, Developer ID signing (`codesign`) and notarization (`notarytool`).
 3. Universal build (`--target universal-apple-darwin`) and DMG.
-4. Tauri updater plugin with signed updates published to GitHub Releases.
+4. Signed updates published to GitHub Releases (tool chosen in this phase, see Status).
 
 **Acceptance:** PRD section 12 release criteria are all met.
 
 ## 6. Testing strategy
 
-- **Rust unit tests** sit next to each module. Integration tests in `src-tauri/tests/` run against temp directories built from the fixture script logic.
-- **Frontend:** Vitest for selectors, formatters and treemap helpers. Components stay thin, so most logic is testable without rendering.
+- **Rust unit tests** sit next to each module. Integration tests in `tests/` run against temp directories built from the fixture script logic.
+- **UI:** unit tests for stats, selection, formatting, treemap layout and theme, plus `AppModel` transitions on GPUI's `TestAppContext` with the mock source. Views stay thin, so most logic is testable without rendering.
 - **Manual QA checklist** lives in `docs/QA.md`, created in Phase 4: scan, drill-down, select, export, dry run, real run on the sandbox, and relaunch.
-- CI is not required for v1. Every phase ends with `pnpm lint && pnpm test && cargo test` passing locally.
+- CI is not required for v1. Every phase ends with `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` passing locally.
 
 ## 7. Definition of done (every task)
 
-- Code compiles with no warnings (`cargo clippy -- -D warnings`, `pnpm lint`).
+- Code is formatted and compiles with no warnings (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`).
 - Tests for the new behavior exist and pass.
 - No TODOs left in safety-related code (`cleanup/`, `rules/guards.rs`, `rules/matcher.rs`).
 - Docs are updated if behavior or rules changed.

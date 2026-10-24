@@ -2,7 +2,7 @@
 
 Version 1.0 · Companion to `docs/PRD.md` and `docs/PLAN.md`
 
-This document defines how DiskLens decides what a folder is, which color it gets, whether it can be cleaned, and how. The TOML in section 7 is the starter `src-tauri/rules/rules.toml`. Any change to that file must update this document and its tests in the same commit.
+This document defines how DiskLens decides what a folder is, which color it gets, whether it can be cleaned, and how. The TOML in section 7 is the starter `rules/rules.toml`. Any change to that file must update this document and its tests in the same commit.
 
 ## 1. Principles
 
@@ -132,7 +132,7 @@ The scan root itself is not checked for project markers, so a dotfiles repositor
 
 **Fallback:** if nothing hits, the node is `documents_media` when at least 60% of its bytes are in `media_extensions`, and `dev_tools` otherwise.
 
-## 7. Starter rules (`src-tauri/rules/rules.toml`)
+## 7. Starter rules (`rules/rules.toml`)
 
 ```toml
 schema_version = 1
@@ -606,10 +606,10 @@ method = "delete"
 
 ## 8. Adding or changing a rule
 
-1. Add or edit the `[[rule]]` in `src-tauri/rules/rules.toml` and copy the change into section 7 of this document.
+1. Add or edit the `[[rule]]` in `rules/rules.toml` and copy the change into section 7 of this document.
 2. Choose the tier conservatively (principle 5).
 3. Add fixture paths to `scripts/make-fixture.sh`.
-4. Add table-driven tests in `src-tauri/tests/rules.rs`:
+4. Add table-driven tests in `tests/rules.rs`:
    - at least one path that matches
    - one that must not match (an exclude or a guard)
    - an overlap test if the rule shares a parent with another rule
