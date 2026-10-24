@@ -82,7 +82,7 @@ impl Protected {
         }
         match std::fs::canonicalize(path) {
             Ok(c) if c == path => {}
-            Ok(_) => return Some("its path now goes through a symlink".into()),
+            Ok(_) => return Some("is reached through a symlink".into()),
             Err(e) => return Some(format!("cannot be resolved ({e})")),
         }
         let Ok(rel) = path.strip_prefix(&self.root) else {
@@ -254,7 +254,7 @@ mod refusal_tests {
         symlink(h.root.join("real"), h.root.join("link")).unwrap();
         assert_eq!(
             h.refusal("link/cache").as_deref(),
-            Some("its path now goes through a symlink")
+            Some("is reached through a symlink")
         );
     }
 
