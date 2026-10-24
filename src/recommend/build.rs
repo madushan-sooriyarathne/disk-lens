@@ -29,6 +29,8 @@ pub struct Item {
     pub rule: usize,
     pub name: String,
     pub path: PathBuf,
+    /// The folder the rule matched; a provider's items live inside it.
+    pub matched: PathBuf,
     pub size: u64,
     pub node: Option<u32>,
     pub main_repo: Option<PathBuf>,
@@ -81,6 +83,7 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 rule: m.rule,
                 name: f.name,
                 path: f.path,
+                matched: path.clone(),
                 size: f.size,
                 node: f.node,
                 main_repo: f.main_repo,

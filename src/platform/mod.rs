@@ -46,6 +46,24 @@ pub trait Runner: Send + Sync {
     fn run(&self, program: &Path, args: &[&str]) -> io::Result<Output>;
 }
 
+/// Moves files to the Trash.
+pub trait Trash: Send + Sync {
+    fn trash(&self, path: &Path) -> io::Result<()>;
+}
+
+/// `NSFileManager.trashItem`: no Finder automation prompt and no sound.
+pub struct MacTrash;
+
+impl Trash for MacTrash {
+    fn trash(&self, path: &Path) -> io::Result<()> {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut ctx = trash::TrashContext::new();
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+        ctx.delete(path)
+            .map_err(|e| io::Error::other(format!("{}: {e}", path.display())))
+    }
+}
+
 /// `sysinfo` for processes, `NSWorkspace.runningApplications` for apps.
 pub struct MacSystem;
 
@@ -160,6 +178,21 @@ impl FakeSystem {
 impl System for FakeSystem {
     fn facts(&self) -> Facts {
         self.0.lock().expect("fake facts").clone()
+    }
+}
+
+/// Moves trashed paths into `dir`, keeping their file names.
+#[derive(Debug)]
+pub struct FakeTrash {
+    pub dir: std::path::PathBuf,
+}
+
+impl Trash for FakeTrash {
+    fn trash(&self, path: &Path) -> io::Result<()> {
+        let name = path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+        std::fs::rename(path, self.dir.join(name))
     }
 }
 
