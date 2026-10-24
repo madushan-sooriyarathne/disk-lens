@@ -7,3 +7,4 @@ pub mod model;
 pub mod plan;
 pub mod protected;
 pub mod revalidate;
+pub mod script;
