@@ -30,6 +30,8 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 # GPUI ships as exact snapshots of Zed's crates; bump both together in their own commit.
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders"] }
+trash = "5.2.9"
+shell-escape = "0.1.5"
 
 [profile.release]
 codegen-units = 1
