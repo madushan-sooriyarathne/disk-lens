@@ -106,6 +106,8 @@ pub struct AppModel {
     /// Bumped per toast, so an older toast's timer does not hide a newer one.
     toast_seq: u64,
     _activation: Subscription,
+    /// Repaints when macOS switches between light and dark.
+    _appearance: Subscription,
 }
 
 /// Runs `work` against the source off the UI thread, then hands the result to
@@ -154,6 +156,7 @@ impl AppModel {
                 this.refresh(cx);
             }
         });
+        let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
         let source = Arc::new(source);
         // Onboarding first when access is missing and was never dismissed.
         off_thread(
@@ -196,6 +199,7 @@ impl AppModel {
             cleanup_task: None,
             toast_seq: 0,
             _activation: activation,
+            _appearance: appearance,
         }
     }
 

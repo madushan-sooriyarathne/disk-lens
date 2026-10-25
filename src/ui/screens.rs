@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt, Context, Div, FontWeight, Hsla, Stateful, Window, div, ease_in_out,
-    prelude::*, px, relative, rgb,
+    prelude::*, px, relative,
 };
 
 use super::format::format_bytes;
@@ -12,8 +12,6 @@ use super::model::AppModel;
 use super::theme::{self, Theme};
 
 const CARD_WIDTH: f32 = 480.;
-/// Tailwind `red-600`, the error text color.
-const ERROR_TEXT: u32 = 0xdc2626;
 
 /// Centered 480 px card (`m-auto w-[480px] rounded-xl border p-6`).
 fn centered(t: &Theme, content: Div) -> Div {
@@ -149,7 +147,7 @@ pub fn scanning(
 ) -> impl IntoElement {
     let t = theme::current(window);
     let p = &model.progress;
-    let (_, bar) = theme::category_colors("code_projects");
+    let (_, bar) = theme::category_colors(&t, "code_projects");
     let stat = |label: &'static str, value: String| {
         div()
             .flex_1()
@@ -229,14 +227,7 @@ pub fn error(
         .error
         .clone()
         .unwrap_or_else(|| "Something went wrong.".into());
-    message(
-        t,
-        "Scan failed",
-        body,
-        rgb(ERROR_TEXT).into(),
-        "Try again",
-        cx,
-    )
+    message(t, "Scan failed", body, t.error, "Try again", cx)
 }
 
 /// Notice above the stat cards: a cancelled rescan, or unreadable folders. Empty otherwise.

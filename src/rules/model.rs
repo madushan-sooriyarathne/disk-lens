@@ -28,6 +28,9 @@ pub struct Category {
     pub description: String,
     pub fill: String,
     pub border: String,
+    /// Dark mode colors (PRD section 9).
+    pub fill_dark: String,
+    pub border_dark: String,
     #[serde(default)]
     pub markers: Vec<String>,
     #[serde(default)]

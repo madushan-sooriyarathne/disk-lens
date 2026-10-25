@@ -32,6 +32,14 @@ pub fn validate(r: &Rules) -> Vec<String> {
         if c.description.trim().is_empty() {
             errors.push(format!("category `{}`: empty description", c.id));
         }
+        for color in [&c.fill, &c.border, &c.fill_dark, &c.border_dark] {
+            if !is_hex_color(color) {
+                errors.push(format!(
+                    "category `{}`: color `{color}` must be #RRGGBB",
+                    c.id
+                ));
+            }
+        }
         for p in &c.paths {
             if !p.starts_with("~/") {
                 errors.push(format!(
@@ -128,6 +136,11 @@ fn check_placeholders(errors: &mut Vec<String>, at: &str, arg: &str) {
     }
 }
 
+/// `#RRGGBB`, the only color form the theme parses.
+fn is_hex_color(s: &str) -> bool {
+    s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::rules::model::Rules;
@@ -142,6 +155,8 @@ label = "Package caches"
 description = "Caches"
 fill = "#000000"
 border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
 paths = ["~/.npm"]
 
 [[category]]
@@ -150,6 +165,8 @@ label = "Media"
 description = "Media"
 fill = "#000000"
 border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
 
 [[category]]
 id = "dev_tools"
@@ -157,6 +174,8 @@ label = "Other"
 description = "Other"
 fill = "#000000"
 border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
 
 [[protect]]
 path = "~/.ssh"
@@ -258,6 +277,16 @@ method = "trash"
             Rules::parse(&r)
                 .unwrap_err()
                 .contains("unknown category `nope`")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_category_color() {
+        let r = BASE.replacen("fill_dark = \"#000000\"", "fill_dark = \"#12345\"", 1);
+        assert!(
+            Rules::parse(&r)
+                .unwrap_err()
+                .contains("category `package_caches`: color `#12345` must be #RRGGBB")
         );
     }
 

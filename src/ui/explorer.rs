@@ -423,7 +423,7 @@ fn legend(t: Theme) -> impl IntoElement {
                     div()
                         .size(px(10.))
                         .rounded(px(3.))
-                        .bg(theme::category_colors(id).1),
+                        .bg(theme::category_colors(&t, id).1),
                 )
                 .child(theme::category_label(id))
         }))

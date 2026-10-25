@@ -4,7 +4,7 @@
 
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, Window, deferred, div, prelude::*, px,
-    relative, rgb,
+    relative,
 };
 
 use super::format::{format_bytes, format_size};
@@ -15,8 +15,6 @@ use super::theme::{self, MONO, Theme};
 use crate::cleanup::model::{CleanupPlan, CleanupSummary, PlannedAction, PlannedMethod};
 
 const WIDTH: f32 = 520.;
-/// Tailwind `red-600`, as on the error screen.
-const ERROR_TEXT: u32 = 0xdc2626;
 
 /// The dialog for the model's cleanup stage, if one is open.
 pub fn render(
@@ -356,7 +354,7 @@ fn results(t: &Theme, s: &CleanupSummary, cx: &mut Context<AppModel>) -> Div {
                 div()
                     .mt_1()
                     .text_size(px(12.))
-                    .text_color(rgb(ERROR_TEXT))
+                    .text_color(t.error)
                     .child(format!("{}: {}", item.name, item.reason)),
             );
         }

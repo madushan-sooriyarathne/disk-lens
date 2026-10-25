@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight,
-    SharedString, Stateful, Window, div, ease_out_quint, prelude::*, px, rgb,
+    SharedString, Stateful, Window, div, ease_out_quint, prelude::*, px,
 };
 
 use super::format::{format_bytes, format_size};
@@ -188,14 +188,16 @@ fn blocked_of(item: &RecItem) -> Option<&str> {
 struct Tip(SharedString);
 
 impl Render for Tip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // Inverted colors: dark on light windows, light on dark ones.
+        let t = theme::current(window);
         div()
             .max_w(px(480.))
             .px_2()
             .py_1()
             .rounded_md()
-            .bg(rgb(0x18181b))
-            .text_color(rgb(0xffffff))
+            .bg(t.text)
+            .text_color(t.card)
             .text_size(px(12.))
             .child(self.0.clone())
     }

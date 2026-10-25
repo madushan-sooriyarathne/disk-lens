@@ -128,6 +128,8 @@ Categories drive treemap colors. They are resolved for every node, including nod
 
 Each category has a one-line `description`. A node's tooltip shows its rule's description when a rule matches it, otherwise its category's description, so every node has a category and a one-line description (PRD goal G2).
 
+Colors are `#RRGGBB`: `fill` and `border` in light mode, `fill_dark` and `border_dark` in dark mode.
+
 **Resolution order:** walk from the node up to the root. At each level, check whether the folder has a project marker (`code_projects`) or equals a category `paths` entry. The first hit wins.
 
 The scan root itself is not checked for project markers, so a dotfiles repository in the home folder does not turn every unclaimed folder into a code project. Nodes inside a matched recommendation take that rule's category.
@@ -155,6 +157,8 @@ label = "Code projects"
 description = "Source code, installed dependencies and build output of your projects."
 fill = "#E6E4FB"
 border = "#8E84E8"
+fill_dark = "#2B2850"
+border_dark = "#8E84E8"
 markers = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", "Package.swift", "pubspec.yaml", "build.gradle", "build.gradle.kts", "composer.json", "Gemfile"]
 paths = []
 
@@ -164,6 +168,8 @@ label = "AI models"
 description = "Local AI models and the caches of the tools that download them."
 fill = "#FBDDE6"
 border = "#E58AA7"
+fill_dark = "#45232F"
+border_dark = "#E58AA7"
 markers = []
 paths = ["~/.ollama", "~/.cache/huggingface", "~/.lmstudio", "~/.cache/lm-studio"]
 
@@ -173,6 +179,8 @@ label = "iOS & Android SDKs"
 description = "Xcode and Android data: SDKs, simulators, emulators and build products."
 fill = "#D9EEF4"
 border = "#6FB7CC"
+fill_dark = "#1D3A43"
+border_dark = "#6FB7CC"
 markers = []
 paths = ["~/Library/Android", "~/.android", "~/Library/Developer"]
 
@@ -182,6 +190,8 @@ label = "Package caches"
 description = "Downloads that package managers and apps keep to speed up installs and launches."
 fill = "#DCE5F7"
 border = "#7C9BD8"
+fill_dark = "#22304A"
+border_dark = "#7C9BD8"
 markers = []
 paths = ["~/.npm", "~/.gradle", "~/.cache", "~/.bun", "~/.cargo", "~/.yarn", "~/go/pkg", "~/Library/Caches", "~/Library/pnpm"]
 
@@ -191,6 +201,8 @@ label = "Documents & media"
 description = "Your documents, photos, videos, music and device backups."
 fill = "#FCE6D8"
 border = "#EFA57A"
+fill_dark = "#452C1D"
+border_dark = "#EFA57A"
 markers = []
 paths = ["~/Documents", "~/Pictures", "~/Movies", "~/Music", "~/Downloads", "~/.Trash", "~/Library/Mobile Documents", "~/Library/Application Support/MobileSync"]
 
@@ -200,6 +212,8 @@ label = "Dev tools & other"
 description = "Developer tool settings, app data and anything not in another category."
 fill = "#EEEEF0"
 border = "#C4C4C9"
+fill_dark = "#2A2A2E"
+border_dark = "#5C5C63"
 markers = []
 paths = ["~/.vscode", "~/.cursor", "~/.docker", "~/.claude", "~/.local", "~/.config", "~/Library/Containers/com.docker.docker"]
 
