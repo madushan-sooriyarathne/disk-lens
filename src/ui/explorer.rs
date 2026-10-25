@@ -7,15 +7,17 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point,
-    SharedString, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
+    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Role,
+    SharedString, Toggled, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
 };
 
-use super::format::format_bytes;
+use super::format::{format_age, format_bytes};
 use super::model::AppModel;
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
+use crate::cleanup::audit::now_ms;
+use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
 /// Context menu opened by a right click on a tile.
@@ -107,12 +109,27 @@ fn hatch(color: Hsla, scale: f32) -> gpui::Background {
     pattern_slash(color.opacity(theme::HATCH_OPACITY), 2.0 * s, 5.0 * s)
 }
 
+/// One line on what a tile is: its rule's description, else its category's.
+fn tile_description(node: &ViewNode) -> Option<&'static str> {
+    let rules = Rules::embedded();
+    node.rule_id
+        .as_deref()
+        .and_then(|id| rules.rule(id))
+        .map(|r| r.description.as_str())
+        .or_else(|| {
+            rules
+                .category(&node.category)
+                .map(|c| c.description.as_str())
+        })
+}
+
 /// What the tooltip shows for a tile (Tooltip.tsx).
 struct TooltipView {
     path: SharedString,
     size: String,
     category: &'static str,
-    rule: Option<String>,
+    /// The matching rule's description, else the category's (PRD goal G2).
+    description: Option<&'static str>,
     theme: Theme,
 }
 
@@ -153,7 +170,7 @@ impl Render for TooltipView {
                     )
                     .child(div().text_color(t.muted).child(self.category)),
             )
-            .children(self.rule.clone().map(|r| div().mt_1().child(r)))
+            .children(self.description.map(|d| div().mt_1().child(d)))
     }
 }
 
@@ -211,7 +228,12 @@ pub fn render(
         .border_1()
         .border_color(t.card_border)
         .bg(t.card)
-        .child(header(model.mode, t, cx))
+        .child(header(
+            model.mode,
+            model.meta.as_ref().map(|m| m.scanned_at),
+            t,
+            cx,
+        ))
         .child(breadcrumb(model, t, cx))
         .child(treemap)
         .child(legend(t))
@@ -258,7 +280,15 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
     .size_full()
 }
 
-fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
+/// `scanned_at` is the snapshot time, shown as "Scanned 2 h ago" before Rescan (US-13).
+fn header(
+    mode: ViewMode,
+    scanned_at: Option<i64>,
+    t: Theme,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    // Re-rendered on window focus and every interaction, so the age stays current enough.
+    let age = scanned_at.map(|at| format!("Scanned {}", format_age(now_ms() as i64 / 1000, at)));
     let toggle = [
         (ViewMode::Category, "Category"),
         (ViewMode::Cleanup, "Cleanup"),
@@ -266,8 +296,12 @@ fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElem
     .into_iter()
     .map(|(m, label)| {
         let active = mode == m;
-        div()
-            .id(label)
+        theme::focusable(div().id(label), &t, Role::Button, format!("{label} view"))
+            .aria_toggled(if active {
+                Toggled::True
+            } else {
+                Toggled::False
+            })
             .cursor_pointer()
             .rounded_md()
             .px_3()
@@ -309,9 +343,9 @@ fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElem
                 .flex()
                 .items_center()
                 .gap_2()
+                .children(age.map(|a| div().text_size(px(12.)).text_color(t.muted).child(a)))
                 .child(
-                    div()
-                        .id("rescan")
+                    theme::focusable(div().id("rescan"), &t, Role::Button, "Rescan")
                         .cursor_pointer()
                         .rounded_lg()
                         .px_3()
@@ -342,13 +376,17 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
             div().text_color(t.text).child(c.label).into_any_element()
         } else {
             let path = c.path;
-            div()
-                .id(SharedString::from(path.clone()))
-                .cursor_pointer()
-                .hover(move |s| s.text_color(t.text).underline())
-                .child(c.label)
-                .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
-                .into_any_element()
+            theme::focusable(
+                div().id(SharedString::from(path.clone())),
+                &t,
+                Role::Link,
+                format!("Go to {}", c.label),
+            )
+            .cursor_pointer()
+            .hover(move |s| s.text_color(t.text).underline())
+            .child(c.label)
+            .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
+            .into_any_element()
         };
         sep.into_iter().chain(Some(label))
     });
@@ -392,7 +430,7 @@ fn legend(t: Theme) -> impl IntoElement {
                     div()
                         .size(px(10.))
                         .rounded(px(3.))
-                        .bg(theme::category_colors(id).1),
+                        .bg(theme::category_colors(&t, id).1),
                 )
                 .child(theme::category_label(id))
         }))
@@ -428,10 +466,20 @@ fn tile(
         .border_color(colors.border)
         .bg(colors.fill)
         .occlude()
-        .when(is_dir, |d| {
-            let path = node.path.clone();
-            d.cursor_pointer()
-                .on_click(cx.listener(move |m, _, _, cx| m.navigate(path.clone(), cx)))
+        .map(|d| {
+            let label = format!(
+                "{}, {size}, {}",
+                node.name,
+                theme::category_label(&node.category)
+            );
+            if is_dir {
+                let path = node.path.clone();
+                theme::focusable(d, &t, Role::Button, label)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |m, _, _, cx| m.navigate(path.clone(), cx)))
+            } else {
+                d.role(Role::Label).aria_label(label)
+            }
         })
         .on_mouse_down(MouseButton::Right, {
             let node_id = node.id.clone();
@@ -449,19 +497,13 @@ fn tile(
         let tip_path = SharedString::from(node.path.clone());
         let tip_size = size.clone();
         let tip_category = theme::category_label(&node.category);
-        let tip_rule = node.rule_id.as_ref().and_then(|id| {
-            model
-                .recommendations
-                .iter()
-                .find(|r| &r.rule_id == id)
-                .map(|r| r.label.clone())
-        });
+        let tip_description = tile_description(node);
         tile = tile.tooltip(move |_, cx| {
             cx.new(|_| TooltipView {
                 path: tip_path.clone(),
                 size: tip_size.clone(),
                 category: tip_category,
-                rule: tip_rule.clone(),
+                description: tip_description,
                 theme: t,
             })
             .into()
@@ -636,6 +678,24 @@ mod tests {
             .map(|(i, &s)| leaf(&format!("c{i}"), s))
             .collect();
         v
+    }
+
+    #[test]
+    fn matched_tile_describes_its_rule() {
+        let mut node = leaf("_cacache", 1);
+        node.rule_id = Some("npm-cache".into());
+        assert_eq!(
+            tile_description(&node),
+            Some("Package tarballs and metadata npm keeps to speed up installs.")
+        );
+    }
+
+    #[test]
+    fn unmatched_tile_describes_its_category() {
+        assert_eq!(
+            tile_description(&leaf("misc", 1)),
+            Some("Developer tool settings, app data and anything not in another category.")
+        );
     }
 
     #[test]

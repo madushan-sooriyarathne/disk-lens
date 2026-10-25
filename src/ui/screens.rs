@@ -1,10 +1,10 @@
-//! Full-window states (idle, scanning, error) and the notice banner.
+//! Full-window states (onboarding, idle, scanning, error) and the notice banner.
 
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, Context, Div, FontWeight, Hsla, Stateful, Window, div, ease_in_out,
-    prelude::*, px, relative, rgb,
+    Animation, AnimationExt, Context, Div, FontWeight, Hsla, Role, Stateful, Window, div,
+    ease_in_out, prelude::*, px, relative,
 };
 
 use super::format::format_bytes;
@@ -12,8 +12,6 @@ use super::model::AppModel;
 use super::theme::{self, Theme};
 
 const CARD_WIDTH: f32 = 480.;
-/// Tailwind `red-600`, the error text color.
-const ERROR_TEXT: u32 = 0xdc2626;
 
 /// Centered 480 px card (`m-auto w-[480px] rounded-xl border p-6`).
 fn centered(t: &Theme, content: Div) -> Div {
@@ -42,9 +40,8 @@ fn title(text: &'static str) -> Div {
 }
 
 /// The Tailwind `mt-5 rounded-lg px-4 py-1.5 text-[13px] font-medium` button.
-fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
-    div()
-        .id(id)
+fn button(t: &Theme, id: &'static str, label: &'static str) -> Stateful<Div> {
+    theme::focusable(div().id(id), t, Role::Button, label)
         .mt_5()
         .px_4()
         .py(px(6.))
@@ -63,7 +60,7 @@ fn message(
     action: &'static str,
     cx: &mut Context<AppModel>,
 ) -> Div {
-    let go = button("scan", action)
+    let go = button(&t, "scan", action)
         .bg(t.text)
         .text_color(t.card)
         .on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)));
@@ -78,6 +75,46 @@ fn message(
             .child(title(heading))
             .child(body)
             .child(div().flex().child(go)),
+    )
+}
+
+/// Full Disk Access is missing (US-01, PRD 7.8). The user can continue without it.
+pub fn onboarding(
+    _model: &mut AppModel,
+    window: &mut Window,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    let t = theme::current(window);
+    let bg = t.bg;
+    let open = button(&t, "open-fda", "Open System Settings")
+        .bg(t.text)
+        .text_color(t.card)
+        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx)));
+    let skip = button(&t, "skip-fda", "Continue without access")
+        .border_1()
+        .border_color(t.card_border)
+        .hover(move |s| s.bg(bg))
+        .on_click(cx.listener(|this, _, _, cx| this.continue_without_access(cx)));
+    let body = div()
+        .mt(px(6.))
+        .text_size(px(13.))
+        .text_color(t.muted)
+        .child(
+            "macOS hides folders such as Mail, Safari and other apps' data until you grant Full Disk Access. \
+             Without it, those folders count as unreadable and their sizes are missing. \
+             DiskLens only reads folder sizes and never asks for an administrator password.",
+        )
+        .child(
+            div()
+                .mt_2()
+                .child("In System Settings, turn on DiskLens under Privacy & Security, Full Disk Access, then come back."),
+        );
+    centered(
+        &t,
+        div()
+            .child(title("Allow Full Disk Access"))
+            .child(body)
+            .child(div().flex().gap_2().child(open).child(skip)),
     )
 }
 
@@ -109,7 +146,7 @@ pub fn scanning(
 ) -> impl IntoElement {
     let t = theme::current(window);
     let p = &model.progress;
-    let (_, bar) = theme::category_colors("code_projects");
+    let (_, bar) = theme::category_colors(&t, "code_projects");
     let stat = |label: &'static str, value: String| {
         div()
             .flex_1()
@@ -140,7 +177,7 @@ pub fn scanning(
                 .with_easing(ease_in_out),
             |bar, d| bar.ml(relative((-1. + 4. * d) / 3.)),
         );
-    let cancel = button("cancel", "Cancel")
+    let cancel = button(&t, "cancel", "Cancel")
         .border_1()
         .border_color(t.card_border)
         .hover(|s| s.bg(t.bg))
@@ -189,40 +226,59 @@ pub fn error(
         .error
         .clone()
         .unwrap_or_else(|| "Something went wrong.".into());
-    message(
-        t,
-        "Scan failed",
-        body,
-        rgb(ERROR_TEXT).into(),
-        "Try again",
-        cx,
-    )
+    message(t, "Scan failed", body, t.error, "Try again", cx)
 }
 
 /// Notice above the stat cards: a cancelled rescan, or unreadable folders. Empty otherwise.
 pub fn banner(
     model: &mut AppModel,
     window: &mut Window,
-    _cx: &mut Context<AppModel>,
+    cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
     let unreadable = model.meta.as_ref().map_or(0, |m| m.inaccessible_count);
-    let text = model
-        .error
-        .clone()
-        .or_else(|| unreadable_notice(unreadable));
-    match text {
-        None => div(),
-        Some(text) => div()
-            .px_4()
-            .py_2()
-            .rounded_lg()
-            .border_1()
-            .border_color(t.review)
-            .bg(t.review_fill)
-            .text_size(px(13.))
-            .child(text),
+    // A scan error wins over the unreadable notice; only the latter offers access.
+    let (text, offer_access) = match model.error.clone() {
+        Some(e) => (Some(e), false),
+        None => (unreadable_notice(unreadable), !model.full_disk_access),
+    };
+    let Some(text) = text else {
+        return div();
+    };
+    let banner = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_4()
+        .py_2()
+        .rounded_lg()
+        .border_1()
+        .border_color(t.review)
+        .bg(t.review_fill)
+        .text_size(px(13.))
+        .child(div().flex_1().child(text));
+    if !offer_access {
+        return banner;
     }
+    banner.child(
+        theme::focusable(
+            div().id("grant-fda"),
+            &t,
+            Role::Button,
+            "Grant Full Disk Access",
+        )
+        .flex_none()
+        .px_3()
+        .py_1()
+        .rounded_lg()
+        .border_1()
+        .border_color(t.review)
+        .bg(t.card)
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .child("Grant Full Disk Access")
+        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
+    )
 }
 
 fn unreadable_notice(n: u32) -> Option<String> {

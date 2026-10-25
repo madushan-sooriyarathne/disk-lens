@@ -16,6 +16,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder, Tier};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
+use crate::settings;
 use crate::state::AppState;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
@@ -35,6 +36,10 @@ pub struct MockData {
     cancelled: Arc<AtomicBool>,
     /// The last plan built; the mock keeps one at a time.
     plan: Mutex<Option<CleanupPlan>>,
+    /// Full Disk Access as the mock reports it. Granted, so mock runs skip onboarding.
+    pub full_disk_access: AtomicBool,
+    /// In memory only: the mock never writes settings.
+    onboarding_done: AtomicBool,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -52,15 +57,19 @@ const SCAN_STEPS: u64 = 12;
 
 impl MockData {
     pub fn new(preselect: bool) -> Self {
-        let file: MockFile =
+        let mut file: MockFile =
             serde_json::from_str(include_str!("../../assets/mock/snapshot.mock.json"))
                 .expect("assets/mock/snapshot.mock.json is valid");
+        // Reads "Scanned 2 h ago", like US-13.
+        file.meta.scanned_at = crate::cleanup::audit::now_ms() as i64 / 1000 - 2 * 3_600;
         Self {
             file: Box::new(file),
             preselect,
             step: Duration::from_millis(150),
             cancelled: Arc::new(AtomicBool::new(false)),
             plan: Mutex::new(None),
+            full_disk_access: AtomicBool::new(true),
+            onboarding_done: AtomicBool::new(false),
         }
     }
 
@@ -315,6 +324,41 @@ impl Source {
         match self {
             Self::Live(state) => backend::reveal_in_finder(state, path.to_owned()),
             Self::Mock(_) => Ok(()),
+        }
+    }
+
+    pub fn full_disk_access(&self) -> bool {
+        match self {
+            Self::Live(state) => backend::check_permissions(state),
+            Self::Mock(m) => m.full_disk_access.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn open_fda_settings(&self) -> Result<()> {
+        match self {
+            Self::Live(_) => backend::open_fda_settings(),
+            Self::Mock(_) => Ok(()),
+        }
+    }
+
+    pub fn onboarding_done(&self) -> bool {
+        match self {
+            Self::Live(state) => settings::load(&state.config.data_dir).onboarding_done,
+            Self::Mock(m) => m.onboarding_done.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn set_onboarding_done(&self) -> Result<()> {
+        match self {
+            Self::Live(state) => {
+                let mut s = settings::load(&state.config.data_dir);
+                s.onboarding_done = true;
+                settings::save(&state.config.data_dir, &s)
+            }
+            Self::Mock(m) => {
+                m.onboarding_done.store(true, Ordering::Relaxed);
+                Ok(())
+            }
         }
     }
 

@@ -7,6 +7,7 @@ pub mod providers;
 pub mod recommend;
 pub mod rules;
 pub mod scanner;
+pub mod settings;
 pub mod state;
 pub mod ui;
 pub mod view;

@@ -3,20 +3,18 @@
 //! binding triggers it.
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, Window, deferred, div, prelude::*, px,
-    relative, rgb,
+    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, Role, Window, deferred, div,
+    prelude::*, px, relative,
 };
 
 use super::format::{format_bytes, format_size};
 use super::model::{AppModel, Cleanup};
-use super::recommendations::{checkbox, tier_pill, tilde};
+use super::recommendations::{checkbox, tier_pill, tilde, toggled};
 use super::selection::RowState;
 use super::theme::{self, MONO, Theme};
 use crate::cleanup::model::{CleanupPlan, CleanupSummary, PlannedAction, PlannedMethod};
 
 const WIDTH: f32 = 520.;
-/// Tailwind `red-600`, as on the error screen.
-const ERROR_TEXT: u32 = 0xdc2626;
 
 /// The dialog for the model's cleanup stage, if one is open.
 pub fn render(
@@ -155,8 +153,12 @@ fn muted(t: &Theme, text: impl Into<String>) -> Div {
 }
 
 fn button(t: &Theme, id: &'static str, label: String, primary: bool) -> gpui::Stateful<Div> {
+    // Not a Tab stop: GPUI clicks a focused element on Enter, and Enter must
+    // never confirm a cleanup (PRD 7.6). Cancel and Done opt in at their call sites.
     let b = div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(label.clone())
         .px_4()
         .py(px(6.))
         .rounded_lg()
@@ -237,30 +239,30 @@ fn confirm(
         c = c.child(muted(t, format!("Left out: {w}")));
     }
     if plan.permanent_available {
+        let state = if permanent {
+            RowState::All
+        } else {
+            RowState::None
+        };
         c = c.child(
-            div()
-                .id("cleanup-permanent")
-                .mt_3()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(px(13.))
-                .cursor_pointer()
-                .child(checkbox(
-                    t,
-                    "cleanup-permanent-box",
-                    if permanent {
-                        RowState::All
-                    } else {
-                        RowState::None
-                    },
-                    false,
-                    16.,
-                ))
-                .child("Delete permanently instead of moving to Trash")
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.set_permanent(!permanent, cx);
-                })),
+            theme::focusable(
+                div().id("cleanup-permanent"),
+                t,
+                Role::CheckBox,
+                "Delete permanently instead of moving to Trash",
+            )
+            .aria_toggled(toggled(state))
+            .mt_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(13.))
+            .cursor_pointer()
+            .child(checkbox(t, "cleanup-permanent-box", state, false, 16.))
+            .child("Delete permanently instead of moving to Trash")
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.set_permanent(!permanent, cx);
+            })),
         );
     }
     if plan.trash_total > 0 {
@@ -291,8 +293,13 @@ fn confirm(
             .justify_end()
             .gap_2()
             .child(
-                button(t, "cleanup-cancel", "Cancel".into(), false)
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_cleanup(cx))),
+                theme::focusable(
+                    button(t, "cleanup-cancel", "Cancel".into(), false),
+                    t,
+                    Role::Button,
+                    "Cancel",
+                )
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_cleanup(cx))),
             )
             .child(clean),
     )
@@ -356,15 +363,20 @@ fn results(t: &Theme, s: &CleanupSummary, cx: &mut Context<AppModel>) -> Div {
                 div()
                     .mt_1()
                     .text_size(px(12.))
-                    .text_color(rgb(ERROR_TEXT))
+                    .text_color(t.error)
                     .child(format!("{}: {}", item.name, item.reason)),
             );
         }
     }
     c.child(
         div().mt_5().flex().justify_end().child(
-            button(t, "cleanup-done", "Done".into(), true)
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_cleanup(cx))),
+            theme::focusable(
+                button(t, "cleanup-done", "Done".into(), true),
+                t,
+                Role::Button,
+                "Done",
+            )
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_cleanup(cx))),
         ),
     )
 }

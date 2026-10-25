@@ -435,6 +435,35 @@ mod tests {
         node("r", sizes.iter().sum(), kids)
     }
 
+    /// PRD section 10: layout under 16 ms for 400 tiles. Timing is only meaningful
+    /// in release builds: `cargo test --release -- --ignored layout_of_400_tiles`.
+    #[test]
+    #[ignore = "timing; run in release"]
+    fn layout_of_400_tiles_takes_under_16_ms() {
+        let groups = (0..20u64)
+            .map(|g| {
+                let kids = (0..20u64)
+                    .map(|k| node(&format!("g{g}k{k}"), 1_000 + g * 37 + k * 11, vec![]))
+                    .collect();
+                node(&format!("g{g}"), 0, kids)
+            })
+            .map(|mut g| {
+                g.size = g.children.iter().map(|c| c.size).sum();
+                g
+            })
+            .collect::<Vec<_>>();
+        let view = node("r", groups.iter().map(|g| g.size).sum(), groups);
+        let fastest = (0..5)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                std::hint::black_box(layout_view(&view, 1100.0, 700.0, LayoutOptions::default()));
+                started.elapsed()
+            })
+            .min()
+            .unwrap();
+        assert!(fastest.as_millis() < 16, "layout took {fastest:?}");
+    }
+
     fn rect<'a>(rects: &'a [Rect], id: &str) -> &'a Rect {
         rects.iter().find(|r| r.node_id == id).unwrap()
     }

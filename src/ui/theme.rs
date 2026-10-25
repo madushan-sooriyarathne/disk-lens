@@ -4,7 +4,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use gpui::{App, Hsla, Window, rgb};
+use gpui::{
+    App, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window, WindowAppearance,
+    rgb,
+};
 
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
@@ -36,6 +39,9 @@ pub struct Theme {
     pub review: Hsla,
     pub safe_fill: Hsla,
     pub review_fill: Hsla,
+    pub error: Hsla,
+    /// Picks the `*_dark` category colors from rules.toml.
+    pub dark: bool,
 }
 
 impl Theme {
@@ -52,26 +58,65 @@ impl Theme {
             review: c(0xe2a03f),
             safe_fill: c(0xdff3ea),
             review_fill: c(0xfbefd9),
+            error: c(0xdc2626),
+            dark: false,
+        }
+    }
+
+    pub fn dark() -> Self {
+        let c = |hex: u32| Hsla::from(rgb(hex));
+        Self {
+            bg: c(0x111113),
+            card: c(0x1c1c1f),
+            card_border: c(0x2e2e33),
+            text: c(0xededef),
+            muted: c(0xa1a1aa),
+            divider: c(0x27272a),
+            safe: c(0x3fbf86),
+            review: c(0xe8b04f),
+            safe_fill: c(0x173226),
+            review_fill: c(0x3a2d14),
+            error: c(0xf87171),
+            dark: true,
         }
     }
 }
 
-/// The theme for the window's appearance. Light only until Phase 5 adds dark.
-pub fn current(_window: &Window) -> Theme {
-    Theme::light()
+/// The theme for the window's appearance (PRD section 9: dark mode).
+pub fn current(window: &Window) -> Theme {
+    match window.appearance() {
+        WindowAppearance::Dark | WindowAppearance::VibrantDark => Theme::dark(),
+        WindowAppearance::Light | WindowAppearance::VibrantLight => Theme::light(),
+    }
+}
+
+/// Makes a clickable element a Tab stop that VoiceOver names (PRD 10). Enter
+/// and Space click a focused element; the ring shows only for keyboard focus.
+pub fn focusable<E: StatefulInteractiveElement>(
+    el: E,
+    t: &Theme,
+    role: Role,
+    label: impl Into<SharedString>,
+) -> E {
+    let ring = t.text;
+    el.tab_index(0)
+        .role(role)
+        .aria_label(label)
+        .focus_visible(move |s| s.border_1().border_color(ring))
 }
 
 const FALLBACK_CATEGORY: &str = "dev_tools";
 
-type CategoryEntry = (&'static str, Hsla, Hsla);
+/// Label, light (fill, border) and dark (fill, border).
+type CategoryEntry = (&'static str, (Hsla, Hsla), (Hsla, Hsla));
 
-/// `#RRGGBB` from `rules.toml`.
+/// `#RRGGBB` from `rules.toml`; validation guarantees the format, so black never shows.
 fn parse_hex(hex: &str) -> Hsla {
     let v = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
     rgb(v).into()
 }
 
-/// Category id to (label, fill, border), parsed once from the embedded rules.
+/// Category id to its label and colors, parsed once from the embedded rules.
 fn category(id: &str) -> &'static CategoryEntry {
     static MAP: OnceLock<HashMap<&'static str, CategoryEntry>> = OnceLock::new();
     let map = MAP.get_or_init(|| {
@@ -79,7 +124,11 @@ fn category(id: &str) -> &'static CategoryEntry {
             .categories
             .iter()
             .map(|c| {
-                let entry = (c.label.as_str(), parse_hex(&c.fill), parse_hex(&c.border));
+                let entry = (
+                    c.label.as_str(),
+                    (parse_hex(&c.fill), parse_hex(&c.border)),
+                    (parse_hex(&c.fill_dark), parse_hex(&c.border_dark)),
+                );
                 (c.id.as_str(), entry)
             })
             .collect()
@@ -87,10 +136,10 @@ fn category(id: &str) -> &'static CategoryEntry {
     map.get(id).unwrap_or_else(|| &map[FALLBACK_CATEGORY])
 }
 
-/// `(fill, border)` of a category; unknown ids get `dev_tools`.
-pub fn category_colors(id: &str) -> (Hsla, Hsla) {
-    let (_, fill, border) = category(id);
-    (*fill, *border)
+/// `(fill, border)` of a category in theme `t`; unknown ids get `dev_tools`.
+pub fn category_colors(t: &Theme, id: &str) -> (Hsla, Hsla) {
+    let (_, light, dark) = category(id);
+    if t.dark { *dark } else { *light }
 }
 
 pub fn category_label(id: &str) -> &'static str {
@@ -112,7 +161,7 @@ pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors
     });
     match mode {
         ViewMode::Cleanup => {
-            let (fill, border) = category_colors(FALLBACK_CATEGORY);
+            let (fill, border) = category_colors(theme, FALLBACK_CATEGORY);
             let tint = node.tier.map(|t| match t {
                 Tier::Safe => theme.safe_fill,
                 Tier::Review => theme.review_fill,
@@ -124,7 +173,7 @@ pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors
             }
         }
         ViewMode::Category => {
-            let (fill, border) = category_colors(&node.category);
+            let (fill, border) = category_colors(theme, &node.category);
             TileColors {
                 fill,
                 border: hatch.unwrap_or(border),
@@ -186,15 +235,112 @@ mod tests {
             ("dev_tools", 0xEEEEF0, 0xC4C4C9),
         ];
         for (id, fill, border) in table {
-            assert_eq!(category_colors(id), (hex(fill), hex(border)), "{id}");
+            assert_eq!(
+                category_colors(&Theme::light(), id),
+                (hex(fill), hex(border)),
+                "{id}"
+            );
         }
+    }
+
+    /// WCAG 2 contrast ratio between two opaque colors.
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        fn luminance(c: Hsla) -> f32 {
+            let c = c.to_rgb();
+            let lin = |v: f32| {
+                if v <= 0.040_45 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        }
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// The lowest contrast of `fg` against every category fill in `t`.
+    fn worst_on_category_fills(t: &Theme, fg: Hsla) -> f32 {
+        LEGEND_ORDER
+            .iter()
+            .map(|id| contrast(fg, category_colors(t, id).0))
+            .fold(f32::MAX, f32::min)
+    }
+
+    const AA: f32 = 4.5;
+
+    #[test]
+    fn light_text_is_aa_on_bg() {
+        let t = Theme::light();
+        assert!(contrast(t.text, t.bg) >= AA);
+    }
+
+    #[test]
+    fn light_muted_is_aa_on_card() {
+        let t = Theme::light();
+        assert!(contrast(t.muted, t.card) >= AA);
+    }
+
+    #[test]
+    fn light_muted_is_aa_on_bg() {
+        let t = Theme::light();
+        assert!(contrast(t.muted, t.bg) >= AA);
+    }
+
+    #[test]
+    fn dark_text_is_aa_on_bg() {
+        let t = Theme::dark();
+        assert!(contrast(t.text, t.bg) >= AA);
+    }
+
+    #[test]
+    fn dark_muted_is_aa_on_card() {
+        let t = Theme::dark();
+        assert!(contrast(t.muted, t.card) >= AA);
+    }
+
+    #[test]
+    fn dark_muted_is_aa_on_bg() {
+        let t = Theme::dark();
+        assert!(contrast(t.muted, t.bg) >= AA);
+    }
+
+    #[test]
+    fn light_text_is_aa_on_every_category_fill() {
+        let t = Theme::light();
+        assert!(worst_on_category_fills(&t, t.text) >= AA);
+    }
+
+    #[test]
+    fn dark_text_is_aa_on_every_category_fill() {
+        let t = Theme::dark();
+        assert!(worst_on_category_fills(&t, t.text) >= AA);
+    }
+
+    #[test]
+    fn dark_error_is_aa_on_card() {
+        let t = Theme::dark();
+        assert!(contrast(t.error, t.card) >= AA);
+    }
+
+    #[test]
+    fn dark_mode_uses_the_dark_category_colors() {
+        assert_eq!(
+            category_colors(&Theme::dark(), "ai_models"),
+            (hex(0x45232F), hex(0xE58AA7))
+        );
     }
 
     #[test]
     fn labels_and_fallback() {
         assert_eq!(category_label("ai_models"), "AI models");
         assert_eq!(category_label("nope"), category_label("dev_tools"));
-        assert_eq!(category_colors("nope"), category_colors("dev_tools"));
+        let t = Theme::light();
+        assert_eq!(
+            category_colors(&t, "nope"),
+            category_colors(&t, "dev_tools")
+        );
     }
 
     #[test]
@@ -213,8 +359,8 @@ mod tests {
     #[test]
     fn tile_colors_by_mode_and_tier() {
         let t = Theme::light();
-        let (dev_fill, dev_border) = category_colors("dev_tools");
-        let (ai_fill, ai_border) = category_colors("ai_models");
+        let (dev_fill, dev_border) = category_colors(&t, "dev_tools");
+        let (ai_fill, ai_border) = category_colors(&t, "ai_models");
         let parts = |c: TileColors| (c.fill, c.border, c.hatch);
 
         let c = tile_colors(&t, &node("ai_models", None), ViewMode::Cleanup);

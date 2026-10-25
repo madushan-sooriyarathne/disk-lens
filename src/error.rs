@@ -24,6 +24,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("snapshot error: {0}")]
     Snapshot(String),
+    #[error("settings error: {0}")]
+    Settings(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
