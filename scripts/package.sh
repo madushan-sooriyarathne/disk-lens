@@ -25,6 +25,9 @@ APP="target/packager/DiskLens.app"
 OUT="target/packager"
 REPO_URL="https://github.com/madushan-sooriyarathne/disk-lens"
 
+# Update artifacts from an earlier run would no longer match this build.
+rm -f -- "$OUT"/*.tar.gz "$OUT"/*.sig "$OUT"/latest.json
+
 for triple in aarch64-apple-darwin x86_64-apple-darwin; do
 	cargo build --release --bin disklens --target "$triple"
 done
