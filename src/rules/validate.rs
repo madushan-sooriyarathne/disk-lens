@@ -29,6 +29,9 @@ pub fn validate(r: &Rules) -> Vec<String> {
         if !category_ids.insert(c.id.as_str()) {
             errors.push(format!("duplicate category id `{}`", c.id));
         }
+        if c.description.trim().is_empty() {
+            errors.push(format!("category `{}`: empty description", c.id));
+        }
         for p in &c.paths {
             if !p.starts_with("~/") {
                 errors.push(format!(
@@ -136,6 +139,7 @@ media_extensions = ["jpg"]
 [[category]]
 id = "package_caches"
 label = "Package caches"
+description = "Caches"
 fill = "#000000"
 border = "#000000"
 paths = ["~/.npm"]
@@ -143,12 +147,14 @@ paths = ["~/.npm"]
 [[category]]
 id = "documents_media"
 label = "Media"
+description = "Media"
 fill = "#000000"
 border = "#000000"
 
 [[category]]
 id = "dev_tools"
 label = "Other"
+description = "Other"
 fill = "#000000"
 border = "#000000"
 
@@ -253,6 +259,22 @@ method = "trash"
                 .unwrap_err()
                 .contains("unknown category `nope`")
         );
+    }
+
+    #[test]
+    fn rejects_empty_category_description() {
+        let r = BASE.replace("description = \"Media\"", "description = \" \"");
+        assert!(
+            Rules::parse(&r)
+                .unwrap_err()
+                .contains("category `documents_media`: empty description")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_category_description() {
+        let r = BASE.replace("description = \"Media\"\n", "");
+        assert!(Rules::parse(&r).unwrap_err().contains("description"));
     }
 
     #[test]

@@ -17,6 +17,7 @@ use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
 use crate::cleanup::audit::now_ms;
+use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
 /// Context menu opened by a right click on a tile.
@@ -108,12 +109,27 @@ fn hatch(color: Hsla, scale: f32) -> gpui::Background {
     pattern_slash(color.opacity(theme::HATCH_OPACITY), 2.0 * s, 5.0 * s)
 }
 
+/// One line on what a tile is: its rule's description, else its category's.
+fn tile_description(node: &ViewNode) -> Option<&'static str> {
+    let rules = Rules::embedded();
+    node.rule_id
+        .as_deref()
+        .and_then(|id| rules.rule(id))
+        .map(|r| r.description.as_str())
+        .or_else(|| {
+            rules
+                .category(&node.category)
+                .map(|c| c.description.as_str())
+        })
+}
+
 /// What the tooltip shows for a tile (Tooltip.tsx).
 struct TooltipView {
     path: SharedString,
     size: String,
     category: &'static str,
-    rule: Option<String>,
+    /// The matching rule's description, else the category's (PRD goal G2).
+    description: Option<&'static str>,
     theme: Theme,
 }
 
@@ -154,7 +170,7 @@ impl Render for TooltipView {
                     )
                     .child(div().text_color(t.muted).child(self.category)),
             )
-            .children(self.rule.clone().map(|r| div().mt_1().child(r)))
+            .children(self.description.map(|d| div().mt_1().child(d)))
     }
 }
 
@@ -464,19 +480,13 @@ fn tile(
         let tip_path = SharedString::from(node.path.clone());
         let tip_size = size.clone();
         let tip_category = theme::category_label(&node.category);
-        let tip_rule = node.rule_id.as_ref().and_then(|id| {
-            model
-                .recommendations
-                .iter()
-                .find(|r| &r.rule_id == id)
-                .map(|r| r.label.clone())
-        });
+        let tip_description = tile_description(node);
         tile = tile.tooltip(move |_, cx| {
             cx.new(|_| TooltipView {
                 path: tip_path.clone(),
                 size: tip_size.clone(),
                 category: tip_category,
-                rule: tip_rule.clone(),
+                description: tip_description,
                 theme: t,
             })
             .into()
@@ -651,6 +661,24 @@ mod tests {
             .map(|(i, &s)| leaf(&format!("c{i}"), s))
             .collect();
         v
+    }
+
+    #[test]
+    fn matched_tile_describes_its_rule() {
+        let mut node = leaf("_cacache", 1);
+        node.rule_id = Some("npm-cache".into());
+        assert_eq!(
+            tile_description(&node),
+            Some("Package tarballs and metadata npm keeps to speed up installs.")
+        );
+    }
+
+    #[test]
+    fn unmatched_tile_describes_its_category() {
+        assert_eq!(
+            tile_description(&leaf("misc", 1)),
+            Some("Developer tool settings, app data and anything not in another category.")
+        );
     }
 
     #[test]

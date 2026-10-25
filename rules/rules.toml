@@ -13,6 +13,7 @@ media_extensions = [
 [[category]]
 id = "code_projects"
 label = "Code projects"
+description = "Source code, installed dependencies and build output of your projects."
 fill = "#E6E4FB"
 border = "#8E84E8"
 markers = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", "Package.swift", "pubspec.yaml", "build.gradle", "build.gradle.kts", "composer.json", "Gemfile"]
@@ -21,6 +22,7 @@ paths = []
 [[category]]
 id = "ai_models"
 label = "AI models"
+description = "Local AI models and the caches of the tools that download them."
 fill = "#FBDDE6"
 border = "#E58AA7"
 markers = []
@@ -29,6 +31,7 @@ paths = ["~/.ollama", "~/.cache/huggingface", "~/.lmstudio", "~/.cache/lm-studio
 [[category]]
 id = "mobile_sdks"
 label = "iOS & Android SDKs"
+description = "Xcode and Android data: SDKs, simulators, emulators and build products."
 fill = "#D9EEF4"
 border = "#6FB7CC"
 markers = []
@@ -37,6 +40,7 @@ paths = ["~/Library/Android", "~/.android", "~/Library/Developer"]
 [[category]]
 id = "package_caches"
 label = "Package caches"
+description = "Downloads that package managers and apps keep to speed up installs and launches."
 fill = "#DCE5F7"
 border = "#7C9BD8"
 markers = []
@@ -45,6 +49,7 @@ paths = ["~/.npm", "~/.gradle", "~/.cache", "~/.bun", "~/.cargo", "~/.yarn", "~/
 [[category]]
 id = "documents_media"
 label = "Documents & media"
+description = "Your documents, photos, videos, music and device backups."
 fill = "#FCE6D8"
 border = "#EFA57A"
 markers = []
@@ -53,6 +58,7 @@ paths = ["~/Documents", "~/Pictures", "~/Movies", "~/Music", "~/Downloads", "~/.
 [[category]]
 id = "dev_tools"
 label = "Dev tools & other"
+description = "Developer tool settings, app data and anything not in another category."
 fill = "#EEEEF0"
 border = "#C4C4C9"
 markers = []

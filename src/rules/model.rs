@@ -24,6 +24,8 @@ pub struct Rules {
 pub struct Category {
     pub id: String,
     pub label: String,
+    /// One line for nodes no rule explains (PRD goal G2).
+    pub description: String,
     pub fill: String,
     pub border: String,
     #[serde(default)]
