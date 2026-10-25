@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024" role="img">
+  <title>DiskLens</title>
+  <!--
+    Source of icon.icns (regenerate with scripts/make-icon.sh).
+    macOS icon grid: 824 squircle centred on 1024, corner radius 185.
+    Tiles use the category borders from rules/rules.toml with fills deepened
+    toward the border so they still read at 16-32 px. The hatched tile is the
+    safe tier (#22A06B) as drawn in the app. The lens shows the tiles scaled
+    up 1.4x behind glass.
+  -->
+  <defs>
+    <linearGradient id="card-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBFCFF"/>
+      <stop offset="1" stop-color="#DFE4EE"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DCD8FA"/>
+      <stop offset="1" stop-color="#B3ABF1"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FAD7E2"/>
+      <stop offset="1" stop-color="#EDA8BE"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D3EBF3"/>
+      <stop offset="1" stop-color="#97CADB"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D6E1F6"/>
+      <stop offset="1" stop-color="#A7BDE8"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6B7385"/>
+      <stop offset="0.5" stop-color="#3B4150"/>
+      <stop offset="1" stop-color="#262A33"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.45"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#9FB4D8" stop-opacity="0.25"/>
+    </radialGradient>
+    <pattern id="hatch" width="40" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="14" height="40" fill="#22A06B" fill-opacity="0.7"/>
+    </pattern>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="lens-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="card-clip">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <clipPath id="lens-clip">
+      <circle cx="562" cy="602" r="165"/>
+    </clipPath>
+
+    <g id="tiles" stroke-width="12">
+      <rect x="198" y="198" width="348" height="388" rx="34" fill="url(#purple)" stroke="#8E84E8"/>
+      <rect x="198" y="618" width="348" height="208" rx="34" fill="url(#blue)"/>
+      <rect x="198" y="618" width="348" height="208" rx="34" fill="url(#hatch)" stroke="#22A06B"/>
+      <rect x="578" y="198" width="248" height="268" rx="34" fill="url(#pink)" stroke="#E58AA7"/>
+      <rect x="578" y="498" width="248" height="328" rx="34" fill="url(#cyan)" stroke="#6FB7CC"/>
+    </g>
+  </defs>
+
+  <g id="card">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#card-fill)" filter="url(#shadow)"/>
+    <use xlink:href="#tiles"/>
+    <g clip-path="url(#card-clip)">
+      <rect x="100" y="100" width="824" height="440" fill="url(#gloss)"/>
+    </g>
+    <rect x="103" y="103" width="818" height="818" rx="182" fill="none" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="6"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#B9C0CE" stroke-width="2"/>
+  </g>
+
+  <g id="lens" filter="url(#lens-shadow)">
+    <line x1="679" y1="719" x2="808" y2="848" stroke="url(#rim)" stroke-width="64" stroke-linecap="round"/>
+    <g clip-path="url(#lens-clip)">
+      <circle cx="562" cy="602" r="165" fill="url(#card-fill)"/>
+      <use xlink:href="#tiles" transform="translate(562 602) scale(1.4) translate(-562 -602)"/>
+      <circle cx="562" cy="602" r="165" fill="url(#glass)"/>
+      <ellipse cx="507" cy="522" rx="80" ry="40" fill="#FFFFFF" fill-opacity="0.55" transform="rotate(-35 507 522)"/>
+    </g>
+    <circle cx="562" cy="602" r="165" fill="none" stroke="url(#rim)" stroke-width="30"/>
+    <circle cx="562" cy="602" r="148" fill="none" stroke="#FFFFFF" stroke-opacity="0.6" stroke-width="4"/>
+  </g>
+</svg>
