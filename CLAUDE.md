@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3 committed; Phase 3.5 (Tauri and React replaced by GPUI) done on branch `gpui-migration`, awaiting review; do not start Phase 4 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3.5 merged; Phase 4 (cleanup engine) verified on macOS, with open findings in `docs/PLAN.md` and `docs/QA.md`; do not start Phase 5 unprompted.
 
 ## Commands
 
@@ -37,8 +37,9 @@ Backend (`src/`):
 - `backend.rs`: plain functions on `&Arc<AppState>` (`start_scan`, `cancel_scan`, `load_last_snapshot`, `get_view`, `get_recommendations`, `get_item_details`, `reveal_in_finder`). `start_scan` canonicalizes the scan root, runs `scanner::scan` on its own thread and reports `ScanEvent` (progress / finished / failed) through a callback. On success it saves the snapshot (zstd JSON, `scanner/snapshot.rs`), runs the analysis and swaps both into state as `Current`. `load_last_snapshot` does the same at startup.
 - `scanner/`: `walk.rs` (parallel lstat walk, no symlink following, same-device only), `hardlinks.rs` (each inode counted once), `tree.rs` (arena `Vec<DirNode>` with bottom-up sizes; also the contract types), `volume.rs` (capacity).
 - `rules/`: `rules/rules.toml` (repo root) embedded and validated at startup (`model`, `load`, `validate`), `matcher` (one DFS per snapshot, RULES.md 4.1), `category` (section 6, markers checked lazily on disk), `guards` (match-time, blocking, safety), `tools` (login-shell PATH; sandbox mode resolves only `git`).
-- `platform/`: `System` (processes, running apps) and `Runner` (argv commands with timeout) traits with real and fake implementations; tests describe the machine with the fakes.
-- `providers/`: ollama, git worktrees, simctl and docker item enumeration. `cleanup/protected.rs`: hardcoded protect list (equality test with `[[protect]]`).
+- `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes.
+- `providers/`: ollama, git worktrees, simctl and docker item enumeration.
+- `cleanup/`: `protected.rs` (hardcoded protect list, equality test with `[[protect]]`, and `refusal`: the RULES.md section 5 checks against the disk), `plan.rs` (item IDs of the current snapshot to a `CleanupPlan`), `revalidate.rs` (S-03/S-04 right before each action), `execute.rs` (`Engine`, sequential, dry run, continues past failures), `audit.rs` (JSON lines), `script.rs` (bash export). `backend.rs` stores plans by ID, clears them on every new snapshot, and runs a plan once on its own thread (`build_cleanup_plan`, `export_script`, `execute_cleanup`).
 - `recommend/build.rs`: `analyze` (matches, providers, min size) runs once per snapshot; rows are rebuilt on every `get_recommendations` because blocking guards depend on what runs now. `get_item_details` adds description, regenerates and largest subfolders.
 - `view.rs`: `get_view` builds the treemap model on demand from the snapshot: the requested folder plus two levels, small siblings merged into "Other", with category, tier and rule filled from the analysis. Paths from the UI are resolved against the snapshot (`validated_path`); anything outside it is refused.
 
@@ -47,7 +48,7 @@ UI (`src/ui/`, GPUI):
 - `model.rs`: `AppModel`, the single GPUI entity (phase, snapshot meta, explorer path and mode, recommendations, selected item IDs, drawer row). Backend calls run off the UI thread; recommendations refresh on window activation.
 - `source.rs`: `Source::Live` (calls `backend.rs`) or `Source::Mock` (`assets/mock/snapshot.mock.json`, chosen by `DISKLENS_MOCK`).
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3), `stats.rs`, `selection.rs`, `format.rs`, `theme.rs` (tokens; category colors from `rules.toml`).
-- Views stay presentational: `screens.rs`, `stat_cards.rs`, `explorer.rs`, `recommendations.rs`.
+- Views stay presentational: `screens.rs`, `stat_cards.rs`, `explorer.rs`, `recommendations.rs`, `cleanup.rs` (confirm, progress and results dialog, toast). After a cleanup the model rescans the whole root.
 
 ## Safety rules (non-negotiable)
 
@@ -72,7 +73,7 @@ UI (`src/ui/`, GPUI):
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DISKLENS_SCAN_ROOT` | Scan root override (dev only, absolute path to `.sandbox/home`)                                                                                                                    |
 | `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release                                                                         |
-| `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens` |
+| `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens`. The audit log follows the same rule: `<scan root>/../logs` when sandboxed, else `~/Library/Logs/DiskLens` |
 | `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows                                                                                       |
 
 ## Workflow

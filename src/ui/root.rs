@@ -2,8 +2,8 @@
 
 use gpui::{App, Context, KeyBinding, Window, actions, div, prelude::*, px};
 
-use super::model::{AppModel, Phase};
-use super::{explorer, recommendations, screens, stat_cards, theme};
+use super::model::{AppModel, Cleanup, Phase};
+use super::{cleanup, explorer, recommendations, screens, stat_cards, theme};
 
 actions!(disklens, [Back]);
 
@@ -17,6 +17,7 @@ impl Render for AppModel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(window);
         let body = div()
+            .relative()
             .size_full()
             .flex()
             .p_4()
@@ -48,11 +49,20 @@ impl Render for AppModel {
                         ),
                 ),
         };
-        body.key_context(CONTEXT)
+        let dialog = cleanup::render(self, window, cx);
+        let toast = cleanup::toast(self, window);
+        body.children(dialog)
+            .children(toast)
+            .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
-            // Esc closes the context menu, then the detail drawer, otherwise goes up one folder.
+            // Esc closes the cleanup dialog (not while it runs), then the context
+            // menu, then the detail drawer, otherwise goes up one folder.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if this.explorer.close_menu() {
+                if let Some(stage) = &this.cleanup {
+                    if !matches!(stage, Cleanup::Running { .. }) {
+                        this.close_cleanup(cx);
+                    }
+                } else if this.explorer.close_menu() {
                     cx.notify();
                 } else if this.focused_row.is_some() {
                     this.focus_row(None, cx);

@@ -91,6 +91,12 @@ impl Matcher {
         out
     }
 
+    /// The rule that claims `path` on disk now, chosen as `run` chooses it.
+    /// Cleanup revalidation uses it to confirm an item still matches its rule.
+    pub fn winner(&self, rules: &Rules, path: &Path, root: &Path, env: &Env) -> Option<usize> {
+        self.best(rules, path, root, env, &mut Vec::new())
+    }
+
     /// The winning rule for `path`: highest priority, then longest literal glob
     /// prefix, then the rule listed first.
     fn best(

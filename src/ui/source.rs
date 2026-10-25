@@ -1,16 +1,20 @@
 //! Where the UI gets its data: the real backend, or the mock snapshot when
 //! `DISKLENS_MOCK` is set. Methods block; the model calls them off the UI thread.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::backend;
+use crate::cleanup::model::{
+    CleanupEvent, CleanupPlan, CleanupSummary, Outcome, PlannedAction, PlannedMethod,
+};
+use crate::cleanup::script;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::recommend::model::{ItemDetails, Recommendation, Subfolder};
+use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder, Tier};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::state::AppState;
 use crate::view::{ViewKind, ViewMode, ViewNode};
@@ -29,6 +33,8 @@ pub struct MockData {
     /// Pause between simulated scan steps.
     step: Duration,
     cancelled: Arc<AtomicBool>,
+    /// The last plan built; the mock keeps one at a time.
+    plan: Mutex<Option<CleanupPlan>>,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -54,6 +60,7 @@ impl MockData {
             preselect,
             step: Duration::from_millis(150),
             cancelled: Arc::new(AtomicBool::new(false)),
+            plan: Mutex::new(None),
         }
     }
 
@@ -130,6 +137,94 @@ impl MockData {
                 })
                 .collect(),
         })
+    }
+}
+
+impl MockData {
+    /// The selected mock items as a plan; nothing is ever touched.
+    fn build_plan(&self, item_ids: &[String], permanent_review: bool) -> CleanupPlan {
+        let mut actions = Vec::new();
+        let mut permanent_available = false;
+        for row in &self.file.recommendations {
+            for i in row.items.iter().filter(|i| item_ids.contains(&i.item_id)) {
+                let review_trash = row.tier == Tier::Review && i.method == MethodView::Trash;
+                permanent_available |= review_trash;
+                let method = match &i.method {
+                    MethodView::Trash if review_trash && permanent_review => PlannedMethod::Delete,
+                    MethodView::Delete => PlannedMethod::Delete,
+                    MethodView::Trash => PlannedMethod::Trash,
+                    MethodView::Command { display } => PlannedMethod::Command {
+                        argv: display.split_whitespace().map(String::from).collect(),
+                    },
+                };
+                actions.push(PlannedAction {
+                    item_id: i.item_id.clone(),
+                    rule_id: row.rule_id.clone(),
+                    label: row.label.clone(),
+                    name: i.name.clone(),
+                    tier: row.tier,
+                    path: i.path.clone(),
+                    matched: i.path.clone(),
+                    size: i.size,
+                    size_is_estimate: row.size_is_estimate,
+                    measurable: false,
+                    method,
+                });
+            }
+        }
+        let plan = CleanupPlan {
+            plan_id: "mock-plan".into(),
+            snapshot_id: self.file.meta.id.clone(),
+            total: actions.iter().map(|a| a.size).sum(),
+            trash_total: actions
+                .iter()
+                .filter(|a| a.method.is_trash())
+                .map(|a| a.size)
+                .sum(),
+            actions,
+            permanent_available,
+            warnings: Vec::new(),
+        };
+        *self.plan.lock().expect("mock plan lock") = Some(plan.clone());
+        plan
+    }
+
+    fn stored_plan(&self, plan_id: &str) -> Result<CleanupPlan> {
+        self.plan
+            .lock()
+            .expect("mock plan lock")
+            .clone()
+            .filter(|p| p.plan_id == plan_id)
+            .ok_or_else(|| Error::UnknownPlan(plan_id.into()))
+    }
+
+    /// Walks the plan as a dry run, one step per item.
+    fn execute(&self, plan: CleanupPlan, mut on_event: impl FnMut(CleanupEvent) + Send + 'static) {
+        let step = self.step;
+        std::thread::spawn(move || {
+            let mut summary = CleanupSummary {
+                dry_run: true,
+                ..CleanupSummary::default()
+            };
+            for a in &plan.actions {
+                on_event(CleanupEvent::ItemStarted {
+                    item_id: a.item_id.clone(),
+                });
+                std::thread::sleep(step);
+                if a.method.is_trash() {
+                    summary.trashed += a.size;
+                } else {
+                    summary.freed += a.size;
+                }
+                summary.done += 1;
+                on_event(CleanupEvent::ItemFinished {
+                    item_id: a.item_id.clone(),
+                    freed: a.size,
+                    outcome: Outcome::DryRun,
+                });
+            }
+            on_event(CleanupEvent::Finished { summary });
+        });
     }
 }
 
@@ -220,6 +315,56 @@ impl Source {
         match self {
             Self::Live(state) => backend::reveal_in_finder(state, path.to_owned()),
             Self::Mock(_) => Ok(()),
+        }
+    }
+
+    /// Cleanups only log what they would do (S-08). The mock never changes anything.
+    pub fn is_dry_run(&self) -> bool {
+        match self {
+            Self::Live(state) => state.config.dry_run,
+            Self::Mock(_) => true,
+        }
+    }
+
+    pub fn build_plan(
+        &self,
+        snapshot_id: &str,
+        item_ids: Vec<String>,
+        permanent_review: bool,
+    ) -> Result<CleanupPlan> {
+        match self {
+            Self::Live(state) => backend::build_cleanup_plan(
+                state,
+                snapshot_id.to_owned(),
+                item_ids,
+                permanent_review,
+            ),
+            Self::Mock(m) => Ok(m.build_plan(&item_ids, permanent_review)),
+        }
+    }
+
+    pub fn export_script(&self, plan_id: &str) -> Result<String> {
+        match self {
+            Self::Live(state) => backend::export_script(state, plan_id),
+            Self::Mock(m) => Ok(script::render(
+                &m.stored_plan(plan_id)?,
+                crate::cleanup::audit::now_ms() as i64 / 1000,
+            )),
+        }
+    }
+
+    /// Returns at once; events arrive on another thread.
+    pub fn execute_cleanup(
+        &self,
+        plan_id: &str,
+        on_event: impl FnMut(CleanupEvent) + Send + 'static,
+    ) -> Result<()> {
+        match self {
+            Self::Live(state) => backend::execute_cleanup(state, plan_id.to_owned(), on_event),
+            Self::Mock(m) => {
+                m.execute(m.stored_plan(plan_id)?, on_event);
+                Ok(())
+            }
         }
     }
 

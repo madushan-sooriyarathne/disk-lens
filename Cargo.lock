@@ -1161,12 +1161,14 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "shell-escape",
  "sysinfo 0.38.4",
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-appender",
+ "trash",
  "wait-timeout",
  "zstd",
 ]
@@ -4582,6 +4584,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-escape"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45bb67a18fa91266cc7807181f62f9178a6873bfad7dc788c42e6430db40184f"
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5222,6 +5230,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trash"
+version = "5.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be89b3fe156965d29ac4f8522f3a640c655affdd9f21cb4f36857f0c92c00317"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "percent-encoding",
+ "scopeguard",
+ "urlencoding",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5324,6 +5350,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usvg"

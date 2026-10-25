@@ -1,6 +1,7 @@
 //! Native UI drawn with GPUI. `AppModel` (model.rs) is the single entity;
 //! the other modules are pure logic or render functions over it.
 
+pub mod cleanup;
 pub mod explorer;
 pub mod format;
 pub mod model;

@@ -10,6 +10,8 @@ pub struct Config {
     pub dry_run: bool,
     /// `DISKLENS_DATA_DIR`, else `<scan_root>/../data` when sandboxed, else Application Support.
     pub data_dir: PathBuf,
+    /// Audit log folder: `<scan_root>/../logs` when sandboxed, else `~/Library/Logs/DiskLens`.
+    pub log_dir: PathBuf,
 }
 
 #[derive(Default)]
@@ -47,28 +49,31 @@ impl Config {
             _ => v.debug_build,
         };
         let scan_root = v.scan_root.filter(|r| !r.is_empty()).map(PathBuf::from);
+        let home = Path::new(v.home.as_deref().unwrap_or("."));
         let data_dir = v
             .data_dir
             .filter(|d| !d.is_empty())
             .map(PathBuf::from)
-            .or_else(|| scan_root.as_deref().and_then(sandbox_data_dir))
-            .unwrap_or_else(|| {
-                Path::new(v.home.as_deref().unwrap_or("."))
-                    .join("Library/Application Support/DiskLens")
-            });
+            .or_else(|| scan_root.as_deref().and_then(|r| sandbox_dir(r, "data")))
+            .unwrap_or_else(|| home.join("Library/Application Support/DiskLens"));
+        let log_dir = scan_root
+            .as_deref()
+            .and_then(|r| sandbox_dir(r, "logs"))
+            .unwrap_or_else(|| home.join("Library/Logs/DiskLens"));
         Self {
             scan_root,
             dry_run,
             data_dir,
+            log_dir,
         }
     }
 }
 
-/// Sibling `data` folder of the scan root, so sandboxed runs never touch real Library.
-fn sandbox_data_dir(root: &Path) -> Option<PathBuf> {
+/// Sibling `name` folder of the scan root, so sandboxed runs never touch real Library.
+fn sandbox_dir(root: &Path, name: &str) -> Option<PathBuf> {
     root.parent()
         .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| p.join("data"))
+        .map(|p| p.join(name))
 }
 
 #[cfg(test)]
@@ -127,6 +132,20 @@ mod tests {
     fn sandboxed_scan_root_redirects_data_dir() {
         let c = cfg(|v| v.scan_root = Some("./.sandbox/home".into()));
         assert_eq!(c.data_dir, PathBuf::from("./.sandbox/data"));
+    }
+
+    #[test]
+    fn log_dir_defaults_to_library_logs() {
+        assert_eq!(
+            cfg(|_| {}).log_dir,
+            PathBuf::from("/Users/x/Library/Logs/DiskLens")
+        );
+    }
+
+    #[test]
+    fn sandboxed_scan_root_redirects_log_dir() {
+        let c = cfg(|v| v.scan_root = Some("./.sandbox/home".into()));
+        assert_eq!(c.log_dir, PathBuf::from("./.sandbox/logs"));
     }
 
     #[test]

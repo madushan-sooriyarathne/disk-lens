@@ -1,5 +1,5 @@
 {
- "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09). All items Ready to match mockup counts (blocked states arrive with Phase 3 data).",
+ "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09). All items Ready to match the mockup's counts; blocked states are covered by the sandbox fixture.",
  "meta": {
   "id": "mock",
   "root": "~",
