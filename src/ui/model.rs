@@ -26,6 +26,8 @@ const TOAST: Duration = Duration::from_secs(3);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Loading,
+    /// Full Disk Access is missing and the user has not moved past it yet (US-01).
+    Onboarding,
     Idle,
     Scanning,
     Ready,
@@ -66,6 +68,8 @@ pub struct AppModel {
     pub phase: Phase,
     pub meta: Option<SnapshotMeta>,
     pub progress: Progress,
+    /// Whether the app can read every folder (PRD 7.8); rechecked on window focus.
+    pub full_disk_access: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
     pub mode: ViewMode,
@@ -141,19 +145,28 @@ impl AppModel {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
         let activation = cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active() && this.phase == Phase::Ready {
+            if !window.is_window_active() {
+                return;
+            }
+            // The user may have just granted access in System Settings.
+            this.recheck_access(cx);
+            if this.phase == Phase::Ready {
                 this.refresh(cx);
             }
         });
         let source = Arc::new(source);
-        // Last snapshot -> Ready, none -> Idle.
+        // Onboarding first when access is missing and was never dismissed.
         off_thread(
             &source,
             cx,
-            |s| s.load_last(),
-            |this, meta, cx| match meta {
-                Some(meta) => this.enter(meta, cx),
-                None => this.phase = Phase::Idle,
+            |s| (s.full_disk_access(), s.onboarding_done()),
+            |this, (granted, done), cx| {
+                this.full_disk_access = granted;
+                if granted || done {
+                    this.load_last(cx);
+                } else {
+                    this.phase = Phase::Onboarding;
+                }
             },
         );
         Self {
@@ -161,6 +174,7 @@ impl AppModel {
             phase: Phase::Loading,
             meta: None,
             progress: Progress::default(),
+            full_disk_access: false,
             error: None,
             mode: ViewMode::Category,
             root_path: String::new(),
@@ -183,6 +197,66 @@ impl AppModel {
             toast_seq: 0,
             _activation: activation,
         }
+    }
+
+    /// Last snapshot -> Ready, none -> Idle.
+    fn load_last(&mut self, cx: &mut Context<Self>) {
+        self.phase = Phase::Loading;
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.load_last(),
+            |this, meta, cx| match meta {
+                Some(meta) => this.enter(meta, cx),
+                None => this.phase = Phase::Idle,
+            },
+        );
+    }
+
+    /// Updates `full_disk_access`, and leaves onboarding once access is granted.
+    pub fn recheck_access(&mut self, cx: &mut Context<Self>) {
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.full_disk_access(),
+            |this, granted, cx| {
+                this.full_disk_access = granted;
+                if granted && this.phase == Phase::Onboarding {
+                    this.load_last(cx);
+                }
+            },
+        );
+    }
+
+    /// Opens the Full Disk Access pane; the activation recheck notices a grant.
+    pub fn open_fda_settings(&mut self, cx: &mut Context<Self>) {
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.open_fda_settings(),
+            |this, opened, cx| {
+                if let Err(e) = opened {
+                    tracing::warn!("could not open System Settings: {e}");
+                    this.show_toast("Could not open System Settings".into(), cx);
+                }
+            },
+        );
+    }
+
+    /// Leaves onboarding without access and remembers that (US-01).
+    pub fn continue_without_access(&mut self, cx: &mut Context<Self>) {
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.set_onboarding_done(),
+            |this, saved, cx| {
+                // Not saving only means onboarding shows again next launch.
+                if let Err(e) = saved {
+                    tracing::warn!("could not save settings: {e}");
+                }
+                this.load_last(cx);
+            },
+        );
     }
 
     /// Shows a snapshot: the root folder, fresh rows and the default selection.
@@ -656,6 +730,8 @@ impl AppModel {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use gpui::{Entity, TestAppContext, VisualTestContext};
 
     use super::*;
@@ -712,6 +788,63 @@ mod tests {
             assert!(m.selected.is_empty());
             assert!(m.error.is_none());
         });
+    }
+
+    /// A model over the mock, started without Full Disk Access.
+    fn setup_without_access(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let cx = cx.add_empty_window();
+        let mock = MockData::new(false).with_step(Duration::ZERO);
+        mock.full_disk_access.store(false, Ordering::Relaxed);
+        let source = Source::Mock(mock);
+        let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        (model, cx)
+    }
+
+    fn grant_access(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
+        model.read_with(cx, |m, _| match m.source.as_ref() {
+            Source::Mock(mock) => mock.full_disk_access.store(true, Ordering::Relaxed),
+            Source::Live(_) => unreachable!("tests use the mock"),
+        });
+    }
+
+    #[gpui::test]
+    fn missing_access_starts_with_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Onboarding);
+    }
+
+    #[gpui::test]
+    fn continue_without_access_reaches_ready(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        cx.run_until_parked();
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Ready);
+    }
+
+    #[gpui::test]
+    fn continue_without_access_is_remembered(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn granting_access_leaves_onboarding_on_recheck(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        grant_access(&model, cx);
+        model.update(cx, |m, cx| m.recheck_access(cx));
+        cx.run_until_parked();
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Ready);
+    }
+
+    #[gpui::test]
+    fn recheck_without_a_grant_stays_on_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        model.update(cx, |m, cx| m.recheck_access(cx));
+        cx.run_until_parked();
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Onboarding);
     }
 
     #[gpui::test]

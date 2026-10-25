@@ -26,6 +26,7 @@ impl Render for AppModel {
             .font_family(theme::SANS);
         let body = match self.phase {
             Phase::Loading => body,
+            Phase::Onboarding => body.child(screens::onboarding(self, window, cx)),
             Phase::Idle => body.child(screens::idle(self, window, cx)),
             Phase::Scanning => body.child(screens::scanning(self, window, cx)),
             Phase::Error => body.child(screens::error(self, window, cx)),

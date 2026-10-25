@@ -16,6 +16,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder, Tier};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
+use crate::settings;
 use crate::state::AppState;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
@@ -37,6 +38,8 @@ pub struct MockData {
     plan: Mutex<Option<CleanupPlan>>,
     /// Full Disk Access as the mock reports it. Granted, so mock runs skip onboarding.
     pub full_disk_access: AtomicBool,
+    /// In memory only: the mock never writes settings.
+    onboarding_done: AtomicBool,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -64,6 +67,7 @@ impl MockData {
             cancelled: Arc::new(AtomicBool::new(false)),
             plan: Mutex::new(None),
             full_disk_access: AtomicBool::new(true),
+            onboarding_done: AtomicBool::new(false),
         }
     }
 
@@ -332,6 +336,27 @@ impl Source {
         match self {
             Self::Live(_) => backend::open_fda_settings(),
             Self::Mock(_) => Ok(()),
+        }
+    }
+
+    pub fn onboarding_done(&self) -> bool {
+        match self {
+            Self::Live(state) => settings::load(&state.config.data_dir).onboarding_done,
+            Self::Mock(m) => m.onboarding_done.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn set_onboarding_done(&self) -> Result<()> {
+        match self {
+            Self::Live(state) => {
+                let mut s = settings::load(&state.config.data_dir);
+                s.onboarding_done = true;
+                settings::save(&state.config.data_dir, &s)
+            }
+            Self::Mock(m) => {
+                m.onboarding_done.store(true, Ordering::Relaxed);
+                Ok(())
+            }
         }
     }
 
