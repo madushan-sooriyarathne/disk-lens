@@ -108,6 +108,8 @@ pub struct AppModel {
     _activation: Subscription,
     /// Repaints when macOS switches between light and dark.
     _appearance: Subscription,
+    /// Refocuses the window root when the focused element disappears.
+    _focus_lost: Subscription,
 }
 
 /// Runs `work` against the source off the UI thread, then hands the result to
@@ -157,6 +159,11 @@ impl AppModel {
             }
         });
         let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
+        // A focused tile or row vanishes on drill-down or rescan. Window-wide keys
+        // (Esc, Tab) dispatch from the focused element, so focus must go back to the root.
+        let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
+            window.focus(&this.focus_handle, cx);
+        });
         let source = Arc::new(source);
         // Onboarding first when access is missing and was never dismissed.
         off_thread(
@@ -200,6 +207,7 @@ impl AppModel {
             toast_seq: 0,
             _activation: activation,
             _appearance: appearance,
+            _focus_lost: focus_lost,
         }
     }
 

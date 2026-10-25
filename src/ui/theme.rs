@@ -4,7 +4,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use gpui::{App, Hsla, Window, WindowAppearance, rgb};
+use gpui::{
+    App, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window, WindowAppearance,
+    rgb,
+};
 
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
@@ -85,6 +88,21 @@ pub fn current(window: &Window) -> Theme {
         WindowAppearance::Dark | WindowAppearance::VibrantDark => Theme::dark(),
         WindowAppearance::Light | WindowAppearance::VibrantLight => Theme::light(),
     }
+}
+
+/// Makes a clickable element a Tab stop that VoiceOver names (PRD 10). Enter
+/// and Space click a focused element; the ring shows only for keyboard focus.
+pub fn focusable<E: StatefulInteractiveElement>(
+    el: E,
+    t: &Theme,
+    role: Role,
+    label: impl Into<SharedString>,
+) -> E {
+    let ring = t.text;
+    el.tab_index(0)
+        .role(role)
+        .aria_label(label)
+        .focus_visible(move |s| s.border_1().border_color(ring))
 }
 
 const FALLBACK_CATEGORY: &str = "dev_tools";

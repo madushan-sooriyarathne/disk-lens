@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight,
-    SharedString, Stateful, Window, div, ease_out_quint, prelude::*, px,
+    Role, SharedString, Stateful, Toggled, Window, div, ease_out_quint, prelude::*, px,
 };
 
 use super::format::{format_bytes, format_size};
@@ -208,6 +208,15 @@ fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     move |_, cx| cx.new(|_| Tip(text.clone())).into()
 }
 
+/// The accessible checked state of a checkbox.
+pub(super) fn toggled(state: RowState) -> Toggled {
+    match state {
+        RowState::All => Toggled::True,
+        RowState::Some => Toggled::Mixed,
+        RowState::None => Toggled::False,
+    }
+}
+
 /// Checkbox drawn with divs: filled with a check when all, a bar when some.
 pub(super) fn checkbox(
     t: &Theme,
@@ -284,9 +293,11 @@ fn row(
         18.,
     );
     if reason.is_none() {
-        check = check.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-            this.toggle_row(&toggle_id, cx);
-        }));
+        check = theme::focusable(check, t, Role::CheckBox, format!("Select {}", r.label))
+            .aria_toggled(toggled(state))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.toggle_row(&toggle_id, cx);
+            }));
     }
 
     let sub = div()
@@ -335,14 +346,19 @@ fn row(
                 .child(format_size(r.size, r.size_is_estimate)),
         )
         .child(
-            ghost_button(t, SharedString::from(format!("open-{}", r.row_id)), "›")
-                .text_size(px(18.))
-                .line_height(px(18.))
-                .mr(px(-8.))
-                .tooltip(tip(format!("Details for {}", r.label)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.focus_row(Some(open_id.clone()), cx);
-                })),
+            theme::focusable(
+                ghost_button(t, SharedString::from(format!("open-{}", r.row_id)), "›"),
+                t,
+                Role::Button,
+                format!("Details for {}", r.label),
+            )
+            .text_size(px(18.))
+            .line_height(px(18.))
+            .mr(px(-8.))
+            .tooltip(tip(format!("Details for {}", r.label)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.focus_row(Some(open_id.clone()), cx);
+            })),
         );
     if !last {
         line = line.border_b_1();
@@ -395,20 +411,30 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                 .flex()
                 .gap_2()
                 .child(
-                    secondary("select-safe", "Select safe")
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(bg))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.select_safe(cx))),
+                    theme::focusable(
+                        secondary("select-safe", "Select safe"),
+                        t,
+                        Role::Button,
+                        "Select safe",
+                    )
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(bg))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.select_safe(cx))),
                 )
                 .child(if nothing {
                     secondary("copy-script", "Copy script")
                         .opacity(0.4)
                         .tooltip(tip(NOTHING_SELECTED.into()))
                 } else {
-                    secondary("copy-script", "Copy script")
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(bg))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_script(cx)))
+                    theme::focusable(
+                        secondary("copy-script", "Copy script"),
+                        t,
+                        Role::Button,
+                        "Copy script",
+                    )
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(bg))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_script(cx)))
                 })
                 .child({
                     let clean = div()
@@ -425,9 +451,11 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                     if nothing {
                         clean.opacity(0.4).tooltip(tip(NOTHING_SELECTED.into()))
                     } else {
-                        clean.cursor_pointer().on_click(
-                            cx.listener(|this, _: &ClickEvent, _, cx| this.open_cleanup(cx)),
-                        )
+                        theme::focusable(clean, t, Role::Button, "Clean selected")
+                            .cursor_pointer()
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| this.open_cleanup(cx)),
+                            )
                     }
                 }),
         )
@@ -550,14 +578,19 @@ fn drawer(
                 .border_b_1()
                 .border_color(t.divider)
                 .child(
-                    ghost_button(t, "drawer-close", "←")
-                        .text_size(px(16.))
-                        .line_height(px(18.))
-                        .ml(px(-6.))
-                        .tooltip(tip("Back to recommendations".into()))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.focus_row(None, cx);
-                        })),
+                    theme::focusable(
+                        ghost_button(t, "drawer-close", "←"),
+                        t,
+                        Role::Button,
+                        "Back to recommendations",
+                    )
+                    .text_size(px(16.))
+                    .line_height(px(18.))
+                    .ml(px(-6.))
+                    .tooltip(tip("Back to recommendations".into()))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.focus_row(None, cx);
+                    })),
                 )
                 .child(
                     div()
@@ -616,9 +649,11 @@ fn item(
     );
     if blocked.is_none() {
         let id = i.item_id.clone();
-        check = check.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-            this.toggle_item(&id, cx);
-        }));
+        check = theme::focusable(check, t, Role::CheckBox, format!("Select {}", i.name))
+            .aria_toggled(toggled(state))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.toggle_item(&id, cx);
+            }));
     }
     let path = i.path.clone();
     let sub = div()
@@ -654,10 +689,15 @@ fn item(
                 .child(format_size(i.size, r.size_is_estimate)),
         )
         .child(
-            ghost_button(
+            theme::focusable(
+                ghost_button(
+                    t,
+                    SharedString::from(format!("reveal-{}", i.item_id)),
+                    "Reveal",
+                ),
                 t,
-                SharedString::from(format!("reveal-{}", i.item_id)),
-                "Reveal",
+                Role::Button,
+                format!("Reveal {} in Finder", i.name),
             )
             .text_size(px(12.))
             .tooltip(tip("Reveal in Finder".into()))

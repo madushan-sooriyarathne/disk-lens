@@ -5,12 +5,16 @@ use gpui::{App, Context, KeyBinding, Window, actions, div, prelude::*, px};
 use super::model::{AppModel, Cleanup, Phase};
 use super::{cleanup, explorer, recommendations, screens, stat_cards, theme};
 
-actions!(disklens, [Back]);
+actions!(disklens, [Back, FocusNext, FocusPrev]);
 
 const CONTEXT: &str = "DiskLens";
 
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", Back, Some(CONTEXT))]);
+    cx.bind_keys([
+        KeyBinding::new("escape", Back, Some(CONTEXT)),
+        KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
+        KeyBinding::new("shift-tab", FocusPrev, Some(CONTEXT)),
+    ]);
 }
 
 impl Render for AppModel {
@@ -56,6 +60,8 @@ impl Render for AppModel {
             .children(toast)
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
             // Esc closes the cleanup dialog (not while it runs), then the context
             // menu, then the detail drawer, otherwise goes up one folder.
             .on_action(cx.listener(|this, _: &Back, _, cx| {

@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, Context, Div, FontWeight, Hsla, Stateful, Window, div, ease_in_out,
-    prelude::*, px, relative,
+    Animation, AnimationExt, Context, Div, FontWeight, Hsla, Role, Stateful, Window, div,
+    ease_in_out, prelude::*, px, relative,
 };
 
 use super::format::format_bytes;
@@ -40,9 +40,8 @@ fn title(text: &'static str) -> Div {
 }
 
 /// The Tailwind `mt-5 rounded-lg px-4 py-1.5 text-[13px] font-medium` button.
-fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
-    div()
-        .id(id)
+fn button(t: &Theme, id: &'static str, label: &'static str) -> Stateful<Div> {
+    theme::focusable(div().id(id), t, Role::Button, label)
         .mt_5()
         .px_4()
         .py(px(6.))
@@ -61,7 +60,7 @@ fn message(
     action: &'static str,
     cx: &mut Context<AppModel>,
 ) -> Div {
-    let go = button("scan", action)
+    let go = button(&t, "scan", action)
         .bg(t.text)
         .text_color(t.card)
         .on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)));
@@ -87,11 +86,11 @@ pub fn onboarding(
 ) -> impl IntoElement {
     let t = theme::current(window);
     let bg = t.bg;
-    let open = button("open-fda", "Open System Settings")
+    let open = button(&t, "open-fda", "Open System Settings")
         .bg(t.text)
         .text_color(t.card)
         .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx)));
-    let skip = button("skip-fda", "Continue without access")
+    let skip = button(&t, "skip-fda", "Continue without access")
         .border_1()
         .border_color(t.card_border)
         .hover(move |s| s.bg(bg))
@@ -178,7 +177,7 @@ pub fn scanning(
                 .with_easing(ease_in_out),
             |bar, d| bar.ml(relative((-1. + 4. * d) / 3.)),
         );
-    let cancel = button("cancel", "Cancel")
+    let cancel = button(&t, "cancel", "Cancel")
         .border_1()
         .border_color(t.card_border)
         .hover(|s| s.bg(t.bg))
@@ -262,19 +261,23 @@ pub fn banner(
         return banner;
     }
     banner.child(
-        div()
-            .id("grant-fda")
-            .flex_none()
-            .px_3()
-            .py_1()
-            .rounded_lg()
-            .border_1()
-            .border_color(t.review)
-            .bg(t.card)
-            .font_weight(FontWeight::MEDIUM)
-            .cursor_pointer()
-            .child("Grant Full Disk Access")
-            .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
+        theme::focusable(
+            div().id("grant-fda"),
+            &t,
+            Role::Button,
+            "Grant Full Disk Access",
+        )
+        .flex_none()
+        .px_3()
+        .py_1()
+        .rounded_lg()
+        .border_1()
+        .border_color(t.review)
+        .bg(t.card)
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .child("Grant Full Disk Access")
+        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
     )
 }
 

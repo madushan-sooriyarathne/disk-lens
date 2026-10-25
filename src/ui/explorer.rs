@@ -7,8 +7,8 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point,
-    SharedString, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
+    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Role,
+    SharedString, Toggled, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
 };
 
 use super::format::{format_age, format_bytes};
@@ -296,8 +296,12 @@ fn header(
     .into_iter()
     .map(|(m, label)| {
         let active = mode == m;
-        div()
-            .id(label)
+        theme::focusable(div().id(label), &t, Role::Button, format!("{label} view"))
+            .aria_toggled(if active {
+                Toggled::True
+            } else {
+                Toggled::False
+            })
             .cursor_pointer()
             .rounded_md()
             .px_3()
@@ -341,8 +345,7 @@ fn header(
                 .gap_2()
                 .children(age.map(|a| div().text_size(px(12.)).text_color(t.muted).child(a)))
                 .child(
-                    div()
-                        .id("rescan")
+                    theme::focusable(div().id("rescan"), &t, Role::Button, "Rescan")
                         .cursor_pointer()
                         .rounded_lg()
                         .px_3()
@@ -373,13 +376,17 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
             div().text_color(t.text).child(c.label).into_any_element()
         } else {
             let path = c.path;
-            div()
-                .id(SharedString::from(path.clone()))
-                .cursor_pointer()
-                .hover(move |s| s.text_color(t.text).underline())
-                .child(c.label)
-                .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
-                .into_any_element()
+            theme::focusable(
+                div().id(SharedString::from(path.clone())),
+                &t,
+                Role::Link,
+                format!("Go to {}", c.label),
+            )
+            .cursor_pointer()
+            .hover(move |s| s.text_color(t.text).underline())
+            .child(c.label)
+            .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
+            .into_any_element()
         };
         sep.into_iter().chain(Some(label))
     });
@@ -459,10 +466,20 @@ fn tile(
         .border_color(colors.border)
         .bg(colors.fill)
         .occlude()
-        .when(is_dir, |d| {
-            let path = node.path.clone();
-            d.cursor_pointer()
-                .on_click(cx.listener(move |m, _, _, cx| m.navigate(path.clone(), cx)))
+        .map(|d| {
+            let label = format!(
+                "{}, {size}, {}",
+                node.name,
+                theme::category_label(&node.category)
+            );
+            if is_dir {
+                let path = node.path.clone();
+                theme::focusable(d, &t, Role::Button, label)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |m, _, _, cx| m.navigate(path.clone(), cx)))
+            } else {
+                d.role(Role::Label).aria_label(label)
+            }
         })
         .on_mouse_down(MouseButton::Right, {
             let node_id = node.id.clone();
