@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3.5 merged; Phase 4 (cleanup engine) verified on macOS, with open findings in `docs/PLAN.md` and `docs/QA.md`; do not start Phase 5 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review, with open items in `docs/PLAN.md`; do not start Phase 6 unprompted.
 
 ## Commands
 
@@ -26,6 +26,8 @@ cargo test                                  # all tests; tests/sandbox_rows.rs n
 cargo test <name>                           # single test
 scripts/make-fixture.sh                     # rebuild .sandbox/home (idempotent)
 cargo run --release --bin scan-bench -- <path>   # read-only scan, compares size with du (1% goal)
+scripts/make-perf-tree.sh                   # 2M empty files in .sandbox/perf for the memory target
+cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
 ```
 
 Every phase ends with `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` passing.
@@ -37,14 +39,15 @@ Backend (`src/`):
 - `backend.rs`: plain functions on `&Arc<AppState>` (`start_scan`, `cancel_scan`, `load_last_snapshot`, `get_view`, `get_recommendations`, `get_item_details`, `reveal_in_finder`). `start_scan` canonicalizes the scan root, runs `scanner::scan` on its own thread and reports `ScanEvent` (progress / finished / failed) through a callback. On success it saves the snapshot (zstd JSON, `scanner/snapshot.rs`), runs the analysis and swaps both into state as `Current`. `load_last_snapshot` does the same at startup.
 - `scanner/`: `walk.rs` (parallel lstat walk, no symlink following, same-device only), `hardlinks.rs` (each inode counted once), `tree.rs` (arena `Vec<DirNode>` with bottom-up sizes; also the contract types), `volume.rs` (capacity).
 - `rules/`: `rules/rules.toml` (repo root) embedded and validated at startup (`model`, `load`, `validate`), `matcher` (one DFS per snapshot, RULES.md 4.1), `category` (section 6, markers checked lazily on disk), `guards` (match-time, blocking, safety), `tools` (login-shell PATH; sandbox mode resolves only `git`).
-- `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes.
+- `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes. `full_disk_access` probes `TCC.db` under the real home.
+- `settings.rs`: `settings.json` in the data dir (only `onboarding_done`).
 - `providers/`: ollama, git worktrees, simctl and docker item enumeration.
 - `cleanup/`: `protected.rs` (hardcoded protect list, equality test with `[[protect]]`, and `refusal`: the RULES.md section 5 checks against the disk), `plan.rs` (item IDs of the current snapshot to a `CleanupPlan`), `revalidate.rs` (S-03/S-04 right before each action), `execute.rs` (`Engine`, sequential, dry run, continues past failures), `audit.rs` (JSON lines), `script.rs` (bash export). `backend.rs` stores plans by ID, clears them on every new snapshot, and runs a plan once on its own thread (`build_cleanup_plan`, `export_script`, `execute_cleanup`).
 - `recommend/build.rs`: `analyze` (matches, providers, min size) runs once per snapshot; rows are rebuilt on every `get_recommendations` because blocking guards depend on what runs now. `get_item_details` adds description, regenerates and largest subfolders.
 - `view.rs`: `get_view` builds the treemap model on demand from the snapshot: the requested folder plus two levels, small siblings merged into "Other", with category, tier and rule filled from the analysis. Paths from the UI are resolved against the snapshot (`validated_path`); anything outside it is refused.
 
 UI (`src/ui/`, GPUI):
-- `mod.rs` opens the window and loads the fonts; `root.rs` renders `AppModel` by phase (loading / idle / scanning / ready / error).
+- `mod.rs` opens the window and loads the fonts; `root.rs` renders `AppModel` by phase (loading / onboarding / idle / scanning / ready / error); Tab and Shift-Tab move focus, Esc goes back.
 - `model.rs`: `AppModel`, the single GPUI entity (phase, snapshot meta, explorer path and mode, recommendations, selected item IDs, drawer row). Backend calls run off the UI thread; recommendations refresh on window activation.
 - `source.rs`: `Source::Live` (calls `backend.rs`) or `Source::Mock` (`assets/mock/snapshot.mock.json`, chosen by `DISKLENS_MOCK`).
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3), `stats.rs`, `selection.rs`, `format.rs`, `theme.rs` (tokens; category colors from `rules.toml`).
@@ -56,7 +59,7 @@ UI (`src/ui/`, GPUI):
 - Debug builds default to `DISKLENS_DRY_RUN=1` (see `src/config.rs`).
 - Do not run `rm`, `git clean` or any cleanup command outside this repository.
 - Real cleanup execution is enabled only in Phase 4, on a single safe item (the npm cache), and only when the user explicitly says so.
-- `scripts/make-fixture.sh` may only delete `<repo>/.sandbox`; keep its path guard.
+- `scripts/make-fixture.sh` may only delete `<repo>/.sandbox`, and `scripts/make-perf-tree.sh` only `<repo>/.sandbox/perf`; keep their path guards.
 - No TODOs in safety-related code (`cleanup/`, `rules/guards.rs`, `rules/matcher.rs`).
 
 ## Conventions

@@ -53,7 +53,20 @@ The audit log of sandboxed runs is `.sandbox/logs/cleanup.log`; of real-home run
 
 ## Relaunch
 
-- [ ] Quit and relaunch: the last snapshot loads with "Scanned X ago", and selection is empty. (2026-10-25: snapshot loads and selection is empty, but "Scanned X ago" is not rendered; see Results.)
+- [ ] Quit and relaunch: the last snapshot loads with "Scanned X ago", and selection is empty. (2026-10-25: snapshot loads and selection is empty, but "Scanned X ago" is not rendered; see Results. Built in Phase 5; recheck.)
+
+## Phase 5: access, appearance, keyboard
+
+- [ ] Fresh macOS user account, DiskLens not yet granted Full Disk Access: the first launch shows "Allow Full Disk Access". Open System Settings lands on Privacy & Security, Full Disk Access.
+- [ ] Grant access, switch back to DiskLens: onboarding closes without a restart.
+- [ ] Revoke access and relaunch. Continue without access, then quit and relaunch: onboarding does not show again (`settings.json` in the data dir has `"onboarding_done": true`).
+- [ ] Without access, scan the real home folder (read-only): the banner counts unreadable folders and its Grant Full Disk Access button opens the same pane.
+- [ ] Hover a tile that no rule matches: the tooltip shows its category's description. A matched tile shows its rule's description.
+- [ ] Switch macOS between Light and Dark while the app runs: every surface repaints, with no light leftovers in dark mode (dialogs, tooltips and the toast included).
+- [ ] Tab from the window start: focus moves through header controls, tiles, row checkboxes, chevrons and footer buttons with a visible ring; Shift-Tab goes back. Mouse clicks show no ring.
+- [ ] Enter on a focused folder tile drills in, and Esc still goes up afterwards. Space on a row checkbox toggles it. Enter on a chevron opens the drawer.
+- [ ] In the cleanup confirm dialog, Tab never reaches the Clean button and Enter does nothing; Cancel is reachable.
+- [ ] VoiceOver (Cmd-F5): tiles read as name, size and category; checkboxes read their label and checked state; buttons read their names.
 
 ## Supervised real run (only when the user says so)
 

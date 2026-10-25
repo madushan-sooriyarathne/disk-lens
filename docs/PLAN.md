@@ -2,7 +2,7 @@
 
 Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 
-## Status and roadmap (as of 2026-10-24)
+## Status and roadmap (as of 2026-10-25)
 
 | Phase | State | Notes |
 |-------|-------|-------|
@@ -12,10 +12,10 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. The UI review moves to the GPUI build (Phase 3.5) |
 | 3.5 GPUI migration | Done, merged | Interactions still need a check in the native window (see What is left) |
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
-| 5 Permissions, persistence, polish | Not started | |
+| 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Not started | |
 
-Last full gate run on macOS (Phase 4, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (268 tests) all pass.
+Last full gate run on macOS (Phase 5, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (301 tests) all pass.
 
 ### What is left
 
@@ -32,13 +32,25 @@ Last full gate run on macOS (Phase 4, 2026-10-25): `cargo fmt --check`, `cargo c
 - Open: Finder's Put Back is not offered for items trashed with `NsFileManager` (decide: Finder method or drop the check); toggling permanent deletion re-renders the confirm dialog; a mount-point refusal is still untested (cannot be built in a test).
 
 **Phase 5: permissions, persistence, polish**
-- `check_permissions` and `open_fda_settings` backend functions, an onboarding screen in `src/ui/screens.rs`, FDA recheck on window focus (PRD 7.8).
-- `settings.json` in Application Support (PRD 7.9). Nothing reads or writes it yet.
-- Dark mode tokens in `src/ui/theme.rs` (light tokens exist, no dark values), chosen from `window.appearance()`.
-- Keyboard navigation for tiles and rows, VoiceOver labels, focus rings, WCAG AA contrast check.
-- Performance pass on a synthetic 2M-file tree: peak memory under 400 MB (the real 3.8M-file scan peaked at about 444 MB), treemap layout under 16 ms for 400 tiles.
-- "Scanned X ago" is not built yet (the 2026-10-25 QA run found no code for it). Rescan and the inaccessible-folders banner exist; verify the banner against the acceptance checks.
-- Decide how G2 is met: only rule-matched rows carry a description today. Nodes of 1 GB or more without a rule have a category but no one-line description. Options: a description per `[[category]]` in `rules.toml` (with the matching RULES.md change), or narrow G2.
+- Built:
+  - Full Disk Access: `platform::full_disk_access` opens `TCC.db` under the real home. The backend has `check_permissions` and `open_fda_settings`.
+  - Onboarding: `Phase::Onboarding` in `src/ui/model.rs`, with the card in `src/ui/screens.rs`. Access is rechecked on every window activation. The unreadable-folders banner offers "Grant Full Disk Access" while access is missing.
+  - Settings: `src/settings.rs` writes `settings.json` in the data dir. Its only field is `onboarding_done`.
+  - "Scanned X ago" before Rescan (`format_age` in `src/ui/format.rs`).
+  - G2: each `[[category]]` has a `description`. The tile tooltip shows the matching rule's description, otherwise the category's.
+  - Dark mode: `Theme::dark()` follows `window.appearance()` and repaints when the appearance changes. Category colors come from `fill_dark` and `border_dark` in `rules.toml`. Validation rejects colors that are not `#RRGGBB`.
+  - Keyboard: Tab and Shift-Tab reach tiles, header controls, breadcrumb links, checkboxes, the chevrons and buttons. Enter and Space click the focused element. A focus ring shows for keyboard focus only.
+  - Accessibility: controls carry AccessKit roles and labels, and the macOS adapter is wired in `gpui-pre-macos`.
+  - Cleanup safety: the cleanup confirm button is not a Tab stop, so Enter never confirms (PRD 7.6).
+- Measured (2026-10-25, Apple Silicon, release build):
+  - `scripts/make-perf-tree.sh` builds 2,000,000 empty files in 202,121 folders.
+  - `scan-bench` peak resident memory: 189 MB (target 400 MB). Scan time about 20 s.
+  - Treemap layout of 420 tiles: under 1 ms (target 16 ms), from `cargo test --release -- --ignored layout_of_400_tiles`.
+  - No optimisation was needed.
+  - The earlier real 3.8M-file home scan (about 444 MB) had more files than the 2M target.
+- Open:
+  - Run the Phase 5 checks in `docs/QA.md`: onboarding on a fresh macOS user account, VoiceOver reading the labels, keyboard navigation in the native window, and dark mode.
+  - Contrast: the PRD's tier colors fail WCAG AA as text in light mode. Safe green on its pill fill is 2.9:1, and review amber on its fill is 2.0:1; blocked reasons are in amber on white. Decide whether to darken the light text shades (fills and hatches can stay) or accept it. Dark mode passes, and the tests cover the text and muted tokens in both themes.
 
 **Phase 6: packaging and release**
 - Final icon, bundle identifier (placeholder today) and version 1.0.0.

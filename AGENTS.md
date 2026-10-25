@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3 committed; Phase 3.5 (Tauri and React replaced by GPUI) done on branch `gpui-migration`, awaiting review; do not start Phase 4 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review, with open items in `docs/PLAN.md`; do not start Phase 6 unprompted.
 
 ## Commands
 
