@@ -1,4 +1,4 @@
-//! Size formatting.
+//! Size and age formatting.
 
 const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
 
@@ -35,6 +35,26 @@ pub fn format_size(bytes: u64, estimate: bool) -> String {
     }
 }
 
+/// How long ago `then` was, both in Unix seconds: "just now", "5 min ago",
+/// "2 h ago", "3 days ago". A time in the future reads "just now".
+pub fn format_age(now: i64, then: i64) -> String {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    let age = now.saturating_sub(then);
+    if age < MINUTE {
+        "just now".into()
+    } else if age < HOUR {
+        format!("{} min ago", age / MINUTE)
+    } else if age < DAY {
+        format!("{} h ago", age / HOUR)
+    } else if age < 2 * DAY {
+        "1 day ago".into()
+    } else {
+        format!("{} days ago", age / DAY)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,6 +73,36 @@ mod tests {
         assert_eq!(format_bytes(100_500), "101 KB");
         // 1.15 is below the tie in binary, so JS gives 1.1 too.
         assert_eq!(format_bytes(1_150), "1.1 KB");
+    }
+
+    #[test]
+    fn age_under_a_minute_is_just_now() {
+        assert_eq!(format_age(1_000, 941), "just now");
+    }
+
+    #[test]
+    fn age_in_the_future_is_just_now() {
+        assert_eq!(format_age(1_000, 5_000), "just now");
+    }
+
+    #[test]
+    fn age_in_minutes() {
+        assert_eq!(format_age(10_000, 10_000 - 5 * 60 - 30), "5 min ago");
+    }
+
+    #[test]
+    fn age_in_hours() {
+        assert_eq!(format_age(100_000, 100_000 - 2 * 3_600 - 59), "2 h ago");
+    }
+
+    #[test]
+    fn age_of_one_day_is_singular() {
+        assert_eq!(format_age(200_000, 200_000 - 86_400), "1 day ago");
+    }
+
+    #[test]
+    fn age_in_days() {
+        assert_eq!(format_age(1_000_000, 1_000_000 - 3 * 86_400), "3 days ago");
     }
 
     #[test]

@@ -11,11 +11,12 @@ use gpui::{
     SharedString, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
 };
 
-use super::format::format_bytes;
+use super::format::{format_age, format_bytes};
 use super::model::AppModel;
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
+use crate::cleanup::audit::now_ms;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
 /// Context menu opened by a right click on a tile.
@@ -211,7 +212,12 @@ pub fn render(
         .border_1()
         .border_color(t.card_border)
         .bg(t.card)
-        .child(header(model.mode, t, cx))
+        .child(header(
+            model.mode,
+            model.meta.as_ref().map(|m| m.scanned_at),
+            t,
+            cx,
+        ))
         .child(breadcrumb(model, t, cx))
         .child(treemap)
         .child(legend(t))
@@ -258,7 +264,15 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
     .size_full()
 }
 
-fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
+/// `scanned_at` is the snapshot time, shown as "Scanned 2 h ago" before Rescan (US-13).
+fn header(
+    mode: ViewMode,
+    scanned_at: Option<i64>,
+    t: Theme,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
+    // Re-rendered on window focus and every interaction, so the age stays current enough.
+    let age = scanned_at.map(|at| format!("Scanned {}", format_age(now_ms() as i64 / 1000, at)));
     let toggle = [
         (ViewMode::Category, "Category"),
         (ViewMode::Cleanup, "Cleanup"),
@@ -309,6 +323,7 @@ fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElem
                 .flex()
                 .items_center()
                 .gap_2()
+                .children(age.map(|a| div().text_size(px(12.)).text_color(t.muted).child(a)))
                 .child(
                     div()
                         .id("rescan")

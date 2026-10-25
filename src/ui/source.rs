@@ -57,9 +57,11 @@ const SCAN_STEPS: u64 = 12;
 
 impl MockData {
     pub fn new(preselect: bool) -> Self {
-        let file: MockFile =
+        let mut file: MockFile =
             serde_json::from_str(include_str!("../../assets/mock/snapshot.mock.json"))
                 .expect("assets/mock/snapshot.mock.json is valid");
+        // Reads "Scanned 2 h ago", like US-13.
+        file.meta.scanned_at = crate::cleanup::audit::now_ms() as i64 / 1000 - 2 * 3_600;
         Self {
             file: Box::new(file),
             preselect,
