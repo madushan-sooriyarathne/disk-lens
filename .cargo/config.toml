@@ -1,0 +1,3 @@
+[env]
+# Both slices of the universal binary must link for the macOS 13 floor in the bundle's Info.plist.
+MACOSX_DEPLOYMENT_TARGET = "13.0"
