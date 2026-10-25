@@ -92,6 +92,12 @@ impl Machine {
             .get_or_init(|| Tools::discover(&self.home, self.sandbox))
     }
 
+    /// Full Disk Access is a property of this process, so the real home is probed
+    /// even when a sandbox is scanned.
+    pub fn full_disk_access(&self) -> bool {
+        crate::platform::full_disk_access(&self.home)
+    }
+
     pub fn env<'a>(&'a self, facts: &'a Facts) -> Env<'a> {
         Env {
             facts,

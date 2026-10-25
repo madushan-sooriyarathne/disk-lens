@@ -64,6 +64,22 @@ impl Trash for MacTrash {
     }
 }
 
+/// The privacy database only processes with Full Disk Access can open (PRD 7.8).
+const TCC_DB: &str = "Library/Application Support/com.apple.TCC/TCC.db";
+
+/// Whether this process has Full Disk Access: `TCC.db` under the real `home`
+/// opens for reading. The file is opened, never read.
+pub fn full_disk_access(home: &Path) -> bool {
+    match std::fs::File::open(home.join(TCC_DB)) {
+        Ok(_) => true,
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => false,
+        Err(e) => {
+            tracing::warn!("full disk access check failed, treating as not granted: {e}");
+            false
+        }
+    }
+}
+
 /// `sysinfo` for processes, `NSWorkspace.runningApplications` for apps.
 pub struct MacSystem;
 
@@ -293,6 +309,34 @@ mod tests {
                 .unwrap()
                 .success
         );
+    }
+
+    fn home_with_tcc_db(mode: u32) -> tempfile::TempDir {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let db = home.path().join(TCC_DB);
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, "").unwrap();
+        std::fs::set_permissions(&db, std::fs::Permissions::from_mode(mode)).unwrap();
+        home
+    }
+
+    #[test]
+    fn full_disk_access_when_tcc_db_opens() {
+        let home = home_with_tcc_db(0o600);
+        assert!(full_disk_access(home.path()));
+    }
+
+    #[test]
+    fn no_full_disk_access_when_tcc_db_is_unreadable() {
+        let home = home_with_tcc_db(0o000);
+        assert!(!full_disk_access(home.path()));
+    }
+
+    #[test]
+    fn no_full_disk_access_when_tcc_db_is_missing() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(!full_disk_access(home.path()));
     }
 
     #[test]

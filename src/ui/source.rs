@@ -35,6 +35,8 @@ pub struct MockData {
     cancelled: Arc<AtomicBool>,
     /// The last plan built; the mock keeps one at a time.
     plan: Mutex<Option<CleanupPlan>>,
+    /// Full Disk Access as the mock reports it. Granted, so mock runs skip onboarding.
+    pub full_disk_access: AtomicBool,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -61,6 +63,7 @@ impl MockData {
             step: Duration::from_millis(150),
             cancelled: Arc::new(AtomicBool::new(false)),
             plan: Mutex::new(None),
+            full_disk_access: AtomicBool::new(true),
         }
     }
 
@@ -314,6 +317,20 @@ impl Source {
     pub fn reveal(&self, path: &str) -> Result<()> {
         match self {
             Self::Live(state) => backend::reveal_in_finder(state, path.to_owned()),
+            Self::Mock(_) => Ok(()),
+        }
+    }
+
+    pub fn full_disk_access(&self) -> bool {
+        match self {
+            Self::Live(state) => backend::check_permissions(state),
+            Self::Mock(m) => m.full_disk_access.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn open_fda_settings(&self) -> Result<()> {
+        match self {
+            Self::Live(_) => backend::open_fda_settings(),
             Self::Mock(_) => Ok(()),
         }
     }

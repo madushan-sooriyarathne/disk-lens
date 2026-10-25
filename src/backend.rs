@@ -19,6 +19,10 @@ use crate::scanner::{self, ScanOptions, snapshot};
 use crate::state::{AppState, Current};
 use crate::view::{self, ViewMode, ViewNode};
 
+/// System Settings, Privacy & Security, Full Disk Access (PRD 7.8).
+const FDA_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
 /// Starts a scan on its own thread and returns immediately; progress and the
 /// result arrive through `on_event`, called on that thread.
 pub fn start_scan(
@@ -160,6 +164,18 @@ pub fn reveal_in_finder(state: &Arc<AppState>, node_path: String) -> Result<()> 
     let path = view::validated_path(&cur.snapshot, Path::new(&node_path))?;
     // argv, no shell.
     Command::new("/usr/bin/open").arg("-R").arg(path).status()?;
+    Ok(())
+}
+
+/// Whether the app has Full Disk Access (PRD 7.8). Cheap enough to call on every window focus.
+pub fn check_permissions(state: &Arc<AppState>) -> bool {
+    state.machine.full_disk_access()
+}
+
+/// Opens System Settings at Privacy & Security, Full Disk Access.
+pub fn open_fda_settings() -> Result<()> {
+    // argv, no shell.
+    Command::new("/usr/bin/open").arg(FDA_SETTINGS).status()?;
     Ok(())
 }
 
