@@ -11,11 +11,11 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 2 Explorer UI | Done, approved | |
 | 3 Rules engine and recommendations | Done, awaiting review | All automated checks pass. The UI review moves to the GPUI build (Phase 3.5) |
 | 3.5 GPUI migration | Done, merged | Interactions still need a check in the native window (see What is left) |
-| 4 Cleanup engine | Code done, awaiting macOS verification | Built in a Linux cloud session: type-checked for `aarch64-apple-darwin`, backend tests run on Linux. GPUI tests, the native window, the real Trash and the supervised npm run need a Mac (see What is left) |
+| 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Not started | |
 | 6 Packaging and release | Not started | |
 
-Last full gate run on macOS (Phase 3.5): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (188 tests) all pass. Phase 4 still needs that run on a Mac.
+Last full gate run on macOS (Phase 4, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (268 tests) all pass.
 
 ### What is left
 
@@ -28,8 +28,8 @@ Last full gate run on macOS (Phase 3.5): `cargo fmt --check`, `cargo clippy --al
 - Built: `cleanup/` (`model`, `protected` refusals, `plan`, `revalidate`, `execute`, `audit`, `script`), the backend functions, and `src/ui/cleanup.rs` (confirm, progress, results, toast). Copy script and Clean selected are enabled.
 - Decisions: after a cleanup the whole scan root is rescanned (not only the parent folders); "inside home" means inside the scan root, so sandboxed runs work; sandboxed audit logs go to `<scan root>/../logs` (`.sandbox/logs`).
 - Verified in the Linux session: the cleanup unit tests, `tests/cleanup_adversarial.rs`, `tests/cleanup_engine.rs`, `tests/cleanup_backend.rs` and `tests/script.rs` pass on a Linux build with the UI and macOS calls stubbed out; a full real cleanup of `.sandbox` (31 ready items, Trash redirected into `.sandbox/`) removed every ready item, left blocked and protected paths alone, and the audit log had one line per item.
-- Left for a Mac: the full gate (`cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`, including the new `AppModel` cleanup tests); the native-window checks in `docs/QA.md`; trashing through `NSFileManager`; a mount-point refusal (cannot be built in a test).
-- One supervised real run on the npm cache, only when the user says so.
+- Verified on macOS (2026-10-25): the full gate, the native-window checks in `docs/QA.md` (Phase 3.5 interactions included), trashing through `NSFileManager`, and the supervised npm run (freed size matched `du` exactly). Results are in `docs/QA.md`.
+- Open: Finder's Put Back is not offered for items trashed with `NsFileManager` (decide: Finder method or drop the check); toggling permanent deletion re-renders the confirm dialog; a mount-point refusal is still untested (cannot be built in a test).
 
 **Phase 5: permissions, persistence, polish**
 - `check_permissions` and `open_fda_settings` backend functions, an onboarding screen in `src/ui/screens.rs`, FDA recheck on window focus (PRD 7.8).
@@ -37,7 +37,7 @@ Last full gate run on macOS (Phase 3.5): `cargo fmt --check`, `cargo clippy --al
 - Dark mode tokens in `src/ui/theme.rs` (light tokens exist, no dark values), chosen from `window.appearance()`.
 - Keyboard navigation for tiles and rows, VoiceOver labels, focus rings, WCAG AA contrast check.
 - Performance pass on a synthetic 2M-file tree: peak memory under 400 MB (the real 3.8M-file scan peaked at about 444 MB), treemap layout under 16 ms for 400 tiles.
-- Already done from this phase: "Scanned X ago" with Rescan, and the inaccessible-folders banner. Verify both against the acceptance checks.
+- "Scanned X ago" is not built yet (the 2026-10-25 QA run found no code for it). Rescan and the inaccessible-folders banner exist; verify the banner against the acceptance checks.
 - Decide how G2 is met: only rule-matched rows carry a description today. Nodes of 1 GB or more without a rule have a category but no one-line description. Options: a description per `[[category]]` in `rules.toml` (with the matching RULES.md change), or narrow G2.
 
 **Phase 6: packaging and release**

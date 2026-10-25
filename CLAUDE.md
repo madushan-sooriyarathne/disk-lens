@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3.5 merged; Phase 4 (cleanup engine) code done, awaiting verification on a Mac (see `docs/PLAN.md` status and `docs/QA.md`); do not start Phase 5 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-3.5 merged; Phase 4 (cleanup engine) verified on macOS, with open findings in `docs/PLAN.md` and `docs/QA.md`; do not start Phase 5 unprompted.
 
 ## Commands
 
