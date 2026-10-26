@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use super::format::format_bytes;
-use super::model::AppModel;
+use super::model::{AppModel, UpdateState};
 use super::theme::{self, Theme};
 
 const CARD_WIDTH: f32 = 480.;
@@ -278,6 +278,77 @@ pub fn banner(
         .cursor_pointer()
         .child("Grant Full Disk Access")
         .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
+    )
+}
+
+/// Button label and what a click does.
+type UpdateAction = (&'static str, fn(&mut AppModel, &mut Context<AppModel>));
+
+/// Update notice under the banner: an available release, the install, and the restart. Empty when idle.
+pub fn update_banner(
+    model: &mut AppModel,
+    window: &mut Window,
+    cx: &mut Context<AppModel>,
+) -> Option<Div> {
+    let t = theme::current(window);
+    let can_install = model.can_install_update();
+    // (text, button label, action); no button while installing.
+    let (text, button): (String, Option<UpdateAction>) = match &model.update_state {
+        UpdateState::Idle => return None,
+        UpdateState::Available { version } if can_install => (
+            format!("DiskLens {version} is available"),
+            Some(("Install", AppModel::install_update)),
+        ),
+        UpdateState::Available { version } => (
+            format!(
+                "DiskLens {version} is available. Install after the current scan or cleanup finishes."
+            ),
+            None,
+        ),
+        UpdateState::Installing => ("Installing update…".into(), None),
+        UpdateState::Ready if can_install => (
+            "Restart to finish the update".into(),
+            Some(("Restart", |_, cx| cx.restart())),
+        ),
+        UpdateState::Ready => (
+            "Restart to finish the update after the current scan or cleanup finishes.".into(),
+            None,
+        ),
+        UpdateState::Failed(message) => (
+            format!("Update failed: {message}"),
+            Some(("Dismiss", AppModel::dismiss_update)),
+        ),
+    };
+    let banner = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_4()
+        .py_2()
+        .rounded_lg()
+        .border_1()
+        .border_color(t.review)
+        .bg(t.review_fill)
+        .text_size(px(13.))
+        .child(div().flex_1().child(text));
+    let Some((label, action)) = button else {
+        return Some(banner);
+    };
+    Some(
+        banner.child(
+            theme::focusable(div().id("update-action"), &t, Role::Button, label)
+                .flex_none()
+                .px_3()
+                .py_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(t.review)
+                .bg(t.card)
+                .font_weight(FontWeight::MEDIUM)
+                .cursor_pointer()
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| action(this, cx))),
+        ),
     )
 }
 

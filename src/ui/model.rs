@@ -16,6 +16,7 @@ use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary};
 use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
+use crate::update;
 use crate::view::{ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
@@ -54,6 +55,20 @@ pub enum Cleanup {
     Results {
         summary: CleanupSummary,
     },
+}
+
+/// Where the in-app update stands (banner in `screens.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Available {
+        version: String,
+    },
+    Installing,
+    /// Installed on disk; the running app is still the old build until it restarts.
+    Ready,
+    Failed(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -97,6 +112,9 @@ pub struct AppModel {
     pub focus_handle: FocusHandle,
     pub explorer: ExplorerState,
     pub panel: PanelState,
+    pub update_state: UpdateState,
+    /// The release behind `UpdateState::Available`, kept for the install.
+    pending_update: Option<update::Update>,
     /// Bumped per view request; an older response is dropped when it arrives late.
     view_seq: u64,
     /// Polls the running scan's events; dropped when a new scan starts.
@@ -133,6 +151,27 @@ fn off_thread<R: Send + 'static>(
     .detach();
 }
 
+/// Looks for a newer release once. A missing release or no network is normal, so failures
+/// only reach the log.
+fn check_for_update(cx: &mut Context<AppModel>) {
+    let task = cx.background_spawn(async { update::check() });
+    cx.spawn(async move |this, cx| match task.await {
+        Ok(Some(found)) => {
+            this.update(cx, |model, cx| {
+                model.update_state = UpdateState::Available {
+                    version: found.version.clone(),
+                };
+                model.pending_update = Some(found);
+                cx.notify();
+            })
+            .ok();
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!("{e}"),
+    })
+    .detach();
+}
+
 /// The folder above `path`, like `parentOf` in the old view store.
 fn parent_of(path: &str) -> &str {
     path.rfind('/')
@@ -165,6 +204,13 @@ impl AppModel {
             window.focus(&this.focus_handle, cx);
         });
         let source = Arc::new(source);
+        let (is_mock, is_sandboxed) = match source.as_ref() {
+            Source::Live(state) => (false, state.config.scan_root.is_some()),
+            Source::Mock(_) => (true, false),
+        };
+        if update::is_enabled(is_mock, is_sandboxed) {
+            check_for_update(cx);
+        }
         // Onboarding first when access is missing and was never dismissed.
         off_thread(
             &source,
@@ -201,6 +247,8 @@ impl AppModel {
             focus_handle,
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
+            update_state: UpdateState::Idle,
+            pending_update: None,
             view_seq: 0,
             scan_task: None,
             cleanup_task: None,
@@ -223,6 +271,43 @@ impl AppModel {
                 None => this.phase = Phase::Idle,
             },
         );
+    }
+
+    /// Installing or restarting under a running scan or cleanup would cut it short.
+    pub fn can_install_update(&self) -> bool {
+        self.phase != Phase::Scanning && self.cleanup.is_none()
+    }
+
+    pub fn install_update(&mut self, cx: &mut Context<Self>) {
+        if !self.can_install_update() {
+            return;
+        }
+        let Some(found) = self.pending_update.take() else {
+            return;
+        };
+        self.update_state = UpdateState::Installing;
+        cx.notify();
+        let task = cx.background_spawn(async move { update::install(&found) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |model, cx| {
+                model.update_state = match result {
+                    Ok(()) => UpdateState::Ready,
+                    Err(e) => {
+                        tracing::warn!("{e}");
+                        UpdateState::Failed(e.to_string())
+                    }
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn dismiss_update(&mut self, cx: &mut Context<Self>) {
+        self.update_state = UpdateState::Idle;
+        cx.notify();
     }
 
     /// Updates `full_disk_access`, and leaves onboarding once access is granted.
@@ -818,6 +903,39 @@ mod tests {
             Source::Mock(mock) => mock.full_disk_access.store(true, Ordering::Relaxed),
             Source::Live(_) => unreachable!("tests use the mock"),
         });
+    }
+
+    #[gpui::test]
+    fn no_install_while_scanning(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.phase = Phase::Scanning);
+        assert!(!model.read_with(cx, |m, _| m.can_install_update()));
+    }
+
+    #[gpui::test]
+    fn no_install_while_a_cleanup_dialog_is_open(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.cleanup = Some(Cleanup::Planning));
+        assert!(!model.read_with(cx, |m, _| m.can_install_update()));
+    }
+
+    #[gpui::test]
+    fn install_is_allowed_when_idle(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        assert!(model.read_with(cx, |m, _| m.can_install_update()));
+    }
+
+    #[gpui::test]
+    fn dismissing_a_failed_update_goes_idle(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.update_state = UpdateState::Failed("offline".into());
+            m.dismiss_update(cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| m.update_state.clone()),
+            UpdateState::Idle
+        );
     }
 
     #[gpui::test]

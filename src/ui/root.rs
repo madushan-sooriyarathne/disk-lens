@@ -38,6 +38,7 @@ impl Render for AppModel {
                 .flex_col()
                 .gap_4()
                 .child(screens::banner(self, window, cx))
+                .children(screens::update_banner(self, window, cx))
                 .child(stat_cards::render(self, window, cx))
                 .child(
                     div()
