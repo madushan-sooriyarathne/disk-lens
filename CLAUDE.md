@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review, with open items in `docs/PLAN.md`; do not start Phase 6 unprompted.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet.
 
 ## Commands
 
@@ -27,6 +27,8 @@ cargo test <name>                           # single test
 scripts/make-fixture.sh                     # rebuild .sandbox/home (idempotent)
 cargo run --release --bin scan-bench -- <path>   # read-only scan, compares size with du (1% goal)
 scripts/make-perf-tree.sh                   # 2M empty files in .sandbox/perf for the memory target
+scripts/package.sh                          # universal DiskLens.app + DMG (+ update artifacts) in target/packager
+scripts/make-icon.sh                        # regenerate assets/icons/icon.icns from icon.svg
 cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
 ```
 
@@ -41,6 +43,7 @@ Backend (`src/`):
 - `rules/`: `rules/rules.toml` (repo root) embedded and validated at startup (`model`, `load`, `validate`), `matcher` (one DFS per snapshot, RULES.md 4.1), `category` (section 6, markers checked lazily on disk), `guards` (match-time, blocking, safety), `tools` (login-shell PATH; sandbox mode resolves only `git`).
 - `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes. `full_disk_access` probes `TCC.db` under the real home.
 - `settings.rs`: `settings.json` in the data dir (only `onboarding_done`).
+- `update.rs`: one update check per launch against `latest.json` on GitHub Releases (`cargo-packager-updater`, minisign key `assets/update.pub`); off in debug, mock and sandboxed runs unless `DISKLENS_UPDATE_URL` is set. The UI shows it as a banner (install, then restart).
 - `providers/`: ollama, git worktrees, simctl and docker item enumeration.
 - `cleanup/`: `protected.rs` (hardcoded protect list, equality test with `[[protect]]`, and `refusal`: the RULES.md section 5 checks against the disk), `plan.rs` (item IDs of the current snapshot to a `CleanupPlan`), `revalidate.rs` (S-03/S-04 right before each action), `execute.rs` (`Engine`, sequential, dry run, continues past failures), `audit.rs` (JSON lines), `script.rs` (bash export). `backend.rs` stores plans by ID, clears them on every new snapshot, and runs a plan once on its own thread (`build_cleanup_plan`, `export_script`, `execute_cleanup`).
 - `recommend/build.rs`: `analyze` (matches, providers, min size) runs once per snapshot; rows are rebuilt on every `get_recommendations` because blocking guards depend on what runs now. `get_item_details` adds description, regenerates and largest subfolders.
@@ -60,6 +63,8 @@ UI (`src/ui/`, GPUI):
 - Do not run `rm`, `git clean` or any cleanup command outside this repository.
 - Real cleanup execution is enabled only in Phase 4, on a single safe item (the npm cache), and only when the user explicitly says so.
 - `scripts/make-fixture.sh` may only delete `<repo>/.sandbox`, and `scripts/make-perf-tree.sh` only `<repo>/.sandbox/perf`; keep their path guards.
+- Never publish a release (`gh release create`, uploads, tags pushed) unless the user says so; `scripts/package.sh` only prints the command.
+- Never commit or print signing secrets: the minisign private key, `.p12` files, `APPLE_*` values. Only `assets/update.pub` is committed.
 - No TODOs in safety-related code (`cleanup/`, `rules/guards.rs`, `rules/matcher.rs`).
 
 ## Conventions
@@ -78,6 +83,10 @@ UI (`src/ui/`, GPUI):
 | `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release                                                                         |
 | `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens`. The audit log follows the same rule: `<scan root>/../logs` when sandboxed, else `~/Library/Logs/DiskLens` |
 | `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows                                                                                       |
+| `DISKLENS_UPDATE_URL` | Update endpoint override (dev and QA only); also turns the update check on in debug, mock and sandboxed runs |
+| `DISKLENS_SIGNING_IDENTITY` | `scripts/package.sh`: codesign identity, e.g. `Developer ID Application: … (TEAM)`. Unset = ad-hoc (`-`) |
+| `CARGO_PACKAGER_SIGN_PRIVATE_KEY`, `CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD` | `scripts/package.sh`: minisign key (file path or key text) and its password; when set, the update tarball, `.sig` and `latest.json` are produced |
+| `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH` | `scripts/package.sh`: notarization credentials read by cargo-packager; notarization is skipped without them |
 
 ## Workflow
 

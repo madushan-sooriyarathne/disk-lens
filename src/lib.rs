@@ -10,4 +10,5 @@ pub mod scanner;
 pub mod settings;
 pub mod state;
 pub mod ui;
+pub mod update;
 pub mod view;

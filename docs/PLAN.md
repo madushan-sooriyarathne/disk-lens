@@ -13,9 +13,9 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 3.5 GPUI migration | Done, merged | Interactions still need a check in the native window (see What is left) |
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
-| 6 Packaging and release | Not started | |
+| 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 
-Last full gate run on macOS (Phase 5, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (301 tests) all pass.
+Last full gate run on macOS (Phase 6, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (313 tests) all pass.
 
 ### What is left
 
@@ -53,11 +53,21 @@ Last full gate run on macOS (Phase 5, 2026-10-25): `cargo fmt --check`, `cargo c
   - Contrast: the PRD's tier colors fail WCAG AA as text in light mode. Safe green on its pill fill is 2.9:1, and review amber on its fill is 2.0:1; blocked reasons are in amber on white. Decide whether to darken the light text shades (fills and hatches can stay) or accept it. Dark mode passes, and the tests cover the text and muted tokens in both themes.
 
 **Phase 6: packaging and release**
-- Final icon, bundle identifier (placeholder today) and version 1.0.0.
-- Hardened runtime, Developer ID signing and notarization.
-- Universal build and DMG, bundle under 25 MB.
-- Packaging without Tauri: build the `.app` and DMG and add signed updates on GitHub Releases. `cargo-packager` (bundler plus updater) is the first candidate; confirm against its docs in this phase. Needs a GitHub remote; nothing is pushed yet.
-- PRD section 12 release criteria, including launch on a clean macOS 13 machine.
+- Decisions (2026-10-25): bundle identifier `com.madushan.disklens`; ad-hoc signing until a Developer ID certificate exists; signed auto-updates are part of v1; the icon is `assets/icons/icon.svg` (glassy treemap with a lens).
+- Built:
+  - Version 1.0.0. `[package.metadata.packager]` in `Cargo.toml` (cargo-packager 0.11.8), the x86_64 target in `rust-toolchain.toml`, and `MACOSX_DEPLOYMENT_TARGET = 13.0` in `.cargo/config.toml`.
+  - `scripts/package.sh`: builds both slices, joins them with `lipo`, and runs `cargo packager` for `DiskLens.app` and `DiskLens_<version>_universal.dmg` in `target/packager`. Hardened runtime, ad-hoc unless `DISKLENS_SIGNING_IDENTITY` is set; cargo-packager notarizes and staples when the `APPLE_API_*` variables are set. With the minisign key set it also writes `DiskLens.app.tar.gz`, its `.sig` and `latest.json`, then prints the `gh release create --draft` command without running it.
+  - `scripts/make-icon.sh` regenerates `icon.icns` from `icon.svg` with tools that ship with macOS.
+  - `src/update.rs` and an update banner: one check per launch against `releases/latest/download/latest.json`, Install, then Restart. Not offered during a scan or cleanup.
+- Measured (2026-10-25): DMG 9.0 MB with the updater (target 25 MB); universal binary 15.3 MB; the updater adds about 0.9 MB to the arm64 binary.
+- Open:
+  - Developer ID signing and notarization: needs an Apple Developer Program membership, a Developer ID Application certificate and a notarytool API key. Until then PRD section 12 ("signed, notarized") is not met.
+  - Ad-hoc consequences: macOS ties the Full Disk Access grant to the build, so users grant access again after each update; on macOS 15 and later the first launch needs Open Anyway in Privacy & Security. Say both in the release notes.
+  - Launch on a clean macOS 13 machine (PRD section 12), for example a UTM virtual machine.
+  - Run the Phase 6 checks in `docs/QA.md`, then publish the first draft release when the user says so.
+  - The update banner shows only on the main (ready) screen, so a user still on onboarding or the idle screen sees it after the first scan. An install that fails is not retried until the next launch.
+  - Not verified on a real release: the signed download, install and `cx.restart()` relaunch. `docs/QA.md` has a local round trip for it.
+  - `create-dmg` sometimes fails with `hdiutil: couldn't unmount ... Resource busy` when Finder holds the volume; detach it (`hdiutil detach <dev> -force`), delete `target/packager/rw.*.dmg` and run `scripts/package.sh` again.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
@@ -89,6 +99,7 @@ PRD section 13 lists the v2 candidates: large and old files finder, duplicate fi
 | Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
 | Fonts | Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/` |
 | Tooling | cargo (`fmt`, `clippy`, `test`) |
+| Packaging | `cargo-packager` CLI 0.11.8 (`.app`, DMG, codesign, notarization, minisign update signatures) |
 
 **Rust crates**
 
@@ -102,6 +113,7 @@ PRD section 13 lists the v2 candidates: large and old files finder, duplicate fi
 | Trash | `trash` (macOS `DeleteMethod::NsFileManager`) |
 | macOS APIs | `objc2`, `objc2-foundation`, `objc2-app-kit` (running apps, volume capacity) |
 | Commands | `wait-timeout`, `shell-escape` (script export) |
+| Updates | `cargo-packager-updater` (`native-tls`) |
 | Logging | `tracing`, `tracing-appender` |
 | Errors | `thiserror`, `anyhow` |
 | Tests | `tempfile` |
@@ -116,13 +128,17 @@ disklens/
   docs/                 PRD.md, RULES.md, PLAN.md, QA.md
   scripts/
     make-fixture.sh     builds .sandbox/home with realistic and adversarial cases
+    make-perf-tree.sh   2M empty files in .sandbox/perf
+    package.sh          universal .app, DMG and update artifacts in target/packager
+    make-icon.sh        assets/icons/icon.icns from icon.svg
   rules/rules.toml
   assets/
     fonts/              Geist, Geist Mono (OFL)
     mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
-    icons/
+    icons/              icon.svg (source), icon.icns (generated)
+    update.pub          minisign public key for updates
   src/
-    main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs
+    main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs, settings.rs, update.rs
     scanner/  walk.rs, tree.rs, hardlinks.rs, volume.rs, snapshot.rs
     rules/    model.rs, load.rs, validate.rs, category.rs, matcher.rs, guards.rs, tools.rs
     providers/ ollama.rs, git_worktrees.rs, simctl.rs, docker.rs
