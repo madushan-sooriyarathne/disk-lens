@@ -1,8 +1,8 @@
 # DiskLens: Implementation Plan
 
-Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
+Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 
-## Status and roadmap (as of 2026-10-25)
+## Status and roadmap (as of 2026-10-26)
 
 | Phase | State | Notes |
 |-------|-------|-------|
@@ -14,6 +14,14 @@ Version 1.0 · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
+| 7 Background rescan | Not started | v2, PRD section 13.4.2 |
+| 8 Design foundation and window shell | Not started | v2, PRD sections 13.4.3 and 13.5 |
+| 9 Overview | Not started | v2, PRD section 13.4.4 |
+| 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
+| 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
+| 12 Onboarding | Not started | v2, PRD section 13.4.1 |
+| 13 Pro licensing | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
+| 14+ Pro features | Not started | One phase per feature, after Phase 13 |
 
 Last full gate run on macOS (Phase 6, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (313 tests) all pass.
 
@@ -72,9 +80,9 @@ Last full gate run on macOS (Phase 6, 2026-10-25): `cargo fmt --check`, `cargo c
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
-### After v1
+### v2
 
-PRD section 13 lists the v2 candidates: large and old files finder, duplicate finder, clone-aware sizes, menu bar indicator, scheduled safe-tier cleanup, and a user-editable rules file.
+PRD section 13 defines v2: onboarding, background rescans, a HIG-based redesign on GPUI, a simpler treemap, and a free/Pro split. The v1 candidates (large and old files, duplicates, clone-aware sizes, menu bar indicator, scheduled cleanup, local rules file) became Pro features. Phases 7 to 13 are in section 5. The Phase 6 open items (Developer ID, notarization, the macOS 13 launch) still apply and block selling Pro.
 
 ## 0. Working agreement
 
@@ -97,7 +105,8 @@ PRD section 13 lists the v2 candidates: large and old files finder, duplicate fi
 | Styling | Theme tokens in `src/ui/theme.rs`; category colors come from `rules.toml` |
 | State | One GPUI entity, `AppModel` (`src/ui/model.rs`) |
 | Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
-| Fonts | Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/` |
+| Fonts | v1: Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/`. v2: the system font (`.SystemUIFont`) with tabular figures; Geist Mono kept only as the path fallback (Phase 8) |
+| Motion (v2) | GPUI's `spring.rs` and `with_animation`; no extra crate |
 | Tooling | cargo (`fmt`, `clippy`, `test`) |
 | Packaging | `cargo-packager` CLI 0.11.8 (`.app`, DMG, codesign, notarization, minisign update signatures) |
 
@@ -214,6 +223,28 @@ pub struct CleanupSummary { pub freed: u64, pub trashed: u64, pub done: u32, pub
 
 Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for providers). They are valid only for the snapshot that produced them, so `build_cleanup_plan` also takes the snapshot ID the selection was made in and refuses any other.
 
+**v2 changes**
+
+```rust
+// ViewMode is removed: "Highlight cleanable" is a UI-only dimming (PRD 13.4.5).
+pub struct ViewNode {
+    pub id: String, pub name: String, pub path: String, pub size: u64,
+    pub category: String, pub tier: Option<Tier>, pub rule_id: Option<String>,
+    pub cleanable: u64,         // ready recommended bytes at or under this node
+    pub system_managed: bool,   // protected, or under ~/Library with nothing recommended inside
+    pub kind: ViewKind,         // Dir | File | Smaller { count: u32 } (was Other)
+    pub children: Vec<ViewNode>, // root: up to 12 tiles plus Smaller; Smaller: the merged items; others: empty
+}
+
+pub struct CategoryTotal { pub category: String, pub size: u64, pub folders: u32 }
+
+pub struct ScanProgress { pub files: u64, pub bytes: u64, pub current: String } // UI model only
+
+pub struct LicenseStatus { pub pro: bool, pub licensee: Option<String>, pub expires_at: Option<i64> }
+```
+
+Selections survive a new snapshot by matching `(rule_id, path)` from `RecItem`, never by item ID (PRD FR-BG-4).
+
 ## 4. Backend functions
 
 | Command | Input | Output |
@@ -230,6 +261,17 @@ Item IDs are `"{rule_id}:{node_id}"` (or `"{rule_id}:{provider_key}"` for provid
 | `export_script` | `{ plan_id }` | `String` |
 | `execute_cleanup` | `{ plan_id, on_event: FnMut(CleanupEvent) }` | none (a plan runs once, only while its snapshot is current) |
 | `reveal_in_finder` | `{ item_id or node_path }` | none (only paths inside the snapshot) |
+
+**v2 changes**
+
+| Command | Input | Output |
+|---------|-------|--------|
+| `get_view` | `{ node_path: string }` | `ViewNode` (root plus one level, at most 12 tiles plus a `Smaller` tile) |
+| `get_category_totals` | none | `Vec<CategoryTotal>` (sidebar and the Overview capacity bar) |
+| `license_status` | none | `LicenseStatus` (Phase 13) |
+| `activate_license` | `{ token: string }` | `LicenseStatus` or an error (Phase 13) |
+
+`export_script` is unchanged; the UI writes its output to the file the user picks in the save panel.
 
 These are plain functions in `src/backend.rs` taking `&Arc<AppState>`. The UI calls them through `src/ui/source.rs`, off the UI thread (`cx.background_spawn`); scans and cleanups run on their own thread and report through the callback. Shared state lives in a `Mutex`/`RwLock` inside `AppState`.
 
@@ -374,6 +416,100 @@ Replaces the Tauri shell and the React frontend with GPUI, before Phase 4 so the
 4. Signed updates published to GitHub Releases (tool chosen in this phase, see Status).
 
 **Acceptance:** PRD section 12 release criteria are all met.
+
+### v2 phases
+
+Rules for every v2 phase:
+- Design work uses the `apple-design` skill and is checked against the HIG pages listed in PRD section 13.
+- The engine (`scanner/`, `rules/`, `cleanup/`, `providers/`) changes only where a phase says so. Safety tests stay green and are never loosened.
+- The mock source keeps working: `DISKLENS_MOCK=1` must show every new screen, so screenshots can be compared without a scan.
+
+### Phase 7: Background rescan
+
+Logic first, on the current UI, because it is independent of the redesign.
+
+1. `AppModel`: split the scan state out of `Phase`. `Phase::Scanning` is used only when no snapshot exists yet; otherwise `scan: Option<ScanProgress>` is set while `Phase::Ready` stays.
+2. Carry state over when a snapshot swaps in (PRD FR-BG-4): explorer path to the nearest existing ancestor, selection by `(rule_id, path)` with a toast for dropped items, drawer closed when its row is gone.
+3. Disable Clean selected during a scan with its reason (FR-BG-5). Copy script, selection and browsing keep working.
+4. Auto-rescan on launch when the snapshot is older than 24 hours (FR-BG-3).
+5. After a cleanup, drop finished items from the recommendations and subtract their sizes from the view before the rescan (FR-BG-6).
+6. Failed or cancelled background scans keep the results and show Retry next to Rescan (FR-BG-7).
+7. Header status in the current Explorer card: "Updating… N files" with Cancel, or "Scanned X ago" with Rescan. Phase 8 moves it to the toolbar.
+
+**Acceptance:**
+- `TestAppContext` tests: a rescan never leaves `Phase::Ready`; the selection survives a swap by path; a vanished item is dropped and counted; the explorer path falls back to an ancestor; cleanup is refused while scanning; a stale snapshot triggers a scan on load and a fresh one does not.
+- Manual check on the sandbox: rescan while browsing and while items are selected.
+
+### Phase 8: Design foundation and window shell
+
+1. Produce `docs/mockup-v2.png` (light and dark: Overview, Explore, Recommended, cleanup sheet, onboarding) from the direction in PRD section 13.5 and get it approved before code. Update `assets/mock/snapshot.mock.json` to its numbers.
+2. `theme.rs` v2 tokens: system font, tabular figures, the type scale, radii, spacing, system accent and status colors with AA-checked text shades, and the new category palette in `rules.toml` and `docs/RULES.md` section 7 (same commit, `tests/rules_doc_sync.rs`).
+3. Check that GPUI resolves the system monospaced font. If not, keep Geist Mono for paths and record it. Remove Geist and the unused font files.
+4. Window: transparent titlebar, traffic lights inset into the sidebar, `WindowBackgroundAppearance::Blurred`, new default and minimum sizes. All platform chrome differences go in one module (`src/ui/chrome.rs`).
+5. Shell: sidebar (pages, categories with `get_category_totals`, footer notice), unified toolbar (title or breadcrumb, scan status from Phase 7, inspector toggle, Clean up button) and an empty inspector slot. Existing views move into pages unchanged for now.
+6. Menu bar with the commands and shortcuts in PRD FR-WIN-4.
+7. Motion helpers: the two spring presets and the Reduce Motion check (`NSWorkspace.accessibilityDisplayShouldReduceMotion` through `platform/`).
+8. Line icon set in `assets/icons/ui/`.
+
+**Acceptance:**
+- Unit tests: token contrast (AA for every text-on-fill pair in both themes), category totals, the Reduce Motion fallback.
+- The shell with mock data compared side by side with `docs/mockup-v2.png` in light and dark; differences listed.
+- Keyboard: Tab reaches the sidebar, toolbar and content; the shortcuts work.
+
+### Phase 9: Overview
+
+1. Overview page with the four widgets in PRD FR-OV-1, built from `compute_stats`, `get_category_totals` and the root view.
+2. Remove `stat_cards.rs` and the v1 "Not scanned" and "Free after cleanup" cards.
+3. Largest folders open Explore at that folder.
+
+**Acceptance:** `stats.rs` tests updated for the new numbers (free now, after-cleanup delta, safe and review totals); the mock compared with the mockup; VoiceOver reads each widget as one sentence.
+
+### Phase 10: Explore and inspector
+
+1. `view.rs`: one level, at most 12 tiles plus `Smaller`, 1% threshold, `cleanable` and `system_managed` per node (PRD FR-EXP-1, FR-EXP-2, FR-EXP-6). Remove `ViewMode`.
+2. `treemap.rs`: label rules (both lines or nothing, 90×44 pt threshold, middle truncation) as pure functions with tests.
+3. `explorer.rs`: flat tiles, cleanable line, lock glyph, Highlight cleanable, hover tooltip, arrow-key selection, context menu.
+4. Zoom transition on drill-down and its reverse, from and to the tile's frame (cross-fade with Reduce Motion).
+5. Inspector panel (PRD 13.4.7) for folders, files and the smaller-items list.
+
+**Acceptance:**
+- `tests/view.rs`: 12-tile cap, 1% merge, `Smaller` children, `cleanable` sums, `system_managed` for protected paths and `~/Library` folders, and paths outside the snapshot still refused.
+- `treemap.rs` tests: no label is ever laid out wider or taller than its tile, for random trees at the minimum window size.
+- Manual: the real home scan shows no clipped or overlapping text at the minimum window size (PRD V2-G2), with screenshots in `docs/QA.md`.
+
+### Phase 11: Recommended and cleanup sheet
+
+1. Recommended page (PRD 13.4.6) with the scroll fade and the footer summary.
+2. Row selection fills the inspector with the v1 drawer content; remove the drawer.
+3. Export Cleanup Script… through the save panel; Copy to Clipboard in the context menu.
+4. Cleanup confirm, progress and results as one sheet from the toolbar, with the v1 behavior and the Enter rule unchanged.
+
+**Acceptance:** the existing cleanup UI tests pass on the sheet; a test proves Enter does not confirm; the exported file matches `export_script` byte for byte.
+
+### Phase 12: Onboarding
+
+1. The three-step flow in PRD 13.4.1 with a page indicator.
+2. The access step advances on window activation once access is granted.
+3. The first-scan view with categories filling in.
+4. `onboarding_done` is written when the first scan finishes.
+
+**Acceptance:** `TestAppContext` tests for each step and for an interrupted first run starting again at Welcome; the fresh-account check in `docs/QA.md` repeated for v2.
+
+### Phase 13: Pro licensing
+
+Starts only after the open decisions in PRD section 13.8 (price, provider, trial) are made.
+
+1. `src/license.rs`: an offline-verified signed token (a public key in `assets/`, like `update.pub`), stored in the data dir. `license_status` and `activate_license` in `backend.rs`.
+2. Pro tags on the Pro entry points and the one explanation sheet with purchase and license entry (PRD 13.6 gate rules).
+3. A Settings window (⌘,) with the license.
+
+**Acceptance:**
+- Tests: a valid token activates Pro; a tampered, expired or wrong-key token does not; no network call is made.
+- A test proves that scanning, recommendations, plan building, execution and script export behave the same with and without a license.
+
+### Phase 14 onward: Pro features
+
+One phase per feature, in the order chosen in PRD section 13.8. Each needs its own PRD subsection before work starts.
 
 ## 6. Testing strategy
 
