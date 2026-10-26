@@ -68,6 +68,19 @@ The audit log of sandboxed runs is `.sandbox/logs/cleanup.log`; of real-home run
 - [ ] In the cleanup confirm dialog, Tab never reaches the Clean button and Enter does nothing; Cancel is reachable.
 - [ ] VoiceOver (Cmd-F5): tiles read as name, size and category; checkboxes read their label and checked state; buttons read their names.
 
+## Phase 6: packaging and updates
+
+Build with `scripts/package.sh` (add the minisign key variables for the update artifacts). The app is `target/packager/DiskLens.app`.
+
+- [ ] `lipo -archs target/packager/DiskLens.app/Contents/MacOS/disklens` prints `x86_64 arm64`; `codesign -dv` shows `com.madushan.disklens` and `flags=0x10002(adhoc,runtime)`; `Info.plist` has version 1.0.0 and `LSMinimumSystemVersion` 13.0; the DMG is under 25 MB.
+- [ ] Open the DMG: it shows DiskLens and an Applications link. Copy the app, launch it: the new icon shows in Finder and the Dock, and the app runs under hardened runtime (onboarding or the last scan appears).
+- [ ] System Settings, Full Disk Access lists "DiskLens"; granting it closes onboarding.
+- [ ] Updates, no release: launch with `DISKLENS_UPDATE_URL=http://127.0.0.1:8000/none.json` (nothing served): no banner, a warning in the log.
+- [ ] Updates, round trip: package 1.0.0 and keep its app; bump to 1.0.1 and package again with the key; serve `target/packager` with `python3 -m http.server 8000`; run the 1.0.0 app with `DISKLENS_UPDATE_URL=http://127.0.0.1:8000/latest.json`. The banner offers 1.0.1; Install, then Restart; the relaunched app is 1.0.1.
+- [ ] Updates, tampered signature: edit one character of the signature in the served `latest.json`; Install fails with a message and the app stays 1.0.0.
+- [ ] During a scan the banner does not offer Install.
+- [ ] Clean macOS 13 machine (or VM): the app launches.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
