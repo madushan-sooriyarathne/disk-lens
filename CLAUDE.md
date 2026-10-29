@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 13 (none started; Phase 7 is next). Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (none started; Phase 7 is next); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
