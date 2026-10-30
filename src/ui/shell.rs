@@ -70,7 +70,7 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 div()
                     .ml_auto()
                     .text_size(px(theme::T_SMALL))
-                    .text_color(t.secondary)
+                    .text_color(t.sidebar_secondary)
                     .child(n.to_string())
             }))
             .on_click(cx.listener(move |m, _, _, cx| m.set_page(page, cx)))
@@ -95,7 +95,7 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                     .child(
                         div()
                             .text_size(px(theme::T_SMALL))
-                            .text_color(t.secondary)
+                            .text_color(t.sidebar_secondary)
                             .child(format!("{} {noun}", c.folders)),
                     ),
             )
@@ -104,7 +104,7 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                     .ml_auto()
                     .flex_none()
                     .text_size(px(12.))
-                    .text_color(t.secondary)
+                    .text_color(t.sidebar_secondary)
                     .child(format_bytes(c.size)),
             )
     });
@@ -118,7 +118,11 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
         .pt(px(TOOLBAR_HEIGHT))
         .px(px(10.))
         .pb(px(10.))
-        .bg(t.sidebar)
+        .bg(if model.reduce_transparency {
+            t.sidebar_solid
+        } else {
+            t.sidebar
+        })
         .border_r_1()
         .border_color(t.separator)
         .text_size(px(theme::T_BODY))
@@ -130,7 +134,7 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .px_2()
                 .text_size(px(theme::T_SMALL))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.secondary)
+                .text_color(t.sidebar_secondary)
                 .child("Categories"),
         )
         .children(categories)

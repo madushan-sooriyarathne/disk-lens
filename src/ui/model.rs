@@ -15,6 +15,7 @@ use super::source::Source;
 use super::theme;
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
+use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
@@ -110,6 +111,9 @@ pub struct AppModel {
     pub page: Page,
     pub sidebar_visible: bool,
     pub inspector_visible: bool,
+    /// Accessibility display settings, reread whenever the window becomes active.
+    pub reduce_motion: bool,
+    pub reduce_transparency: bool,
     /// Per-category bytes of the current snapshot, for the sidebar.
     pub category_totals: Vec<CategoryTotal>,
     pub view: Option<ViewNode>,
@@ -257,7 +261,9 @@ impl AppModel {
             if !window.is_window_active() {
                 return;
             }
-            // The user may have just granted access in System Settings.
+            // The user may have just granted access or changed a display setting.
+            this.reduce_motion = platform::reduce_motion();
+            this.reduce_transparency = platform::reduce_transparency();
             this.recheck_access(cx);
             if this.phase == Phase::Ready {
                 this.refresh(cx);
@@ -309,6 +315,8 @@ impl AppModel {
             page: Page::Overview,
             sidebar_visible: true,
             inspector_visible: false,
+            reduce_motion: platform::reduce_motion(),
+            reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
             view: None,
             hovered: None,

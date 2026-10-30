@@ -7,6 +7,7 @@ pub mod cleanup;
 pub mod explorer;
 pub mod format;
 pub mod model;
+pub mod motion;
 pub mod recommendations;
 pub mod root;
 pub mod screens;

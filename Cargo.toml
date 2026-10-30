@@ -26,7 +26,7 @@ toml = "1.1.8"
 globset = "0.4.20"
 wait-timeout = "0.2.1"
 sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "NSAccessibility"] }
 # GPUI ships as exact snapshots of Zed's crates; bump both together in their own commit.
 gpui = { package = "gpui-pre", version = "=0.3.10" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "runtime_shaders"] }

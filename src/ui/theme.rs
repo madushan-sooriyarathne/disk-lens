@@ -54,6 +54,8 @@ pub const LEGEND_ORDER: [&str; 6] = [
 pub struct Theme {
     /// Translucent over the blurred window background.
     pub sidebar: Hsla,
+    /// The sidebar under Reduce Transparency.
+    pub sidebar_solid: Hsla,
     pub content: Hsla,
     pub widget: Hsla,
     pub hover: Hsla,
@@ -63,6 +65,8 @@ pub struct Theme {
     pub popover: Hsla,
     pub label: Hsla,
     pub secondary: Hsla,
+    /// Secondary text on the sidebar: the mockup's shade measures 4.2:1 there in light mode.
+    pub sidebar_secondary: Hsla,
     /// Size lines on tiles: passes AA on every category fill and stripe pixel.
     pub tile_secondary: Hsla,
     /// Icons and placeholders only, never body text.
@@ -93,6 +97,7 @@ impl Theme {
         let a = |hex: u32| Hsla::from(rgba(hex));
         Self {
             sidebar: a(0xeaeaeed1),
+            sidebar_solid: c(0xeaeaee),
             content: c(0xffffff),
             widget: c(0xf5f5f7),
             hover: a(0x0000000d),
@@ -102,6 +107,7 @@ impl Theme {
             popover: c(0xffffff),
             label: c(0x1d1d1f),
             secondary: c(0x6e6e73),
+            sidebar_secondary: c(0x636366),
             tile_secondary: c(0x55555a),
             tertiary: c(0x8e8e93),
             accent: c(0x007aff),
@@ -127,6 +133,7 @@ impl Theme {
         let a = |hex: u32| Hsla::from(rgba(hex));
         Self {
             sidebar: a(0x2c2c30cc),
+            sidebar_solid: c(0x2c2c30),
             content: c(0x1e1e1e),
             widget: c(0x2a2a2c),
             hover: a(0xffffff0f),
@@ -136,6 +143,7 @@ impl Theme {
             popover: c(0x2c2c2e),
             label: c(0xf5f5f7),
             secondary: c(0xa1a1a6),
+            sidebar_secondary: c(0xa1a1a6),
             tile_secondary: c(0xc2c2c7),
             tertiary: c(0x7c7c80),
             accent: c(0x0a84ff),
@@ -413,6 +421,13 @@ mod tests {
             ("secondary/content", t.secondary, t.content),
             ("secondary/widget", t.secondary, t.widget),
             ("accent_text/content", t.accent_text, t.content),
+            ("accent_text/review_tint", t.accent_text, t.review_tint),
+            ("label/sidebar_solid", t.label, t.sidebar_solid),
+            (
+                "sidebar_secondary/sidebar_solid",
+                t.sidebar_secondary,
+                t.sidebar_solid,
+            ),
             ("safe_text/content", t.safe_text, t.content),
             ("safe_text/safe_tint", t.safe_text, t.safe_tint),
             ("review_text/content", t.review_text, t.content),
