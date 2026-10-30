@@ -48,19 +48,20 @@
 
   /* Text. */
   --label: #1d1d1f;
-  --secondary: #6e6e73;               /* 5.0:1 on --content, 4.6:1 on --widget */
+  --secondary: #6e6e73;               /* 5.1:1 on --content, 4.7:1 on --widget */
+  --tile-secondary: #55555a;          /* size line on tiles: >= 5.0:1 on every fill and stripe pixel */
   --tertiary: #8e8e93;                /* icons and placeholders only, never body text */
 
   /* System colors. */
   --accent: #007aff;
-  --accent-text: #0062cc;             /* links and accent text: 5.7:1 on --content */
+  --accent-text: #0062cc;             /* links and accent text: 5.8:1 on --content */
   --safe: #34c759;                    /* fills, dots, stripes */
-  --safe-text: #1d7a35;               /* 5.3:1 on --content, 4.7:1 on --safe-tint */
+  --safe-text: #1d7a35;               /* 5.4:1 on --content, 4.8:1 on --safe-tint */
   --safe-tint: #e5f6e9;
   --review: #ff9500;
-  --review-text: #a34f00;             /* 5.6:1 on --content, 5.0:1 on --review-tint */
+  --review-text: #a34f00;             /* 5.7:1 on --content, 5.1:1 on --review-tint */
   --review-tint: #fff1de;
-  --clean: #248a3d;                   /* Clean up button fill; white text 4.6:1 */
+  --clean: #1e7a34;                   /* Clean up button fill; white text 5.4:1 */
   --clean-text: #ffffff;
   --danger: #d70015;
 
@@ -92,17 +93,18 @@
   --popover: #2c2c2e;
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
   --label: #f5f5f7;
-  --secondary: #a1a1a6;               /* 7.1:1 on --content, 6.2:1 on --widget */
+  --secondary: #a1a1a6;               /* 6.5:1 on --content, 5.6:1 on --widget */
+  --tile-secondary: #c2c2c7;          /* >= 4.9:1 on every fill and stripe pixel */
   --tertiary: #7c7c80;
   --accent: #0a84ff;
   --accent-text: #409cff;
   --safe: #30d158;
-  --safe-text: #30d158;               /* 8.4:1 on --content */
+  --safe-text: #30d158;               /* 8.2:1 on --content, 6.7:1 on --safe-tint */
   --safe-tint: #1c3323;
   --review: #ff9f0a;
-  --review-text: #ff9f0a;             /* 8.0:1 on --content */
+  --review-text: #ff9f0a;             /* 8.1:1 on --content, 6.7:1 on --review-tint */
   --review-tint: #3a2a12;
-  --clean: #248a3d;
+  --clean: #1e7a34;
   --clean-text: #ffffff;
   --danger: #ff453a;
   --cat-code: #34304f;      --cat-code-b: #9d93f0;
@@ -228,7 +230,7 @@ body {
 .treemap { position: relative; flex: 1; min-height: 0; }
 .tile { position: absolute; border-radius: var(--r-tile); overflow: hidden; padding: 8px 10px; line-height: 1.3; }
 .tile .tn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
-.tile .ts { font-size: 12px; color: var(--secondary); white-space: nowrap; }
+.tile .ts { font-size: 12px; color: var(--tile-secondary); white-space: nowrap; }
 .tile .ts.cl { color: var(--label); }
 .tile .ts.cl::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--safe); margin-right: 5px; vertical-align: 1px; }
 .tile.sel { box-shadow: inset 0 0 0 2px var(--accent); }
