@@ -182,6 +182,30 @@ fn parent_of(path: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// `path` and its parents down to `root`, nearest first. A path outside `root` gives just `root`.
+fn ancestors<'a>(path: &'a str, root: &'a str) -> Vec<&'a str> {
+    let inside = path == root
+        || path
+            .strip_prefix(root.trim_end_matches('/'))
+            .is_some_and(|rest| rest.starts_with('/'));
+    if !inside {
+        return vec![root];
+    }
+    let mut chain = vec![path];
+    let mut current = path;
+    while current != root {
+        let parent = parent_of(current);
+        // A root with a trailing slash is never reached by trimming; stop at the top.
+        if parent == current {
+            chain.push(root);
+            break;
+        }
+        chain.push(parent);
+        current = parent;
+    }
+    chain
+}
+
 impl AppModel {
     /// Builds the model, focuses it, refreshes recommendations whenever the
     /// window becomes active (blocked states depend on running apps), and
@@ -358,51 +382,93 @@ impl AppModel {
         );
     }
 
-    /// Shows a snapshot: the root folder, fresh rows and the default selection.
+    /// Shows a snapshot. The first one opens at the root with the default selection; a later one
+    /// keeps the folder (or its nearest surviving ancestor), the selection and the drawer.
     fn enter(&mut self, meta: SnapshotMeta, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
         let mode = self.mode;
+        let first = self.meta.is_none();
+        let candidates: Vec<String> = if first {
+            vec![meta.root.clone()]
+        } else {
+            ancestors(&self.path, &meta.root)
+                .into_iter()
+                .map(String::from)
+                .collect()
+        };
         let root = meta.root.clone();
         off_thread(
             &self.source,
             cx,
             move |s| {
-                Ok::<_, Error>((
-                    s.view(&root, mode)?,
-                    s.recommendations()?,
-                    s.preselected_rows(),
-                ))
+                let mut view = Err(Error::NotInSnapshot(root));
+                for candidate in &candidates {
+                    view = s.view(candidate, mode);
+                    if view.is_ok() {
+                        break;
+                    }
+                }
+                Ok::<_, Error>((view?, s.recommendations()?, s.preselected_rows()))
             },
             move |this, loaded, cx| {
                 if this.view_seq != seq {
+                    // The user navigated while this loaded; load again for where they are now.
+                    this.enter(meta, cx);
                     return;
                 }
                 match loaded {
                     Ok((view, recommendations, preselected)) => {
-                        let mut selected = HashSet::new();
-                        for row in &recommendations {
-                            if preselected.contains(&row.row_id) {
-                                selected.extend(
-                                    selection::ready_ids(row).into_iter().map(String::from),
+                        let selected = if first {
+                            let mut selected = HashSet::new();
+                            for row in &recommendations {
+                                if preselected.contains(&row.row_id) {
+                                    selected.extend(
+                                        selection::ready_ids(row).into_iter().map(String::from),
+                                    );
+                                }
+                            }
+                            selected
+                        } else {
+                            let (kept, dropped) = selection::carry_over(
+                                &this.recommendations,
+                                &this.selected,
+                                &recommendations,
+                            );
+                            if dropped > 0 {
+                                let noun = if dropped == 1 { "item" } else { "items" };
+                                this.show_toast(
+                                    format!("{dropped} selected {noun} no longer found"),
+                                    cx,
                                 );
                             }
-                        }
+                            kept
+                        };
+                        let drawer = this
+                            .focused_row
+                            .clone()
+                            .filter(|id| recommendations.iter().any(|r| &r.row_id == id));
                         this.root_path = meta.root.clone();
-                        this.path = meta.root.clone();
+                        this.path = view.path.clone();
                         this.meta = Some(meta);
                         this.view = Some(view);
                         this.hovered = None;
                         this.recommendations = recommendations;
                         this.selected = selected;
+                        // The details belong to the old snapshot; reload them for a surviving row.
                         this.focused_row = None;
                         this.details = None;
                         this.details_error = None;
+                        if drawer.is_some() {
+                            this.focus_row(drawer, cx);
+                        }
                         this.error = None;
                         this.phase = Phase::Ready;
                     }
                     Err(e) => {
-                        this.phase = Phase::Error;
+                        if first {
+                            this.phase = Phase::Error;
+                        }
                         this.error = Some(e.to_string());
                     }
                 }
@@ -887,6 +953,26 @@ mod tests {
         assert_eq!(parent_of("~"), "/");
     }
 
+    #[test]
+    fn ancestors_walk_up_to_the_root() {
+        assert_eq!(ancestors("~/a/b", "~"), ["~/a/b", "~/a", "~"]);
+    }
+
+    #[test]
+    fn ancestors_of_the_root_is_the_root() {
+        assert_eq!(ancestors("/Users/a", "/Users/a"), ["/Users/a"]);
+    }
+
+    #[test]
+    fn ancestors_of_a_path_outside_the_root_is_the_root() {
+        assert_eq!(ancestors("/Users/ab/x", "/Users/a"), ["/Users/a"]);
+    }
+
+    #[test]
+    fn ancestors_under_the_filesystem_root_end_at_it() {
+        assert_eq!(ancestors("/a/b", "/"), ["/a/b", "/a", "/"]);
+    }
+
     #[gpui::test]
     fn init_reaches_ready_with_an_empty_selection(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
@@ -1214,6 +1300,71 @@ mod tests {
             assert_eq!(m.phase, Phase::Ready);
             assert_eq!(m.error.as_deref(), Some("Scan cancelled"));
         });
+    }
+
+    /// Rescans and waits until the new snapshot is shown.
+    fn rescan(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
+        model.update(cx, |m, cx| m.start_scan(cx));
+        settle(cx, model, |m| m.scan.is_none());
+    }
+
+    /// Adds a ready item that the mock's next snapshot does not have, and selects it.
+    fn select_a_ghost(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
+        model.update(cx, |m, _| {
+            let mut ghost = m.recommendations[0].items[0].clone();
+            ghost.item_id = "ghost".into();
+            ghost.path = "~/ghost".into();
+            m.recommendations[0].items.push(ghost);
+            m.selected.insert("ghost".into());
+        });
+    }
+
+    #[gpui::test]
+    fn selection_survives_a_swap_by_path(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let real_id = model.update(cx, |m, _| {
+            let item = &mut m.recommendations[0].items[0];
+            let real = std::mem::replace(&mut item.item_id, "old-id".into());
+            m.selected.insert("old-id".into());
+            real
+        });
+        rescan(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.selected.contains(&real_id)));
+    }
+
+    #[gpui::test]
+    fn a_vanished_item_is_dropped(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        select_a_ghost(&model, cx);
+        rescan(&model, cx);
+        assert!(!model.read_with(cx, |m, _| m.selected.contains("ghost")));
+    }
+
+    #[gpui::test]
+    fn a_vanished_item_is_counted_in_a_toast(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        select_a_ghost(&model, cx);
+        rescan(&model, cx);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.toast.clone()).as_deref(),
+            Some("1 selected item no longer found")
+        );
+    }
+
+    #[gpui::test]
+    fn explorer_path_falls_back_to_an_ancestor(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.path = "~/Desktop/vanished".into());
+        rescan(&model, cx);
+        assert_eq!(model.read_with(cx, |m, _| m.path.clone()), "~/Desktop");
+    }
+
+    #[gpui::test]
+    fn drawer_closes_when_its_row_is_gone(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.focused_row = Some("gone-row".into()));
+        rescan(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.focused_row.is_none()));
     }
 
     #[gpui::test]
