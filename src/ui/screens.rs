@@ -145,7 +145,7 @@ pub fn scanning(
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
-    let p = &model.progress;
+    let p = model.scan.clone().unwrap_or_default();
     let (_, bar) = theme::category_colors(&t, "code_projects");
     let stat = |label: &'static str, value: String| {
         div()

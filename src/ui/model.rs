@@ -71,8 +71,9 @@ pub enum UpdateState {
     Failed(String),
 }
 
+/// Counters of the running scan.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Progress {
+pub struct ScanProgress {
     pub files: u64,
     pub bytes: u64,
     pub current: String,
@@ -82,7 +83,8 @@ pub struct AppModel {
     pub source: Arc<Source>,
     pub phase: Phase,
     pub meta: Option<SnapshotMeta>,
-    pub progress: Progress,
+    /// The running scan, if any. Independent of `phase`: a rescan keeps the results on screen.
+    pub scan: Option<ScanProgress>,
     /// Whether the app can read every folder (PRD 7.8); rechecked on window focus.
     pub full_disk_access: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
@@ -229,7 +231,7 @@ impl AppModel {
             source,
             phase: Phase::Loading,
             meta: None,
-            progress: Progress::default(),
+            scan: None,
             full_disk_access: false,
             error: None,
             mode: ViewMode::Category,
@@ -275,7 +277,7 @@ impl AppModel {
 
     /// Installing or restarting under a running scan or cleanup would cut it short.
     pub fn can_install_update(&self) -> bool {
-        self.phase != Phase::Scanning && self.cleanup.is_none()
+        self.scan.is_none() && self.cleanup.is_none()
     }
 
     pub fn install_update(&mut self, cx: &mut Context<Self>) {
@@ -404,15 +406,22 @@ impl AppModel {
                         this.error = Some(e.to_string());
                     }
                 }
+                this.scan = None;
                 cx.notify();
             },
         );
     }
 
     pub fn start_scan(&mut self, cx: &mut Context<Self>) {
-        self.phase = Phase::Scanning;
-        self.progress = Progress::default();
+        if self.scan.is_some() {
+            return;
+        }
+        self.scan = Some(ScanProgress::default());
         self.error = None;
+        // With a snapshot on screen the scan runs behind it; the explorer keeps working.
+        if self.meta.is_none() {
+            self.phase = Phase::Scanning;
+        }
         cx.notify();
         let (tx, rx) = mpsc::channel();
         let started = self.source.start_scan(move |event| {
@@ -420,7 +429,10 @@ impl AppModel {
             tx.send(event).ok();
         });
         if let Err(e) = started {
-            self.phase = Phase::Error;
+            self.scan = None;
+            if self.meta.is_none() {
+                self.phase = Phase::Error;
+            }
             self.error = Some(e.to_string());
             return;
         }
@@ -471,11 +483,13 @@ impl AppModel {
                 bytes,
                 current,
             } => {
-                self.progress = Progress {
-                    files,
-                    bytes,
-                    current,
-                };
+                if let Some(scan) = &mut self.scan {
+                    *scan = ScanProgress {
+                        files,
+                        bytes,
+                        current,
+                    };
+                }
                 false
             }
             ScanEvent::Finished { meta } => {
@@ -483,6 +497,7 @@ impl AppModel {
                 true
             }
             ScanEvent::Failed { message } => {
+                self.scan = None;
                 self.phase = if self.meta.is_some() {
                     Phase::Ready
                 } else {
@@ -908,7 +923,7 @@ mod tests {
     #[gpui::test]
     fn no_install_while_scanning(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
-        model.update(cx, |m, _| m.phase = Phase::Scanning);
+        model.update(cx, |m, _| m.scan = Some(ScanProgress::default()));
         assert!(!model.read_with(cx, |m, _| m.can_install_update()));
     }
 
@@ -1169,9 +1184,10 @@ mod tests {
         model.update(cx, |m, cx| {
             m.selected.insert("stale".into());
             m.start_scan(cx);
-            assert_eq!(m.phase, Phase::Scanning);
+            assert_eq!(m.phase, Phase::Ready);
+            assert!(m.scan.is_some());
         });
-        settle(cx, &model, |m| m.phase != Phase::Scanning);
+        settle(cx, &model, |m| m.scan.is_none());
         model.read_with(cx, |m, _| {
             assert_eq!(m.phase, Phase::Ready);
             assert!(m.error.is_none());
@@ -1192,7 +1208,7 @@ mod tests {
             m.start_scan(cx);
             m.cancel_scan(cx);
         });
-        settle(cx, &model, |m| m.phase != Phase::Scanning);
+        settle(cx, &model, |m| m.scan.is_none());
         model.read_with(cx, |m, _| {
             // A snapshot was already loaded, so the explorer comes back.
             assert_eq!(m.phase, Phase::Ready);
@@ -1250,8 +1266,28 @@ mod tests {
         });
         model.update(cx, |m, cx| m.close_cleanup(cx));
         model.read_with(cx, |m, _| {
-            assert_eq!((m.phase, m.selected.is_empty()), (Phase::Scanning, true));
+            assert_eq!(
+                (m.phase, m.scan.is_some(), m.selected.is_empty()),
+                (Phase::Ready, true, true)
+            );
         });
+    }
+
+    #[gpui::test]
+    fn a_rescan_never_leaves_ready(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.start_scan(cx));
+        settle(cx, &model, |m| {
+            assert_eq!(m.phase, Phase::Ready);
+            m.scan.is_none()
+        });
+    }
+
+    #[gpui::test]
+    fn rescan_shows_progress_in_scan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.start_scan(cx));
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
     }
 
     #[gpui::test]
