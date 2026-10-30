@@ -11,8 +11,8 @@ use gpui::{
     SharedString, Toggled, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
 };
 
-use super::format::{format_age, format_bytes};
-use super::model::AppModel;
+use super::format::{format_age, format_bytes, group_digits};
+use super::model::{AppModel, ScanProgress};
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
@@ -230,6 +230,8 @@ pub fn render(
         .bg(t.card)
         .child(header(
             model.mode,
+            model.scan.as_ref(),
+            model.error.as_deref(),
             model.meta.as_ref().map(|m| m.scanned_at),
             t,
             cx,
@@ -280,15 +282,45 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
     .size_full()
 }
 
-/// `scanned_at` is the snapshot time, shown as "Scanned 2 h ago" before Rescan (US-13).
+/// What the header says next to the scan button: progress, the last failure, or the snapshot
+/// age ("Scanned 2 h ago", US-13).
+fn status_label(
+    scan: Option<&ScanProgress>,
+    error: Option<&str>,
+    scanned_at: Option<i64>,
+    now: i64,
+) -> Option<String> {
+    if let Some(scan) = scan {
+        return Some(format!("Updating… {} files", group_digits(scan.files)));
+    }
+    if let Some(error) = error {
+        return Some(error.to_owned());
+    }
+    scanned_at.map(|at| format!("Scanned {}", format_age(now, at)))
+}
+
+/// The status and the scan button: Cancel while updating, Retry after a failure, else Rescan.
 fn header(
     mode: ViewMode,
+    scan: Option<&ScanProgress>,
+    error: Option<&str>,
     scanned_at: Option<i64>,
     t: Theme,
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     // Re-rendered on window focus and every interaction, so the age stays current enough.
-    let age = scanned_at.map(|at| format!("Scanned {}", format_age(now_ms() as i64 / 1000, at)));
+    let status = status_label(scan, error, scanned_at, now_ms() as i64 / 1000);
+    let status_color = if scan.is_none() && error.is_some() {
+        t.review
+    } else {
+        t.muted
+    };
+    let scanning = scan.is_some();
+    let (button_id, button_label) = match (scanning, error.is_some()) {
+        (true, _) => ("cancel-rescan", "Cancel"),
+        (false, true) => ("retry-scan", "Retry"),
+        (false, false) => ("rescan", "Rescan"),
+    };
     let toggle = [
         (ViewMode::Category, "Category"),
         (ViewMode::Cleanup, "Cleanup"),
@@ -343,9 +375,11 @@ fn header(
                 .flex()
                 .items_center()
                 .gap_2()
-                .children(age.map(|a| div().text_size(px(12.)).text_color(t.muted).child(a)))
+                .children(
+                    status.map(|a| div().text_size(px(12.)).text_color(status_color).child(a)),
+                )
                 .child(
-                    theme::focusable(div().id("rescan"), &t, Role::Button, "Rescan")
+                    theme::focusable(div().id(button_id), &t, Role::Button, button_label)
                         .cursor_pointer()
                         .rounded_lg()
                         .px_3()
@@ -353,8 +387,14 @@ fn header(
                         .text_size(px(13.))
                         .text_color(t.muted)
                         .hover(move |s| s.bg(t.bg).text_color(t.text))
-                        .child("Rescan")
-                        .on_click(cx.listener(|model, _, _, cx| model.start_scan(cx))),
+                        .child(button_label)
+                        .on_click(cx.listener(move |model, _, _, cx| {
+                            if scanning {
+                                model.cancel_scan(cx);
+                            } else {
+                                model.start_scan(cx);
+                            }
+                        })),
                 )
                 .child(
                     div()
@@ -655,6 +695,34 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_while_scanning_counts_files() {
+        let scan = ScanProgress {
+            files: 1_234,
+            ..ScanProgress::default()
+        };
+        assert_eq!(
+            status_label(Some(&scan), Some("old"), Some(0), 0).as_deref(),
+            Some("Updating… 1,234 files")
+        );
+    }
+
+    #[test]
+    fn status_after_a_failure_is_the_message() {
+        assert_eq!(
+            status_label(None, Some("Scan cancelled"), Some(0), 0).as_deref(),
+            Some("Scan cancelled")
+        );
+    }
+
+    #[test]
+    fn status_otherwise_is_the_snapshot_age() {
+        assert_eq!(
+            status_label(None, None, Some(0), 2 * 3_600).as_deref(),
+            Some("Scanned 2 h ago")
+        );
+    }
 
     fn leaf(id: &str, size: u64) -> ViewNode {
         ViewNode {

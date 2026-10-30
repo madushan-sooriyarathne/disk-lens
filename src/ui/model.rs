@@ -1593,6 +1593,20 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_cancelled_rescan_keeps_the_view(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
+        let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.start_scan(cx);
+            m.cancel_scan(cx);
+        });
+        settle(cx, &model, |m| m.scan.is_none());
+        assert!(model.read_with(cx, |m, _| m.view.is_some()));
+    }
+
+    #[gpui::test]
     fn open_cleanup_without_a_selection_does_nothing(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, cx| m.open_cleanup(cx));

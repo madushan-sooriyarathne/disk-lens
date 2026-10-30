@@ -7,7 +7,7 @@ use gpui::{
     ease_in_out, prelude::*, px, relative,
 };
 
-use super::format::format_bytes;
+use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, UpdateState};
 use super::theme::{self, Theme};
 
@@ -229,7 +229,7 @@ pub fn error(
     message(t, "Scan failed", body, t.error, "Try again", cx)
 }
 
-/// Notice above the stat cards: a cancelled rescan, or unreadable folders. Empty otherwise.
+/// Notice above the stat cards about unreadable folders, with the way to grant access. Empty otherwise.
 pub fn banner(
     model: &mut AppModel,
     window: &mut Window,
@@ -237,12 +237,7 @@ pub fn banner(
 ) -> impl IntoElement {
     let t = theme::current(window);
     let unreadable = model.meta.as_ref().map_or(0, |m| m.inaccessible_count);
-    // A scan error wins over the unreadable notice; only the latter offers access.
-    let (text, offer_access) = match model.error.clone() {
-        Some(e) => (Some(e), false),
-        None => (unreadable_notice(unreadable), !model.full_disk_access),
-    };
-    let Some(text) = text else {
+    let Some(text) = unreadable_notice(unreadable) else {
         return div();
     };
     let banner = div()
@@ -257,7 +252,7 @@ pub fn banner(
         .bg(t.review_fill)
         .text_size(px(13.))
         .child(div().flex_1().child(text));
-    if !offer_access {
+    if model.full_disk_access {
         return banner;
     }
     banner.child(
@@ -359,30 +354,9 @@ fn unreadable_notice(n: u32) -> Option<String> {
     })
 }
 
-/// `Number.toLocaleString()` for en-US: `1,234,567`.
-fn group_digits(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn groups_digits() {
-        assert_eq!(group_digits(0), "0");
-        assert_eq!(group_digits(999), "999");
-        assert_eq!(group_digits(1000), "1,000");
-        assert_eq!(group_digits(1_234_567), "1,234,567");
-    }
 
     #[test]
     fn unreadable_notice_pluralizes() {
