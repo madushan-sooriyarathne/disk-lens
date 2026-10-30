@@ -14,7 +14,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
-| 7 Background rescan | Built, awaiting review | v2, PRD section 13.4.2. Branch `feat/phase-7-background-rescan`. Native-window check open (see What is left) |
+| 7 Background rescan | Built, verified on macOS, awaiting review | v2, PRD section 13.4.2. Branch `feat/phase-7-background-rescan`; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
 | 8 Design foundation and window shell | Not started | v2, PRD sections 13.4.3 and 13.5 |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
@@ -98,8 +98,8 @@ Last full gate run on macOS (Phase 7, 2026-10-31): `cargo fmt --check`, `cargo c
   - Retry takes Rescan's place while an error shows (both start the same scan), instead of a second button next to it.
   - Dry-run, skipped, failed and command items stay on screen until the rescan: PRD FR-BG-6 names deleted or trashed items, and a command frees an estimated size from a folder that still exists.
   - "Other" tiles are not shrunk by `subtract`: they carry their folder's path and only stand for leftovers.
+- Verified (2026-10-31): the Phase 7 checks in `docs/QA.md` passed in the native window on the sandbox.
 - Open:
-  - Manual check in the native window on the sandbox (`docs/QA.md`, Phase 7). Interactions were verified only through `TestAppContext` and pure tests, against the mock.
   - If loading the new snapshot fails after a background scan, the backend already holds the new snapshot while the UI keeps the old view, with the error and Retry; Retry rescans.
 
 **Housekeeping**
