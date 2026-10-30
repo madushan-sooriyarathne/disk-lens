@@ -741,6 +741,20 @@ impl AppModel {
         }
     }
 
+    /// Selects every ready item of `row_id`; already selected items stay.
+    pub fn add_row(&mut self, row_id: &str, cx: &mut Context<Self>) {
+        if let Some(row) = self.recommendations.iter().find(|r| r.row_id == row_id) {
+            self.selected
+                .extend(selection::ready_ids(row).into_iter().map(String::from));
+            cx.notify();
+        }
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.selected.clear();
+        cx.notify();
+    }
+
     pub fn select_safe(&mut self, cx: &mut Context<Self>) {
         self.selected = selection::select_safe(&self.recommendations, &self.selected);
         cx.notify();
@@ -1215,6 +1229,28 @@ mod tests {
         model.update(cx, |m, cx| m.navigate(child.clone(), cx));
         cx.run_until_parked();
         child
+    }
+
+    #[gpui::test]
+    fn add_to_queue_selects_the_rows_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let (row_id, ready) = model.read_with(cx, |m, _| {
+            let row = &m.recommendations[0];
+            let ready: HashSet<String> = selection::ready_ids(row)
+                .into_iter()
+                .map(String::from)
+                .collect();
+            (row.row_id.clone(), ready)
+        });
+        model.update(cx, |m, cx| m.add_row(&row_id, cx));
+        model.read_with(cx, |m, _| assert_eq!(m.selected, ready));
+    }
+
+    #[gpui::test]
+    fn clear_queue_empties_the_selection(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.clear_selection(cx));
+        model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
     }
 
     #[gpui::test]

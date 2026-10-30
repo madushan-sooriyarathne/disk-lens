@@ -33,6 +33,7 @@ pub fn run() {
         .run(|cx: &mut App| {
             gpui_component::init(cx);
             root::bind_keys(cx);
+            root::set_menus(cx);
             cx.open_window(chrome::window_options(cx), |window, cx| {
                 let model = cx.new(|cx| AppModel::new(Source::from_env(), window, cx));
                 // gpui-component's popovers, tooltips and sheets mount under Root.
