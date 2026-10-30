@@ -69,7 +69,7 @@ UI (`src/ui/`, GPUI):
 
 ## Conventions
 
-- Latest stable dependency versions; confirm configuration against official docs and crate docs rather than memory. GPUI is pinned to an exact snapshot (`gpui-pre` / `gpui-pre-platform` `=0.3.9`, imported as `gpui` / `gpui_platform`); read its source and `examples/` in `~/.cargo/registry/src/*/gpui-pre-0.3.9/` for API questions, and bump it only in its own commit. The Rust toolchain is pinned in `rust-toolchain.toml` (GPUI needs 1.95 or later).
+- Latest stable dependency versions; confirm configuration against official docs and crate docs rather than memory. GPUI is pinned to an exact snapshot (`gpui-pre` / `gpui-pre-platform` `=0.3.10`, imported as `gpui` / `gpui_platform`); read its source and `examples/` in `~/.cargo/registry/src/*/gpui-pre-0.3.10/` for API questions, and bump it only in its own commit. The Rust toolchain is pinned in `rust-toolchain.toml` (GPUI needs 1.95 or later).
 - `rules/rules.toml` is the TOML block of `docs/RULES.md` section 7 verbatim. Change both, plus tests, in the same commit. `tests/rules_doc_sync.rs` enforces equality.
 - Cleanup actions send item IDs, never paths (S-01). Explorer actions (`get_view`, `reveal_in_finder`) take paths, which the backend validates against the snapshot.
 - `assets/mock/snapshot.mock.json` mirrors `docs/mockup.jpg` numbers (test in `src/ui/source.rs`); its `preselected` list is mock-only, real default selection is empty.

@@ -128,7 +128,7 @@ Decisions (2026-10-29): the active-work guard, staging queue and Copy as Shell S
 |-------|--------|
 | Platform | macOS only, minimum macOS 13 |
 | Language | Rust stable (pinned in `rust-toolchain.toml`), edition 2024. One crate at the repo root |
-| UI | GPUI, Zed's GPU UI framework: `gpui-pre` and `gpui-pre-platform` pinned to an exact snapshot version (`=0.3.9`), imported as `gpui` and `gpui_platform`. v1: no component library. v2: `gpui-component` from gpui-kit (0.8.1, which pins `gpui-pre =0.3.10`, so GPUI is bumped first, in its own commit) for the palette, text input, lists, menus, popovers and tooltips, themed with DiskLens tokens. Any component that can't follow the HIG is hand-built |
+| UI | GPUI, Zed's GPU UI framework: `gpui-pre` and `gpui-pre-platform` pinned to an exact snapshot version (`=0.3.10`), imported as `gpui` and `gpui_platform`. v1: no component library. v2: `gpui-component` from gpui-kit (0.8.1, which pins `gpui-pre =0.3.10`, so GPUI is bumped first, in its own commit) for the palette, text input, lists, menus, popovers and tooltips, themed with DiskLens tokens. Any component that can't follow the HIG is hand-built |
 | Styling | Theme tokens in `src/ui/theme.rs`; category colors come from `rules.toml` |
 | State | One GPUI entity, `AppModel` (`src/ui/model.rs`) |
 | Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
