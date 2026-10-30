@@ -1,20 +1,20 @@
 //! Colors, fonts and tile colors. Category colors and labels come from `rules.toml`.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    App, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window, WindowAppearance,
-    rgb, rgba,
+    FontFeatures, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window,
+    WindowAppearance, rgb, rgba,
 };
 
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
 use crate::view::{ViewMode, ViewNode};
 
-pub const SANS: &str = "Geist";
-pub const MONO: &str = "Geist Mono";
+pub const SANS: &str = ".SystemUIFont";
+/// SF Mono on macOS; GPUI resolves CoreText's hidden system name (checked in Phase 8).
+pub const MONO: &str = ".AppleSystemUIFontMonospaced";
 /// Stripe opacity on disposable tiles; PRD 13.5 caps it at 20%.
 pub const STRIPE_ALPHA: f32 = 0.2;
 /// How much of the category fill a disposable or restorable tile keeps.
@@ -157,6 +157,11 @@ impl Theme {
     }
 }
 
+/// Tabular figures, set once on the window so every number lines up in columns.
+pub fn numeric() -> FontFeatures {
+    FontFeatures(Arc::new(vec![("tnum".into(), 1)]))
+}
+
 /// The theme for the window's appearance (PRD section 9: dark mode).
 pub fn current(window: &Window) -> Theme {
     match window.appearance() {
@@ -255,24 +260,6 @@ pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors
                 hatch,
             }
         }
-    }
-}
-
-/// Registers the embedded Geist and Geist Mono fonts.
-pub fn load_fonts(cx: &App) {
-    let fonts = [
-        &include_bytes!("../../assets/fonts/Geist-Regular.ttf")[..],
-        &include_bytes!("../../assets/fonts/Geist-Medium.ttf")[..],
-        &include_bytes!("../../assets/fonts/Geist-SemiBold.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-Regular.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-Medium.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-SemiBold.ttf")[..],
-    ];
-    if let Err(e) = cx
-        .text_system()
-        .add_fonts(fonts.into_iter().map(Cow::Borrowed).collect())
-    {
-        tracing::warn!("failed to load Geist fonts: {e:#}");
     }
 }
 

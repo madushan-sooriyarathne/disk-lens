@@ -158,7 +158,6 @@ pub fn scanning(
             )
             .child(
                 div()
-                    .font_family(theme::MONO)
                     .text_size(px(22.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(value),

@@ -163,7 +163,6 @@ impl Render for TooltipView {
                     .gap_2()
                     .child(
                         div()
-                            .font_family(theme::MONO)
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.size.clone()),
@@ -446,7 +445,7 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
             model
                 .view
                 .as_ref()
-                .map(|v| div().font_family(theme::MONO).child(format_bytes(v.size))),
+                .map(|v| div().child(format_bytes(v.size))),
         )
 }
 
@@ -584,7 +583,6 @@ fn tile(
                     d.child(
                         div()
                             .flex_none()
-                            .font_family(theme::MONO)
                             .text_size(px(12.))
                             .text_color(t.secondary)
                             .child(size),
@@ -611,7 +609,6 @@ fn tile(
                     .absolute()
                     .left(px(10.))
                     .bottom(px(8.))
-                    .font_family(theme::MONO)
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(px(treemap::size_font_px(r.w * r.h) as f32))
                     .child(size),

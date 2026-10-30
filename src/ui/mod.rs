@@ -26,7 +26,6 @@ pub fn run() {
     // Validates the bundled rules once at startup; an invalid file is a build defect.
     Rules::embedded();
     gpui_platform::application().run(|cx: &mut App| {
-        theme::load_fonts(cx);
         root::bind_keys(cx);
         let bounds = Bounds::centered(None, size(px(1280.), px(860.)), cx);
         cx.open_window(

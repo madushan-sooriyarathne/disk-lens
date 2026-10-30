@@ -31,7 +31,6 @@ fn card(
     head = head.child(label);
     let mut row = div().mt(px(6.)).flex().items_baseline().gap_2p5().child(
         div()
-            .font_family(theme::MONO)
             .text_size(px(30.))
             .line_height(px(36.))
             .font_weight(FontWeight::SEMIBOLD)
@@ -40,7 +39,6 @@ fn card(
     if let Some((text, green)) = secondary {
         row = row.child(
             div()
-                .font_family(theme::MONO)
                 .text_size(px(13.))
                 .text_color(if green { t.safe_text } else { t.secondary })
                 .child(text),

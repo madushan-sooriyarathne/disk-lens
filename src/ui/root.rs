@@ -27,7 +27,8 @@ impl Render for AppModel {
             .p_4()
             .bg(t.content)
             .text_color(t.label)
-            .font_family(theme::SANS);
+            .font_family(theme::SANS)
+            .font_features(theme::numeric());
         let body = match self.phase {
             Phase::Loading => body,
             Phase::Onboarding => body.child(screens::onboarding(self, window, cx)),
