@@ -436,11 +436,9 @@ impl AppModel {
                 Ok::<_, Error>((view?, s.recommendations()?, s.preselected_rows()))
             },
             move |this, loaded, cx| {
-                if this.view_seq != seq {
-                    // The user navigated while this loaded; load again for where they are now.
-                    this.enter(meta, cx);
-                    return;
-                }
+                // The user navigated while this loaded. That newer view request already reads
+                // this snapshot, so it sets the path and view; the rest still swaps in here.
+                let navigated = this.view_seq != seq;
                 let mut stale = false;
                 match loaded {
                     Ok((view, recommendations, preselected)) => {
@@ -479,10 +477,12 @@ impl AppModel {
                                 meta.scanned_at,
                             );
                         this.root_path = meta.root.clone();
-                        this.path = view.path.clone();
+                        if !navigated {
+                            this.path = view.path.clone();
+                            this.view = Some(view);
+                            this.hovered = None;
+                        }
                         this.meta = Some(meta);
-                        this.view = Some(view);
-                        this.hovered = None;
                         this.recommendations = recommendations;
                         this.selected = selected;
                         // The details belong to the old snapshot; reload them for a surviving row.
@@ -1403,6 +1403,18 @@ mod tests {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, _| m.path = "~/Desktop/vanished".into());
         rescan(&model, cx);
+        assert_eq!(model.read_with(cx, |m, _| m.path.clone()), "~/Desktop");
+    }
+
+    #[gpui::test]
+    fn navigation_during_a_swap_is_kept(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            let meta = m.meta.clone().unwrap();
+            m.enter(meta, cx);
+            m.navigate("~/Desktop".into(), cx);
+        });
+        cx.run_until_parked();
         assert_eq!(model.read_with(cx, |m, _| m.path.clone()), "~/Desktop");
     }
 
