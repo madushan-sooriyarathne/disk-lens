@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (none started; Phase 7 is next); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, built on `feat/phase-7-background-rescan`, awaiting review; Phase 8 is next); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
@@ -51,7 +51,7 @@ Backend (`src/`):
 
 UI (`src/ui/`, GPUI):
 - `mod.rs` opens the window and loads the fonts; `root.rs` renders `AppModel` by phase (loading / onboarding / idle / scanning / ready / error); Tab and Shift-Tab move focus, Esc goes back.
-- `model.rs`: `AppModel`, the single GPUI entity (phase, snapshot meta, explorer path and mode, recommendations, selected item IDs, drawer row). Backend calls run off the UI thread; recommendations refresh on window activation.
+- `model.rs`: `AppModel`, the single GPUI entity (phase, running scan, snapshot meta, explorer path and mode, recommendations, selected item IDs, drawer row). Backend calls run off the UI thread; recommendations refresh on window activation.
 - `source.rs`: `Source::Live` (calls `backend.rs`) or `Source::Mock` (`assets/mock/snapshot.mock.json`, chosen by `DISKLENS_MOCK`).
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3), `stats.rs`, `selection.rs`, `format.rs`, `theme.rs` (tokens; category colors from `rules.toml`).
 - Views stay presentational: `screens.rs`, `stat_cards.rs`, `explorer.rs`, `recommendations.rs`, `cleanup.rs` (confirm, progress and results dialog, toast). After a cleanup the model rescans the whole root.

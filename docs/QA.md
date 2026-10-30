@@ -81,6 +81,16 @@ Build with `scripts/package.sh` (add the minisign key variables for the update a
 - [ ] During a scan the banner does not offer Install.
 - [ ] Clean macOS 13 machine (or VM): the app launches.
 
+## Phase 7: background rescan
+
+- [ ] Open a subfolder, then Rescan: the explorer, stat cards and recommendations stay on screen; the header reads "Updating… N files" with Cancel; afterwards the same subfolder is shown and the header reads "Scanned just now".
+- [ ] Select a few items, open a drawer, then Rescan: during the scan Clean selected is dimmed with the tooltip "Available when the update finishes", Copy script still works; afterwards the same items are selected and the drawer is still open.
+- [ ] Delete a folder you are viewing in the sandbox from the terminal (for example `rm -rf .sandbox/home/<folder>`), then Rescan: the explorer falls back to its parent.
+- [ ] Select an item, delete its folder from the terminal, then Rescan: a toast says "1 selected item no longer found".
+- [ ] Rescan, then Cancel: results stay; the header shows "Scan cancelled" with Retry, and Retry starts a new scan.
+- [ ] **real** Clean a few safe items: as each finishes, its row leaves the panel and the totals and tiles shrink, before the follow-up rescan finishes.
+- [ ] Stale snapshot: set the system clock forward more than 24 hours (or wait), relaunch: the last results show at once and a background rescan starts; a fresh snapshot does not rescan on launch.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

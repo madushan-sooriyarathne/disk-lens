@@ -14,7 +14,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
-| 7 Background rescan | Not started | v2, PRD section 13.4.2 |
+| 7 Background rescan | Built, awaiting review | v2, PRD section 13.4.2. Branch `feat/phase-7-background-rescan`. Native-window check open (see What is left) |
 | 8 Design foundation and window shell | Not started | v2, PRD sections 13.4.3 and 13.5 |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 6, 2026-10-25): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (313 tests) all pass.
+Last full gate run on macOS (Phase 7, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (346 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -85,6 +85,22 @@ Last full gate run on macOS (Phase 6, 2026-10-25): `cargo fmt --check`, `cargo c
   - The update banner shows only on the main (ready) screen, so a user still on onboarding or the idle screen sees it after the first scan. An install that fails is not retried until the next launch.
   - Not verified on a real release: the signed download, install and `cx.restart()` relaunch. `docs/QA.md` has a local round trip for it.
   - `create-dmg` sometimes fails with `hdiutil: couldn't unmount ... Resource busy` when Finder holds the volume; detach it (`hdiutil detach <dev> -force`), delete `target/packager/rw.*.dmg` and run `scripts/package.sh` again.
+
+**Phase 7: background rescan**
+- Built (all in `src/ui/`):
+  - `AppModel.scan: Option<ScanProgress>` holds the running scan. `Phase::Scanning` is used only while no snapshot exists; a rescan keeps `Phase::Ready`, and `scan` stays set until the new snapshot is on screen, so Clean selected cannot build a plan against IDs that are about to change.
+  - Snapshot swap (`AppModel::enter`): the explorer path falls back to the nearest ancestor in the new snapshot (`ancestors`), the selection is carried over by `(rule_id, path)` (`selection::carry_over`) with a toast counting dropped items, and the drawer stays open (details reloaded) only if its row still exists. A navigation made while the swap loads wins over the carried-over path.
+  - Clean selected is disabled during a scan with the tooltip "Available when the update finishes"; `open_cleanup` and `confirm_cleanup` refuse while scanning. Copy script, selection and browsing keep working.
+  - A snapshot older than 24 hours (`STALE_AFTER`) starts a background rescan when it is first shown after launch.
+  - Deleted or trashed items leave the recommendations, the selection and the treemap sizes as each one finishes (`selection::forget_item`, `subtract`), before the follow-up rescan.
+  - Explorer header: "Updating… N files" with Cancel; the failure or cancel message with Retry; otherwise "Scanned X ago" with Rescan. The banner above the stat cards now only shows the unreadable-folders notice.
+- Decisions:
+  - Retry takes Rescan's place while an error shows (both start the same scan), instead of a second button next to it.
+  - Dry-run, skipped, failed and command items stay on screen until the rescan: PRD FR-BG-6 names deleted or trashed items, and a command frees an estimated size from a folder that still exists.
+  - "Other" tiles are not shrunk by `subtract`: they carry their folder's path and only stand for leftovers.
+- Open:
+  - Manual check in the native window on the sandbox (`docs/QA.md`, Phase 7). Interactions were verified only through `TestAppContext` and pure tests, against the mock.
+  - If loading the new snapshot fails after a background scan, the backend already holds the new snapshot while the UI keeps the old view, with the error and Retry; Retry rescans.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
