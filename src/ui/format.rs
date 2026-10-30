@@ -1,4 +1,4 @@
-//! Size and age formatting.
+//! Size, age and count formatting.
 
 const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
 
@@ -55,9 +55,30 @@ pub fn format_age(now: i64, then: i64) -> String {
     }
 }
 
+/// `Number.toLocaleString()` for en-US: `1,234,567`.
+pub fn group_digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn groups_digits() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1000), "1,000");
+        assert_eq!(group_digits(1_234_567), "1,234,567");
+    }
 
     #[test]
     fn format_bytes_across_units() {

@@ -79,10 +79,18 @@ impl MockData {
         self
     }
 
+    /// Age of the loaded snapshot, as Unix seconds (2 h ago by default).
+    pub fn with_scanned_at(mut self, secs: i64) -> Self {
+        self.file.meta.scanned_at = secs;
+        self
+    }
+
     fn start_scan(&self, mut on_event: impl FnMut(ScanEvent) + Send + 'static) {
         self.cancelled.store(false, Ordering::Relaxed);
         let cancelled = self.cancelled.clone();
-        let meta = self.file.meta.clone();
+        let mut meta = self.file.meta.clone();
+        // A finished scan is fresh, like a real one.
+        meta.scanned_at = crate::cleanup::audit::now_ms() as i64 / 1000;
         let step = self.step;
         std::thread::spawn(move || {
             for i in 1..=SCAN_STEPS {

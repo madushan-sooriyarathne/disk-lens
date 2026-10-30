@@ -22,6 +22,7 @@ use crate::recommend::model::{ItemDetails, ItemStatus, MethodView, RecItem, Reco
 pub struct PanelState {}
 
 const NOTHING_SELECTED: &str = "Select items to clean first";
+const SCANNING: &str = "Available when the update finishes";
 
 pub fn render(
     model: &mut AppModel,
@@ -118,7 +119,13 @@ pub fn render(
                 ),
         )
         .child(body)
-        .child(footer(&t, chosen.selected, chosen.selected_rows, cx));
+        .child(footer(
+            &t,
+            chosen.selected,
+            chosen.selected_rows,
+            model.scan.is_some(),
+            cx,
+        ));
 
     match model
         .focused_row
@@ -366,7 +373,13 @@ fn row(
     line
 }
 
-fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl IntoElement {
+fn footer(
+    t: &Theme,
+    size: u64,
+    rows: usize,
+    scanning: bool,
+    cx: &mut Context<AppModel>,
+) -> impl IntoElement {
     let secondary = |id: &'static str, label: &'static str| {
         div()
             .id(id)
@@ -450,6 +463,8 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                         .child("Clean selected");
                     if nothing {
                         clean.opacity(0.4).tooltip(tip(NOTHING_SELECTED.into()))
+                    } else if scanning {
+                        clean.opacity(0.4).tooltip(tip(SCANNING.into()))
                     } else {
                         theme::focusable(clean, t, Role::Button, "Clean selected")
                             .cursor_pointer()

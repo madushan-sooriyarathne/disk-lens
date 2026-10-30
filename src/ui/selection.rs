@@ -1,8 +1,8 @@
 //! Selection rules: only ready items can be selected.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::recommend::model::{ItemStatus, Recommendation, Tier};
+use crate::recommend::model::{ItemStatus, RecItem, Recommendation, Tier};
 use crate::view::ViewNode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +65,59 @@ pub fn prune_selection(recs: &[Recommendation], selected: &HashSet<String>) -> H
         .filter(|id| ready.contains(id.as_str()))
         .cloned()
         .collect()
+}
+
+/// Maps `selected` ids of an old snapshot onto the new one by `(rule_id, path)`, since ids are
+/// minted per snapshot. Also counts the ids that did not survive: unknown, gone or now blocked.
+pub fn carry_over(
+    old: &[Recommendation],
+    selected: &HashSet<String>,
+    new: &[Recommendation],
+) -> (HashSet<String>, usize) {
+    let key = |r: &Recommendation, path: &str| (r.rule_id.clone(), path.to_owned());
+    let old_keys: HashMap<&str, (String, String)> = old
+        .iter()
+        .flat_map(|r| {
+            r.items
+                .iter()
+                .map(move |i| (i.item_id.as_str(), key(r, &i.path)))
+        })
+        .collect();
+    let new_ready: HashMap<(String, String), &str> = new
+        .iter()
+        .flat_map(|r| {
+            r.items
+                .iter()
+                .filter(|i| i.status == ItemStatus::Ready)
+                .map(move |i| (key(r, &i.path), i.item_id.as_str()))
+        })
+        .collect();
+    let mut kept = HashSet::new();
+    let mut dropped = 0;
+    for id in selected {
+        match old_keys.get(id.as_str()).and_then(|k| new_ready.get(k)) {
+            Some(new_id) => {
+                kept.insert((*new_id).to_owned());
+            }
+            None => dropped += 1,
+        }
+    }
+    (kept, dropped)
+}
+
+/// Removes one item from its row and shrinks the row by it; a row left empty goes too.
+pub fn forget_item(recs: &mut Vec<Recommendation>, item_id: &str) -> Option<RecItem> {
+    let (row_at, item_at) = recs
+        .iter()
+        .enumerate()
+        .find_map(|(r, row)| Some((r, row.items.iter().position(|i| i.item_id == item_id)?)))?;
+    let row = recs.get_mut(row_at)?;
+    let item = row.items.remove(item_at);
+    row.size = row.size.saturating_sub(item.size);
+    if row.items.is_empty() {
+        recs.remove(row_at);
+    }
+    Some(item)
 }
 
 /// The reason shown on a row whose items are all blocked, else `None`.
@@ -195,6 +248,51 @@ mod tests {
     fn prune_selection_drops_vanished_and_newly_blocked_items() {
         let s = prune_selection(&[npm(), xcode()], &set(&["a", "c", "x", "gone"]));
         assert_eq!(sorted(&s), ["a"]);
+    }
+
+    /// `r` with the item that sits at `/{from}` renamed to `to`, as a new snapshot would mint it.
+    fn reissued(mut r: Recommendation, from: &str, to: &str) -> Recommendation {
+        for i in r.items.iter_mut().filter(|i| i.path == format!("/{from}")) {
+            i.item_id = to.into();
+        }
+        r
+    }
+
+    #[test]
+    fn carry_over_maps_ids_by_rule_and_path() {
+        let new = reissued(npm(), "a", "a2");
+        let (kept, _) = carry_over(&[npm()], &set(&["a"]), &[new]);
+        assert_eq!(sorted(&kept), ["a2"]);
+    }
+
+    #[test]
+    fn carry_over_drops_a_now_blocked_item() {
+        let mut new = npm();
+        new.items[0].status = ItemStatus::Blocked {
+            reason: "running".into(),
+        };
+        let (kept, _) = carry_over(&[npm()], &set(&["a"]), &[new]);
+        assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn carry_over_counts_gone_and_unknown_ids() {
+        let (_, dropped) = carry_over(&[npm()], &set(&["a", "gone"]), &[trash()]);
+        assert_eq!(dropped, 2);
+    }
+
+    #[test]
+    fn forget_item_removes_a_row_it_empties() {
+        let mut recs = vec![npm(), trash()];
+        forget_item(&mut recs, "t");
+        assert_eq!(recs, [npm()]);
+    }
+
+    #[test]
+    fn forget_item_shrinks_the_row_it_leaves() {
+        let mut recs = vec![Recommendation { size: 5, ..npm() }];
+        forget_item(&mut recs, "a");
+        assert_eq!(recs[0].size, 4);
     }
 
     #[test]

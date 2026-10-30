@@ -12,15 +12,17 @@ use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
-use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary};
+use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{ViewMode, ViewNode};
+use crate::view::{ViewKind, ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
+/// A snapshot older than this is rescanned on launch (FR-BG-3). A constant, not a setting.
+const STALE_AFTER: i64 = 24 * 3_600;
 /// How long a toast stays up.
 const TOAST: Duration = Duration::from_secs(3);
 
@@ -71,8 +73,9 @@ pub enum UpdateState {
     Failed(String),
 }
 
+/// Counters of the running scan.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Progress {
+pub struct ScanProgress {
     pub files: u64,
     pub bytes: u64,
     pub current: String,
@@ -82,7 +85,8 @@ pub struct AppModel {
     pub source: Arc<Source>,
     pub phase: Phase,
     pub meta: Option<SnapshotMeta>,
-    pub progress: Progress,
+    /// The running scan, if any. Independent of `phase`: a rescan keeps the results on screen.
+    pub scan: Option<ScanProgress>,
     /// Whether the app can read every folder (PRD 7.8); rechecked on window focus.
     pub full_disk_access: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
@@ -172,12 +176,58 @@ fn check_for_update(cx: &mut Context<AppModel>) {
     .detach();
 }
 
+fn is_stale(now: i64, scanned_at: i64) -> bool {
+    now.saturating_sub(scanned_at) > STALE_AFTER
+}
+
+/// Takes `size` off every node on the way to `path` and drops the node at it, so the treemap
+/// matches the disk before the rescan lands.
+fn subtract(node: &mut ViewNode, path: &str, size: u64) {
+    // "Other" carries its folder's path but only stands for leftovers.
+    if node.kind == ViewKind::Other || !is_within(path, &node.path) {
+        return;
+    }
+    node.size = node.size.saturating_sub(size);
+    node.children.retain(|c| c.path != path);
+    for child in &mut node.children {
+        subtract(child, path, size);
+    }
+}
+
 /// The folder above `path`, like `parentOf` in the old view store.
 fn parent_of(path: &str) -> &str {
     path.rfind('/')
         .map(|i| &path[..i])
         .filter(|p| !p.is_empty())
         .unwrap_or("/")
+}
+
+/// Whether `path` is `dir` or below it.
+fn is_within(path: &str, dir: &str) -> bool {
+    path == dir
+        || path
+            .strip_prefix(dir.trim_end_matches('/'))
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// `path` and its parents down to `root`, nearest first. A path outside `root` gives just `root`.
+fn ancestors<'a>(path: &'a str, root: &'a str) -> Vec<&'a str> {
+    if !is_within(path, root) {
+        return vec![root];
+    }
+    let mut chain = vec![path];
+    let mut current = path;
+    while current != root {
+        let parent = parent_of(current);
+        // A root with a trailing slash is never reached by trimming; stop at the top.
+        if parent == current {
+            chain.push(root);
+            break;
+        }
+        chain.push(parent);
+        current = parent;
+    }
+    chain
 }
 
 impl AppModel {
@@ -229,7 +279,7 @@ impl AppModel {
             source,
             phase: Phase::Loading,
             meta: None,
-            progress: Progress::default(),
+            scan: None,
             full_disk_access: false,
             error: None,
             mode: ViewMode::Category,
@@ -275,7 +325,7 @@ impl AppModel {
 
     /// Installing or restarting under a running scan or cleanup would cut it short.
     pub fn can_install_update(&self) -> bool {
-        self.phase != Phase::Scanning && self.cleanup.is_none()
+        self.scan.is_none() && self.cleanup.is_none()
     }
 
     pub fn install_update(&mut self, cx: &mut Context<Self>) {
@@ -356,63 +406,122 @@ impl AppModel {
         );
     }
 
-    /// Shows a snapshot: the root folder, fresh rows and the default selection.
+    /// Shows a snapshot. The first one opens at the root with the default selection; a later one
+    /// keeps the folder (or its nearest surviving ancestor), the selection and the drawer.
     fn enter(&mut self, meta: SnapshotMeta, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
         let mode = self.mode;
+        let first = self.meta.is_none();
+        let candidates: Vec<String> = if first {
+            vec![meta.root.clone()]
+        } else {
+            ancestors(&self.path, &meta.root)
+                .into_iter()
+                .map(String::from)
+                .collect()
+        };
         let root = meta.root.clone();
         off_thread(
             &self.source,
             cx,
             move |s| {
-                Ok::<_, Error>((
-                    s.view(&root, mode)?,
-                    s.recommendations()?,
-                    s.preselected_rows(),
-                ))
+                let mut view = Err(Error::NotInSnapshot(root));
+                for candidate in &candidates {
+                    view = s.view(candidate, mode);
+                    if view.is_ok() {
+                        break;
+                    }
+                }
+                Ok::<_, Error>((view?, s.recommendations()?, s.preselected_rows()))
             },
             move |this, loaded, cx| {
-                if this.view_seq != seq {
-                    return;
-                }
+                // The user navigated while this loaded. That newer view request already reads
+                // this snapshot, so it sets the path and view; the rest still swaps in here.
+                let navigated = this.view_seq != seq;
+                let mut stale = false;
                 match loaded {
                     Ok((view, recommendations, preselected)) => {
-                        let mut selected = HashSet::new();
-                        for row in &recommendations {
-                            if preselected.contains(&row.row_id) {
-                                selected.extend(
-                                    selection::ready_ids(row).into_iter().map(String::from),
+                        let selected = if first {
+                            let mut selected = HashSet::new();
+                            for row in &recommendations {
+                                if preselected.contains(&row.row_id) {
+                                    selected.extend(
+                                        selection::ready_ids(row).into_iter().map(String::from),
+                                    );
+                                }
+                            }
+                            selected
+                        } else {
+                            let (kept, dropped) = selection::carry_over(
+                                &this.recommendations,
+                                &this.selected,
+                                &recommendations,
+                            );
+                            if dropped > 0 {
+                                let noun = if dropped == 1 { "item" } else { "items" };
+                                this.show_toast(
+                                    format!("{dropped} selected {noun} no longer found"),
+                                    cx,
                                 );
                             }
-                        }
+                            kept
+                        };
+                        let drawer = this
+                            .focused_row
+                            .clone()
+                            .filter(|id| recommendations.iter().any(|r| &r.row_id == id));
+                        stale = first
+                            && is_stale(
+                                crate::cleanup::audit::now_ms() as i64 / 1000,
+                                meta.scanned_at,
+                            );
                         this.root_path = meta.root.clone();
-                        this.path = meta.root.clone();
+                        if !navigated {
+                            this.path = view.path.clone();
+                            this.view = Some(view);
+                            this.hovered = None;
+                        }
                         this.meta = Some(meta);
-                        this.view = Some(view);
-                        this.hovered = None;
                         this.recommendations = recommendations;
                         this.selected = selected;
+                        // The details belong to the old snapshot; reload them for a surviving row.
                         this.focused_row = None;
                         this.details = None;
                         this.details_error = None;
+                        if drawer.is_some() {
+                            this.focus_row(drawer, cx);
+                        }
                         this.error = None;
                         this.phase = Phase::Ready;
                     }
                     Err(e) => {
-                        this.phase = Phase::Error;
+                        if first {
+                            this.phase = Phase::Error;
+                        }
                         this.error = Some(e.to_string());
                     }
                 }
+                this.scan = None;
                 cx.notify();
+                // Only the launch load can start this, so a scan never triggers itself.
+                if stale {
+                    this.start_scan(cx);
+                }
             },
         );
     }
 
     pub fn start_scan(&mut self, cx: &mut Context<Self>) {
-        self.phase = Phase::Scanning;
-        self.progress = Progress::default();
+        if self.scan.is_some() {
+            return;
+        }
+        self.scan = Some(ScanProgress::default());
         self.error = None;
+        // With a snapshot on screen the scan runs behind it; the explorer keeps working.
+        if self.meta.is_none() {
+            self.phase = Phase::Scanning;
+        }
         cx.notify();
         let (tx, rx) = mpsc::channel();
         let started = self.source.start_scan(move |event| {
@@ -420,7 +529,10 @@ impl AppModel {
             tx.send(event).ok();
         });
         if let Err(e) = started {
-            self.phase = Phase::Error;
+            self.scan = None;
+            if self.meta.is_none() {
+                self.phase = Phase::Error;
+            }
             self.error = Some(e.to_string());
             return;
         }
@@ -471,11 +583,13 @@ impl AppModel {
                 bytes,
                 current,
             } => {
-                self.progress = Progress {
-                    files,
-                    bytes,
-                    current,
-                };
+                if let Some(scan) = &mut self.scan {
+                    *scan = ScanProgress {
+                        files,
+                        bytes,
+                        current,
+                    };
+                }
                 false
             }
             ScanEvent::Finished { meta } => {
@@ -483,6 +597,7 @@ impl AppModel {
                 true
             }
             ScanEvent::Failed { message } => {
+                self.scan = None;
                 self.phase = if self.meta.is_some() {
                     Phase::Ready
                 } else {
@@ -646,7 +761,8 @@ impl AppModel {
 
     /// "Clean selected": builds the plan and opens the confirm dialog.
     pub fn open_cleanup(&mut self, cx: &mut Context<Self>) {
-        if self.selected.is_empty() || self.cleanup.is_some() {
+        // The plan would be built against a snapshot that is about to be replaced.
+        if self.selected.is_empty() || self.cleanup.is_some() || self.scan.is_some() {
             return;
         }
         self.request_plan(false, cx);
@@ -688,7 +804,7 @@ impl AppModel {
         let Some(Cleanup::Confirm { plan, .. }) = self.cleanup.clone() else {
             return;
         };
-        if plan.actions.is_empty() {
+        if plan.actions.is_empty() || self.scan.is_some() {
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -753,9 +869,21 @@ impl AppModel {
                 *current = Some(item_id);
                 false
             }
-            CleanupEvent::ItemFinished { .. } => {
+            CleanupEvent::ItemFinished {
+                item_id, outcome, ..
+            } => {
                 *done += 1;
                 *current = None;
+                // Deleted or trashed items are gone for sure (FR-BG-6). A command frees an
+                // estimate and its folder stays until the rescan, and the rest changed nothing.
+                if matches!(outcome, Outcome::Deleted | Outcome::Trashed)
+                    && let Some(item) = selection::forget_item(&mut self.recommendations, &item_id)
+                {
+                    if let Some(view) = &mut self.view {
+                        subtract(view, &item.path, item.size);
+                    }
+                    self.selected.remove(&item_id);
+                }
                 false
             }
             CleanupEvent::Finished { summary } => {
@@ -872,6 +1000,26 @@ mod tests {
         assert_eq!(parent_of("~"), "/");
     }
 
+    #[test]
+    fn ancestors_walk_up_to_the_root() {
+        assert_eq!(ancestors("~/a/b", "~"), ["~/a/b", "~/a", "~"]);
+    }
+
+    #[test]
+    fn ancestors_of_the_root_is_the_root() {
+        assert_eq!(ancestors("/Users/a", "/Users/a"), ["/Users/a"]);
+    }
+
+    #[test]
+    fn ancestors_of_a_path_outside_the_root_is_the_root() {
+        assert_eq!(ancestors("/Users/ab/x", "/Users/a"), ["/Users/a"]);
+    }
+
+    #[test]
+    fn ancestors_under_the_filesystem_root_end_at_it() {
+        assert_eq!(ancestors("/a/b", "/"), ["/a/b", "/a", "/"]);
+    }
+
     #[gpui::test]
     fn init_reaches_ready_with_an_empty_selection(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
@@ -908,7 +1056,7 @@ mod tests {
     #[gpui::test]
     fn no_install_while_scanning(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
-        model.update(cx, |m, _| m.phase = Phase::Scanning);
+        model.update(cx, |m, _| m.scan = Some(ScanProgress::default()));
         assert!(!model.read_with(cx, |m, _| m.can_install_update()));
     }
 
@@ -1169,9 +1317,10 @@ mod tests {
         model.update(cx, |m, cx| {
             m.selected.insert("stale".into());
             m.start_scan(cx);
-            assert_eq!(m.phase, Phase::Scanning);
+            assert_eq!(m.phase, Phase::Ready);
+            assert!(m.scan.is_some());
         });
-        settle(cx, &model, |m| m.phase != Phase::Scanning);
+        settle(cx, &model, |m| m.scan.is_none());
         model.read_with(cx, |m, _| {
             assert_eq!(m.phase, Phase::Ready);
             assert!(m.error.is_none());
@@ -1192,12 +1341,281 @@ mod tests {
             m.start_scan(cx);
             m.cancel_scan(cx);
         });
-        settle(cx, &model, |m| m.phase != Phase::Scanning);
+        settle(cx, &model, |m| m.scan.is_none());
         model.read_with(cx, |m, _| {
             // A snapshot was already loaded, so the explorer comes back.
             assert_eq!(m.phase, Phase::Ready);
             assert_eq!(m.error.as_deref(), Some("Scan cancelled"));
         });
+    }
+
+    /// Rescans and waits until the new snapshot is shown.
+    fn rescan(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
+        model.update(cx, |m, cx| m.start_scan(cx));
+        settle(cx, model, |m| m.scan.is_none());
+    }
+
+    /// Adds a ready item that the mock's next snapshot does not have, and selects it.
+    fn select_a_ghost(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
+        model.update(cx, |m, _| {
+            let mut ghost = m.recommendations[0].items[0].clone();
+            ghost.item_id = "ghost".into();
+            ghost.path = "~/ghost".into();
+            m.recommendations[0].items.push(ghost);
+            m.selected.insert("ghost".into());
+        });
+    }
+
+    #[gpui::test]
+    fn selection_survives_a_swap_by_path(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let real_id = model.update(cx, |m, _| {
+            let item = &mut m.recommendations[0].items[0];
+            let real = std::mem::replace(&mut item.item_id, "old-id".into());
+            m.selected.insert("old-id".into());
+            real
+        });
+        rescan(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.selected.contains(&real_id)));
+    }
+
+    #[gpui::test]
+    fn a_vanished_item_is_dropped(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        select_a_ghost(&model, cx);
+        rescan(&model, cx);
+        assert!(!model.read_with(cx, |m, _| m.selected.contains("ghost")));
+    }
+
+    #[gpui::test]
+    fn a_vanished_item_is_counted_in_a_toast(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        select_a_ghost(&model, cx);
+        rescan(&model, cx);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.toast.clone()).as_deref(),
+            Some("1 selected item no longer found")
+        );
+    }
+
+    #[gpui::test]
+    fn explorer_path_falls_back_to_an_ancestor(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.path = "~/Desktop/vanished".into());
+        rescan(&model, cx);
+        assert_eq!(model.read_with(cx, |m, _| m.path.clone()), "~/Desktop");
+    }
+
+    #[gpui::test]
+    fn navigation_during_a_swap_is_kept(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            let meta = m.meta.clone().unwrap();
+            m.enter(meta, cx);
+            m.navigate("~/Desktop".into(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(model.read_with(cx, |m, _| m.path.clone()), "~/Desktop");
+    }
+
+    #[gpui::test]
+    fn drawer_closes_when_its_row_is_gone(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.focused_row = Some("gone-row".into()));
+        rescan(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.focused_row.is_none()));
+    }
+
+    #[gpui::test]
+    fn cleanup_is_refused_while_scanning(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let source = Source::Mock(MockData::new(true).with_step(Duration::from_millis(30)));
+        let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.start_scan(cx);
+            m.open_cleanup(cx);
+        });
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.cleanup.is_none()));
+    }
+
+    /// A model over a mock whose snapshot is `age_secs` old.
+    fn setup_aged(
+        cx: &mut TestAppContext,
+        age_secs: i64,
+    ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let cx = cx.add_empty_window();
+        let now = crate::cleanup::audit::now_ms() as i64 / 1000;
+        let mock = MockData::new(false)
+            .with_step(Duration::from_millis(30))
+            .with_scanned_at(now - age_secs);
+        let model =
+            cx.update(|window, cx| cx.new(|cx| AppModel::new(Source::Mock(mock), window, cx)));
+        cx.run_until_parked();
+        (model, cx)
+    }
+
+    #[gpui::test]
+    fn a_stale_snapshot_rescans_on_load(cx: &mut TestAppContext) {
+        let (model, cx) = setup_aged(cx, STALE_AFTER + 3_600);
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
+    }
+
+    #[gpui::test]
+    fn a_fresh_snapshot_does_not_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup_aged(cx, 3_600);
+        assert!(model.read_with(cx, |m, _| m.scan.is_none()));
+    }
+
+    #[test]
+    fn exactly_a_day_old_is_not_stale() {
+        assert!(!is_stale(STALE_AFTER, 0));
+    }
+
+    #[test]
+    fn a_day_and_a_second_old_is_stale() {
+        assert!(is_stale(STALE_AFTER + 1, 0));
+    }
+
+    fn view_node(path: &str, size: u64, children: Vec<ViewNode>) -> ViewNode {
+        ViewNode {
+            id: path.into(),
+            name: path.into(),
+            path: path.into(),
+            size,
+            category: "dev_tools".into(),
+            tier: None,
+            rule_id: None,
+            kind: ViewKind::Dir,
+            children,
+        }
+    }
+
+    #[test]
+    fn subtract_removes_the_exact_node() {
+        let mut root = view_node(
+            "~",
+            10,
+            vec![view_node("~/a", 4, vec![]), view_node("~/b", 6, vec![])],
+        );
+        subtract(&mut root, "~/a", 4);
+        assert_eq!(
+            root.children
+                .iter()
+                .map(|c| c.path.as_str())
+                .collect::<Vec<_>>(),
+            ["~/b"]
+        );
+    }
+
+    #[test]
+    fn subtract_shrinks_the_folders_above() {
+        let mut root = view_node(
+            "~",
+            10,
+            vec![view_node("~/a", 4, vec![view_node("~/a/x", 3, vec![])])],
+        );
+        subtract(&mut root, "~/a/x", 3);
+        assert_eq!((root.size, root.children[0].size), (7, 1));
+    }
+
+    #[test]
+    fn subtract_leaves_a_look_alike_sibling_alone() {
+        let mut root = view_node("~", 10, vec![view_node("~/ab", 4, vec![])]);
+        subtract(&mut root, "~/a", 3);
+        assert_eq!(root.children[0].size, 4);
+    }
+
+    /// The model with a running cleanup that no event has touched yet.
+    fn setup_running(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| {
+            m.cleanup = Some(Cleanup::Running {
+                plan: CleanupPlan {
+                    plan_id: "p".into(),
+                    snapshot_id: "s".into(),
+                    actions: Vec::new(),
+                    total: 0,
+                    trash_total: 0,
+                    permanent_available: false,
+                    warnings: Vec::new(),
+                },
+                done: 0,
+                current: None,
+            });
+        });
+        (model, cx)
+    }
+
+    /// Finishes the first item of the first row with `outcome`; returns that item.
+    fn finish_first_item(
+        model: &Entity<AppModel>,
+        cx: &mut VisualTestContext,
+        outcome: Outcome,
+    ) -> crate::recommend::model::RecItem {
+        model.update(cx, |m, _| {
+            let item = m.recommendations[0].items[0].clone();
+            m.selected.insert(item.item_id.clone());
+            m.on_cleanup_event(CleanupEvent::ItemFinished {
+                item_id: item.item_id.clone(),
+                freed: item.size,
+                outcome,
+            });
+            item
+        })
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_leaves_the_recommendations(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        assert!(model.read_with(cx, |m, _| {
+            m.recommendations
+                .iter()
+                .all(|r| r.items.iter().all(|i| i.item_id != item.item_id))
+        }));
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_shrinks_the_view(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let before = model.read_with(cx, |m, _| m.view.as_ref().map(|v| v.size));
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        let after = model.read_with(cx, |m, _| m.view.as_ref().map(|v| v.size));
+        assert_eq!(after, before.map(|b| b - item.size));
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_leaves_the_selection(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        assert!(!model.read_with(cx, |m, _| m.selected.contains(&item.item_id)));
+    }
+
+    #[gpui::test]
+    fn a_dry_run_item_stays(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let before = model.read_with(cx, |m, _| m.recommendations.clone());
+        finish_first_item(&model, cx, Outcome::DryRun);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.recommendations.clone()),
+            before
+        );
+    }
+
+    #[gpui::test]
+    fn a_cancelled_rescan_keeps_the_view(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
+        let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.start_scan(cx);
+            m.cancel_scan(cx);
+        });
+        settle(cx, &model, |m| m.scan.is_none());
+        assert!(model.read_with(cx, |m, _| m.view.is_some()));
     }
 
     #[gpui::test]
@@ -1250,8 +1668,28 @@ mod tests {
         });
         model.update(cx, |m, cx| m.close_cleanup(cx));
         model.read_with(cx, |m, _| {
-            assert_eq!((m.phase, m.selected.is_empty()), (Phase::Scanning, true));
+            assert_eq!(
+                (m.phase, m.scan.is_some(), m.selected.is_empty()),
+                (Phase::Ready, true, true)
+            );
         });
+    }
+
+    #[gpui::test]
+    fn a_rescan_never_leaves_ready(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.start_scan(cx));
+        settle(cx, &model, |m| {
+            assert_eq!(m.phase, Phase::Ready);
+            m.scan.is_none()
+        });
+    }
+
+    #[gpui::test]
+    fn rescan_shows_progress_in_scan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.start_scan(cx));
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
     }
 
     #[gpui::test]
