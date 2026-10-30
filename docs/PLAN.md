@@ -15,7 +15,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
-| 8 Design foundation and window shell | 8a built, mockup awaiting approval | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) on branch `feat/phase-8-design-shell`; 8b (tokens, fonts, chrome, shell, menus, motion, icons) starts after approval |
+| 8 Design foundation and window shell | 8a built, mockup approved; 8b next | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) on branch `feat/phase-8-design-shell`; 8b (tokens, fonts, chrome, shell, menus, motion, icons) starts after approval |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
@@ -112,12 +112,12 @@ Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo 
   - Accessibility: button, checkbox, switch, input, sidebar menu, list and menus set AccessKit roles or labels; command, sheet, popover and tooltip set none.
   - Size: a release arm64 window with Root, input, sidebar, button and tooltip grows from 4.4 MB to 11.1 MB (+6.7 MB; `init` registers every component, so most of it links regardless). Expect roughly +13 MB on the universal binary; the DMG (9.0 MB today) should stay under the 25 MB target, to be measured in 8b.
   - Use: input, list, popup and context menus, popover, tooltip, button, checkbox. Hand-build: the sidebar (custom category rows), the toolbar and titlebar (native traffic lights through `TitlebarOptions`, not its `TitleBar`), the command palette (on its input and list, since `command` has no AccessKit roles) and the cleanup sheet (no roles; it must come down from the toolbar).
+- Approved (2026-10-31): the mockup, as rendered at commit 715ee69, is the visual target for 8b onward.
 - Mockup decisions: the Clean up button fill is `#1E7A34` (white text 5.4:1) because the PRD's system green with white text fails AA; tile size lines use `--tile-secondary`, which passes on every fill and stripe pixel; the `-dark` board is a second file next to `docs/mockup-v2.png`; the mock JSON is unchanged (numbers the v2 screens need beyond it are marked "not in mock" in the HTML).
 - Open:
-  - The mockup needs approval before 8b.
   - The bump's smoke runs (mock and sandbox) launched without errors, but window capture was refused in the session, so a visual check of the 0.3.10 build is still open.
   - VoiceOver over gpui-component controls is checked in 8b once the shell uses them.
-  - The Overview leaves the lower half of the window empty at the default size; decide in review whether the widgets grow.
+  - The Overview leaves the lower half of the window empty at the default size; the approved mockup keeps it that way, revisit in Phase 9 if it reads as unfinished in the app.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
