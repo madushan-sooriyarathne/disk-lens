@@ -1,4 +1,4 @@
-//! Full-window states (onboarding, idle, scanning, error) and the notice banner.
+//! Full-window states (onboarding, idle, scanning, error) and the update banner.
 
 use std::time::Duration;
 
@@ -234,52 +234,6 @@ pub fn error(
 }
 
 /// Notice above the stat cards about unreadable folders, with the way to grant access. Empty otherwise.
-pub fn banner(
-    model: &mut AppModel,
-    window: &mut Window,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let t = theme::current(window);
-    let unreadable = model.meta.as_ref().map_or(0, |m| m.inaccessible_count);
-    let Some(text) = unreadable_notice(unreadable) else {
-        return div();
-    };
-    let banner = div()
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_2()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.review)
-        .bg(t.review_tint)
-        .text_size(px(13.))
-        .child(div().flex_1().child(text));
-    if model.full_disk_access {
-        return banner;
-    }
-    banner.child(
-        theme::focusable(
-            div().id("grant-fda"),
-            &t,
-            Role::Button,
-            "Grant Full Disk Access",
-        )
-        .flex_none()
-        .px_3()
-        .py_1()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.review)
-        .bg(t.widget)
-        .font_weight(FontWeight::MEDIUM)
-        .cursor_pointer()
-        .child("Grant Full Disk Access")
-        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
-    )
-}
-
 /// Button label and what a click does.
 type UpdateAction = (&'static str, fn(&mut AppModel, &mut Context<AppModel>));
 
@@ -351,7 +305,7 @@ pub fn update_banner(
     )
 }
 
-fn unreadable_notice(n: u32) -> Option<String> {
+pub(super) fn unreadable_notice(n: u32) -> Option<String> {
     (n > 0).then(|| {
         let noun = if n == 1 { "folder" } else { "folders" };
         format!("{n} {noun} couldn't be read. Granting Full Disk Access lets DiskLens see them.")

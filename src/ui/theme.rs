@@ -204,6 +204,13 @@ pub fn sync_components(window: &mut Window, cx: &mut App) {
         c.primary_active = t.clean;
         c.primary_foreground = t.clean_text;
         c.button_primary = t.clean;
+        c.button_primary_hover = t.clean;
+        c.button_primary_active = t.clean;
+        c.button_primary_foreground = t.clean_text;
+        c.button = t.selected;
+        c.button_hover = t.hover;
+        c.button_active = t.selected;
+        c.button_foreground = t.label;
         c.danger = t.danger;
         c.popover = t.popover;
         c.popover_foreground = t.label;

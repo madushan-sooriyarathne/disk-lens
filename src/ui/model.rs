@@ -18,7 +18,7 @@ use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{ViewKind, ViewMode, ViewNode};
+use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
@@ -26,6 +26,14 @@ const SCAN_POLL: Duration = Duration::from_millis(100);
 const STALE_AFTER: i64 = 24 * 3_600;
 /// How long a toast stays up.
 const TOAST: Duration = Duration::from_secs(3);
+
+/// Sidebar pages (PRD FR-WIN-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Overview,
+    Explore,
+    Recommended,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -97,6 +105,13 @@ pub struct AppModel {
     pub root_path: String,
     /// Folder the explorer shows.
     pub path: String,
+    /// Folders left by Back, nearest last; Forward reopens them.
+    pub forward: Vec<String>,
+    pub page: Page,
+    pub sidebar_visible: bool,
+    pub inspector_visible: bool,
+    /// Per-category bytes of the current snapshot, for the sidebar.
+    pub category_totals: Vec<CategoryTotal>,
     pub view: Option<ViewNode>,
     /// `ViewNode::id` under the pointer.
     pub hovered: Option<String>,
@@ -290,6 +305,11 @@ impl AppModel {
             mode: ViewMode::Category,
             root_path: String::new(),
             path: String::new(),
+            forward: Vec::new(),
+            page: Page::Overview,
+            sidebar_visible: true,
+            inspector_visible: false,
+            category_totals: Vec::new(),
             view: None,
             hovered: None,
             recommendations: Vec::new(),
@@ -438,7 +458,12 @@ impl AppModel {
                         break;
                     }
                 }
-                Ok::<_, Error>((view?, s.recommendations()?, s.preselected_rows()))
+                Ok::<_, Error>((
+                    view?,
+                    s.recommendations()?,
+                    s.category_totals()?,
+                    s.preselected_rows(),
+                ))
             },
             move |this, loaded, cx| {
                 // The user navigated while this loaded. That newer view request already reads
@@ -446,7 +471,7 @@ impl AppModel {
                 let navigated = this.view_seq != seq;
                 let mut stale = false;
                 match loaded {
-                    Ok((view, recommendations, preselected)) => {
+                    Ok((view, recommendations, totals, preselected)) => {
                         let selected = if first {
                             let mut selected = HashSet::new();
                             for row in &recommendations {
@@ -489,6 +514,9 @@ impl AppModel {
                         }
                         this.meta = Some(meta);
                         this.recommendations = recommendations;
+                        this.category_totals = totals;
+                        // Folders left behind may be gone from the new snapshot.
+                        this.forward.clear();
                         this.selected = selected;
                         // The details belong to the old snapshot; reload them for a surviving row.
                         this.focused_row = None;
@@ -646,14 +674,38 @@ impl AppModel {
 
     /// Shows the folder at `path` in the explorer.
     pub fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
+        self.forward.clear();
         self.load_view(path, self.mode, cx);
     }
 
-    /// Goes up one folder; does nothing at the scan root.
+    /// Goes up one folder, remembered for Forward; does nothing at the scan root.
     pub fn up(&mut self, cx: &mut Context<Self>) {
         if self.path != self.root_path {
-            self.navigate(parent_of(&self.path).to_owned(), cx);
+            self.forward.push(self.path.clone());
+            self.load_view(parent_of(&self.path).to_owned(), self.mode, cx);
         }
+    }
+
+    /// Reopens the folder the last Back left.
+    pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self.forward.pop() {
+            self.load_view(path, self.mode, cx);
+        }
+    }
+
+    pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        cx.notify();
+    }
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_visible = !self.sidebar_visible;
+        cx.notify();
+    }
+
+    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
+        self.inspector_visible = !self.inspector_visible;
+        cx.notify();
     }
 
     pub fn set_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
@@ -1145,6 +1197,51 @@ mod tests {
             assert!(!want.is_empty());
             assert_eq!(m.selected, want);
         });
+    }
+
+    /// The first folder tile under the root, opened.
+    fn open_first_folder(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        let child = model.read_with(cx, |m, _| {
+            m.view
+                .as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.kind == crate::view::ViewKind::Dir)
+                .unwrap()
+                .path
+                .clone()
+        });
+        model.update(cx, |m, cx| m.navigate(child.clone(), cx));
+        cx.run_until_parked();
+        child
+    }
+
+    #[gpui::test]
+    fn forward_reopens_the_folder_back_left(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let child = open_first_folder(&model, cx);
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.go_forward(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert_eq!(m.path, child));
+    }
+
+    #[gpui::test]
+    fn opening_a_folder_clears_forward(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        open_first_folder(&model, cx);
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        open_first_folder(&model, cx);
+        model.read_with(cx, |m, _| assert!(m.forward.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_sidebar_lists_every_category(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.read_with(cx, |m, _| assert_eq!(m.category_totals.len(), 6));
     }
 
     #[gpui::test]

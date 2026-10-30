@@ -11,6 +11,7 @@ pub mod recommendations;
 pub mod root;
 pub mod screens;
 pub mod selection;
+pub mod shell;
 pub mod source;
 pub mod stat_cards;
 pub mod stats;

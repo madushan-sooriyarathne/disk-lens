@@ -3,7 +3,7 @@
 use gpui::{App, Context, KeyBinding, Window, actions, div, prelude::*, px};
 
 use super::model::{AppModel, Cleanup, Phase};
-use super::{cleanup, explorer, recommendations, screens, stat_cards, theme};
+use super::{cleanup, screens, shell, theme};
 
 actions!(disklens, [Back, FocusNext, FocusPrev]);
 
@@ -24,35 +24,48 @@ impl Render for AppModel {
             .relative()
             .size_full()
             .flex()
-            .p_4()
-            .bg(t.content)
             .text_color(t.label)
             .font_family(theme::SANS)
             .font_features(theme::numeric());
+        let full_window = |body: gpui::Div| body.p_4().bg(t.content);
         let body = match self.phase {
-            Phase::Loading => body,
-            Phase::Onboarding => body.child(screens::onboarding(self, window, cx)),
-            Phase::Idle => body.child(screens::idle(self, window, cx)),
-            Phase::Scanning => body.child(screens::scanning(self, window, cx)),
-            Phase::Error => body.child(screens::error(self, window, cx)),
+            Phase::Loading => full_window(body),
+            Phase::Onboarding => full_window(body).child(screens::onboarding(self, window, cx)),
+            Phase::Idle => full_window(body).child(screens::idle(self, window, cx)),
+            Phase::Scanning => full_window(body).child(screens::scanning(self, window, cx)),
+            Phase::Error => full_window(body).child(screens::error(self, window, cx)),
+            // The sidebar stays translucent over the blurred window; the rest is opaque.
             Phase::Ready => body
-                .flex_col()
-                .gap_4()
-                .child(screens::banner(self, window, cx))
-                .children(screens::update_banner(self, window, cx))
-                .child(stat_cards::render(self, window, cx))
+                .when(self.sidebar_visible, |b| {
+                    b.child(shell::sidebar(self, t, cx))
+                })
                 .child(
                     div()
-                        .flex()
                         .flex_1()
-                        .min_h_0()
-                        .gap_4()
-                        .child(explorer::render(self, window, cx))
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .bg(t.content)
+                        .child(shell::toolbar(self, t, cx))
                         .child(
                             div()
-                                .w(px(390.))
-                                .flex_none()
-                                .child(recommendations::render(self, window, cx)),
+                                .flex_1()
+                                .min_h_0()
+                                .flex()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(theme::GAP_CONTENT))
+                                        .px(px(theme::GAP_CONTENT))
+                                        .pb(px(theme::GAP_CONTENT))
+                                        .pt_1()
+                                        .children(screens::update_banner(self, window, cx))
+                                        .child(shell::page(self, window, cx)),
+                                )
+                                .when(self.inspector_visible, |d| d.child(shell::inspector(t))),
                         ),
                 ),
         };

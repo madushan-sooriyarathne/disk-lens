@@ -1,5 +1,5 @@
-//! Explorer card: header, breadcrumb, treemap, legend, tooltip and context
-//! menu.
+//! Explorer card: header, treemap, legend, tooltip and context menu. The
+//! breadcrumb is drawn in the toolbar from `crumbs`.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -16,7 +16,6 @@ use super::model::{AppModel, ScanProgress};
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
-use crate::cleanup::audit::now_ms;
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
@@ -227,15 +226,7 @@ pub fn render(
         .border_1()
         .border_color(t.separator)
         .bg(t.widget)
-        .child(header(
-            model.mode,
-            model.scan.as_ref(),
-            model.error.as_deref(),
-            model.meta.as_ref().map(|m| m.scanned_at),
-            t,
-            cx,
-        ))
-        .child(breadcrumb(model, t, cx))
+        .child(header(model.mode, t, cx))
         .child(treemap)
         .child(legend(t))
         .children(context_menu(model, t, cx))
@@ -283,7 +274,7 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
 
 /// What the header says next to the scan button: progress, the last failure, or the snapshot
 /// age ("Scanned 2 h ago", US-13).
-fn status_label(
+pub(super) fn status_label(
     scan: Option<&ScanProgress>,
     error: Option<&str>,
     scanned_at: Option<i64>,
@@ -298,28 +289,8 @@ fn status_label(
     scanned_at.map(|at| format!("Scanned {}", format_age(now, at)))
 }
 
-/// The status and the scan button: Cancel while updating, Retry after a failure, else Rescan.
-fn header(
-    mode: ViewMode,
-    scan: Option<&ScanProgress>,
-    error: Option<&str>,
-    scanned_at: Option<i64>,
-    t: Theme,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    // Re-rendered on window focus and every interaction, so the age stays current enough.
-    let status = status_label(scan, error, scanned_at, now_ms() as i64 / 1000);
-    let status_color = if scan.is_none() && error.is_some() {
-        t.review_text
-    } else {
-        t.secondary
-    };
-    let scanning = scan.is_some();
-    let (button_id, button_label) = match (scanning, error.is_some()) {
-        (true, _) => ("cancel-rescan", "Cancel"),
-        (false, true) => ("retry-scan", "Retry"),
-        (false, false) => ("rescan", "Rescan"),
-    };
+/// Title and the view-mode toggle. The scan status lives in the toolbar.
+fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
     let toggle = [
         (ViewMode::Category, "Category"),
         (ViewMode::Cleanup, "Cleanup"),
@@ -370,49 +341,29 @@ fn header(
                 ),
         )
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .children(
-                    status.map(|a| div().text_size(px(12.)).text_color(status_color).child(a)),
-                )
-                .child(
-                    theme::focusable(div().id(button_id), &t, Role::Button, button_label)
-                        .cursor_pointer()
-                        .rounded_lg()
-                        .px_3()
-                        .py_1()
-                        .text_size(px(13.))
-                        .text_color(t.secondary)
-                        .hover(move |s| s.bg(t.content).text_color(t.label))
-                        .child(button_label)
-                        .on_click(cx.listener(move |model, _, _, cx| {
-                            if scanning {
-                                model.cancel_scan(cx);
-                            } else {
-                                model.start_scan(cx);
-                            }
-                        })),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .rounded_lg()
-                        .bg(t.content)
-                        .p(px(2.))
-                        .children(toggle),
-                ),
+            div().flex().items_center().gap_2().child(
+                div()
+                    .flex()
+                    .rounded_lg()
+                    .bg(t.content)
+                    .p(px(2.))
+                    .children(toggle),
+            ),
         )
 }
 
-fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
+/// The path from the scan root to the open folder; earlier parts are links.
+pub(super) fn crumbs(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
     let trail = treemap::crumbs(&model.root_path, &model.path);
     let last = trail.len() - 1;
     let items = trail.into_iter().enumerate().flat_map(|(i, c)| {
-        let sep = (i > 0).then(|| div().child("/").into_any_element());
+        let sep = (i > 0).then(|| div().text_color(t.tertiary).child("/").into_any_element());
         let label = if i == last {
-            div().text_color(t.label).child(c.label).into_any_element()
+            div()
+                .text_color(t.label)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(c.label)
+                .into_any_element()
         } else {
             let path = c.path;
             theme::focusable(
@@ -430,23 +381,12 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
         sep.into_iter().chain(Some(label))
     });
     div()
-        .mt_3()
-        .border_t_1()
-        .border_color(t.separator)
         .flex()
         .items_center()
-        .justify_between()
-        .px_5()
-        .py(px(10.))
-        .text_size(px(13.))
+        .gap(px(4.))
+        .text_size(px(theme::T_BODY))
         .text_color(t.secondary)
-        .child(div().flex().items_center().gap(px(6.)).children(items))
-        .children(
-            model
-                .view
-                .as_ref()
-                .map(|v| div().child(format_bytes(v.size))),
-        )
+        .children(items)
 }
 
 fn legend(t: Theme) -> impl IntoElement {
