@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - target UI
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, built on `feat/phase-7-background-rescan`, awaiting review; Phase 8 is next); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8 is split: 8a (GPUI 0.3.10, gpui-component evaluation, v2 mockup) built on `feat/phase-8-design-shell`, mockup approved; 8b is next); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
@@ -29,6 +29,7 @@ cargo run --release --bin scan-bench -- <path>   # read-only scan, compares size
 scripts/make-perf-tree.sh                   # 2M empty files in .sandbox/perf for the memory target
 scripts/package.sh                          # universal DiskLens.app + DMG (+ update artifacts) in target/packager
 scripts/make-icon.sh                        # regenerate assets/icons/icon.icns from icon.svg
+scripts/render-mockup.sh                    # docs/mockup-v2.png and -dark.png from docs/mockup-v2/mockup.html (headless Chrome)
 cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
 ```
 
@@ -69,7 +70,7 @@ UI (`src/ui/`, GPUI):
 
 ## Conventions
 
-- Latest stable dependency versions; confirm configuration against official docs and crate docs rather than memory. GPUI is pinned to an exact snapshot (`gpui-pre` / `gpui-pre-platform` `=0.3.9`, imported as `gpui` / `gpui_platform`); read its source and `examples/` in `~/.cargo/registry/src/*/gpui-pre-0.3.9/` for API questions, and bump it only in its own commit. The Rust toolchain is pinned in `rust-toolchain.toml` (GPUI needs 1.95 or later).
+- Latest stable dependency versions; confirm configuration against official docs and crate docs rather than memory. GPUI is pinned to an exact snapshot (`gpui-pre` / `gpui-pre-platform` `=0.3.10`, imported as `gpui` / `gpui_platform`); read its source and `examples/` in `~/.cargo/registry/src/*/gpui-pre-0.3.10/` for API questions, and bump it only in its own commit. The Rust toolchain is pinned in `rust-toolchain.toml` (GPUI needs 1.95 or later).
 - `rules/rules.toml` is the TOML block of `docs/RULES.md` section 7 verbatim. Change both, plus tests, in the same commit. `tests/rules_doc_sync.rs` enforces equality.
 - Cleanup actions send item IDs, never paths (S-01). Explorer actions (`get_view`, `reveal_in_finder`) take paths, which the backend validates against the snapshot.
 - `assets/mock/snapshot.mock.json` mirrors `docs/mockup.jpg` numbers (test in `src/ui/source.rs`); its `preselected` list is mock-only, real default selection is empty.

@@ -14,8 +14,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 4 Cleanup engine | Done, verified on macOS | `docs/QA.md` run on 2026-10-25, including the supervised npm run; open findings under What is left |
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
-| 7 Background rescan | Built, verified on macOS, awaiting review | v2, PRD section 13.4.2. Branch `feat/phase-7-background-rescan`; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
-| 8 Design foundation and window shell | Not started | v2, PRD sections 13.4.3 and 13.5 |
+| 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
+| 8 Design foundation and window shell | 8a built, mockup approved; 8b next | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) on branch `feat/phase-8-design-shell`; 8b (tokens, fonts, chrome, shell, menus, motion, icons) starts after approval |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 7, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (346 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (346 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -102,6 +102,22 @@ Last full gate run on macOS (Phase 7, 2026-10-31): `cargo fmt --check`, `cargo c
 - Open:
   - If loading the new snapshot fails after a background scan, the backend already holds the new snapshot while the UI keeps the old view, with the error and Retry; Retry rescans.
 
+**Phase 8a: GPUI bump, gpui-component evaluation, mockup**
+- Built:
+  - GPUI `=0.3.10` (`gpui-pre`, `gpui-pre-platform`, test-support). No source changes; the lockfile moves only GPUI's own tree (wgpu and naga 30, taffy 0.15); `accesskit_macos` is still pulled in. Mock and sandbox runs launch without errors, and the v1 UI renders as before in the native window (checked by the user in dark mode, 2026-10-31).
+  - `docs/mockup-v2/mockup.html` with its token block (type scale, radii, spacing, system and status colors with AA ratios, the muted category palette, texture opacities), rendered by `scripts/render-mockup.sh` to `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`. Eight frames: Overview, Explore with textures and the inspector, Recommended, queue, command palette, cleanup sheet, onboarding (Full Disk Access), Explore inside `~/Library` with Highlight Cleanable during a background rescan.
+- gpui-component 0.8.1 evaluation (scratch spike, not committed; the dependency is added in 8b with its first use):
+  - Theming: every color in the components checked (button, input, sidebar, menus, popover, tooltip, list, command, sheet, title bar, checkbox, switch) comes from `ThemeColor`; none is hardcoded. `Theme::global_mut` also takes the font family and size, both radii and shadows, so `theme.rs` can drive it entirely. Control heights come from `Size` (26, 30, 32, 40 pt by default, taller than macOS controls); `Size::Size(px)` sets HIG heights per control.
+  - Root: `gpui_component::Root::new(view, window, cx)` must wrap the window's root view for its popovers, dialogs, sheets and notifications. `AppModel` stays the app entity under it; tests that render a component need the same wrapper. `init` also registers its inspector in debug builds.
+  - Accessibility: button, checkbox, switch, input, sidebar menu, list and menus set AccessKit roles or labels; command, sheet, popover and tooltip set none.
+  - Size: a release arm64 window with Root, input, sidebar, button and tooltip grows from 4.4 MB to 11.1 MB (+6.7 MB; `init` registers every component, so most of it links regardless). Expect roughly +13 MB on the universal binary; the DMG (9.0 MB today) should stay under the 25 MB target, to be measured in 8b.
+  - Use: input, list, popup and context menus, popover, tooltip, button, checkbox. Hand-build: the sidebar (custom category rows), the toolbar and titlebar (native traffic lights through `TitlebarOptions`, not its `TitleBar`), the command palette (on its input and list, since `command` has no AccessKit roles) and the cleanup sheet (no roles; it must come down from the toolbar).
+- Approved (2026-10-31): the mockup, as rendered at commit 715ee69, is the visual target for 8b onward.
+- Mockup decisions: the Clean up button fill is `#1E7A34` (white text 5.4:1) because the PRD's system green with white text fails AA; tile size lines use `--tile-secondary`, which passes on every fill and stripe pixel; the `-dark` board is a second file next to `docs/mockup-v2.png`; the mock JSON is unchanged (numbers the v2 screens need beyond it are marked "not in mock" in the HTML).
+- Open:
+  - VoiceOver over gpui-component controls is checked in 8b once the shell uses them.
+  - The Overview leaves the lower half of the window empty at the default size; the approved mockup keeps it that way, revisit in Phase 9 if it reads as unfinished in the app.
+
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
@@ -128,7 +144,7 @@ Decisions (2026-10-29): the active-work guard, staging queue and Copy as Shell S
 |-------|--------|
 | Platform | macOS only, minimum macOS 13 |
 | Language | Rust stable (pinned in `rust-toolchain.toml`), edition 2024. One crate at the repo root |
-| UI | GPUI, Zed's GPU UI framework: `gpui-pre` and `gpui-pre-platform` pinned to an exact snapshot version (`=0.3.9`), imported as `gpui` and `gpui_platform`. v1: no component library. v2: `gpui-component` from gpui-kit (0.8.1, which pins `gpui-pre =0.3.10`, so GPUI is bumped first, in its own commit) for the palette, text input, lists, menus, popovers and tooltips, themed with DiskLens tokens. Any component that can't follow the HIG is hand-built |
+| UI | GPUI, Zed's GPU UI framework: `gpui-pre` and `gpui-pre-platform` pinned to an exact snapshot version (`=0.3.10`), imported as `gpui` and `gpui_platform`. v1: no component library. v2: `gpui-component` from gpui-kit (0.8.1, which pins `gpui-pre =0.3.10`, so GPUI is bumped first, in its own commit) for the palette, text input, lists, menus, popovers and tooltips, themed with DiskLens tokens. Any component that can't follow the HIG is hand-built |
 | Styling | Theme tokens in `src/ui/theme.rs`; category colors come from `rules.toml` |
 | State | One GPUI entity, `AppModel` (`src/ui/model.rs`) |
 | Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
@@ -496,7 +512,7 @@ Logic first, on the current UI, because it is independent of the redesign.
 ### Phase 8: Design foundation and window shell
 
 1. Bump GPUI from `=0.3.9` to `=0.3.10` (`gpui-pre` and `gpui-pre-platform`, with the crates they pull in) in its own commit, with the full gate and a smoke run. Then add `gpui-component` (gpui-kit 0.8.1). Check that AccessKit labels still reach VoiceOver, that its theme can be driven entirely from `theme.rs`, and record which components are used and which are hand-built.
-2. Produce `docs/mockup-v2.png` (light and dark: Overview, Explore with textures, Recommended, queue, command palette, cleanup sheet, onboarding) from the direction in PRD section 13.5, and get it approved before code. Update `assets/mock/snapshot.mock.json` to its numbers.
+2. Produce `docs/mockup-v2.png` and `docs/mockup-v2-dark.png` (light and dark: Overview, Explore with textures, Recommended, queue, command palette, cleanup sheet, onboarding) from the direction in PRD section 13.5, and get it approved before code. Update `assets/mock/snapshot.mock.json` to its numbers.
 3. `theme.rs` v2 tokens: system font, tabular figures, the type scale, radii, spacing, system accent and status colors with AA-checked text shades, and the new category palette in `rules.toml` and `docs/RULES.md` section 7 (same commit, `tests/rules_doc_sync.rs`).
 4. Check that GPUI resolves the system monospaced font. If not, keep Geist Mono for paths and record it. Remove Geist and the unused font files.
 5. Window: transparent titlebar, traffic lights inset into the sidebar, `WindowBackgroundAppearance::Blurred`, new default and minimum sizes. All platform chrome differences go in one module (`src/ui/chrome.rs`).
