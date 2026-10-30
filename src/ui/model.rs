@@ -21,6 +21,8 @@ use crate::view::{ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
+/// A snapshot older than this is rescanned on launch (FR-BG-3). A constant, not a setting.
+const STALE_AFTER: i64 = 24 * 3_600;
 /// How long a toast stays up.
 const TOAST: Duration = Duration::from_secs(3);
 
@@ -172,6 +174,10 @@ fn check_for_update(cx: &mut Context<AppModel>) {
         Err(e) => tracing::warn!("{e}"),
     })
     .detach();
+}
+
+fn is_stale(now: i64, scanned_at: i64) -> bool {
+    now.saturating_sub(scanned_at) > STALE_AFTER
 }
 
 /// The folder above `path`, like `parentOf` in the old view store.
@@ -417,6 +423,7 @@ impl AppModel {
                     this.enter(meta, cx);
                     return;
                 }
+                let mut stale = false;
                 match loaded {
                     Ok((view, recommendations, preselected)) => {
                         let selected = if first {
@@ -448,6 +455,11 @@ impl AppModel {
                             .focused_row
                             .clone()
                             .filter(|id| recommendations.iter().any(|r| &r.row_id == id));
+                        stale = first
+                            && is_stale(
+                                crate::cleanup::audit::now_ms() as i64 / 1000,
+                                meta.scanned_at,
+                            );
                         this.root_path = meta.root.clone();
                         this.path = view.path.clone();
                         this.meta = Some(meta);
@@ -474,6 +486,10 @@ impl AppModel {
                 }
                 this.scan = None;
                 cx.notify();
+                // Only the launch load can start this, so a scan never triggers itself.
+                if stale {
+                    this.start_scan(cx);
+                }
             },
         );
     }
@@ -1380,6 +1396,44 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(model.read_with(cx, |m, _| m.cleanup.is_none()));
+    }
+
+    /// A model over a mock whose snapshot is `age_secs` old.
+    fn setup_aged(
+        cx: &mut TestAppContext,
+        age_secs: i64,
+    ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let cx = cx.add_empty_window();
+        let now = crate::cleanup::audit::now_ms() as i64 / 1000;
+        let mock = MockData::new(false)
+            .with_step(Duration::from_millis(30))
+            .with_scanned_at(now - age_secs);
+        let model =
+            cx.update(|window, cx| cx.new(|cx| AppModel::new(Source::Mock(mock), window, cx)));
+        cx.run_until_parked();
+        (model, cx)
+    }
+
+    #[gpui::test]
+    fn a_stale_snapshot_rescans_on_load(cx: &mut TestAppContext) {
+        let (model, cx) = setup_aged(cx, STALE_AFTER + 3_600);
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
+    }
+
+    #[gpui::test]
+    fn a_fresh_snapshot_does_not_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup_aged(cx, 3_600);
+        assert!(model.read_with(cx, |m, _| m.scan.is_none()));
+    }
+
+    #[test]
+    fn exactly_a_day_old_is_not_stale() {
+        assert!(!is_stale(STALE_AFTER, 0));
+    }
+
+    #[test]
+    fn a_day_and_a_second_old_is_stale() {
+        assert!(is_stale(STALE_AFTER + 1, 0));
     }
 
     #[gpui::test]
