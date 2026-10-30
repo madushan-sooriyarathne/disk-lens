@@ -15,7 +15,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
-| 8 Design foundation and window shell | 8a built, mockup approved; 8b next | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) on branch `feat/phase-8-design-shell`; 8b (tokens, fonts, chrome, shell, menus, motion, icons) starts after approval |
+| 8 Design foundation and window shell | 8a merged; 8b built, awaiting the visual check | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) on branch `feat/phase-8b-window-shell` |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (346 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 8b, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (355 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -118,6 +118,31 @@ Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo 
   - VoiceOver over gpui-component controls is checked in 8b once the shell uses them.
   - The Overview leaves the lower half of the window empty at the default size; the approved mockup keeps it that way, revisit in Phase 9 if it reads as unfinished in the app.
 
+**Phase 8b: tokens, fonts, window chrome, shell, menus, motion, icons**
+- Built:
+  - `theme.rs` v2 tokens from the mockup, plus the type scale, radii, spacing and texture constants. `rules.toml` and RULES.md section 7 carry the muted category palette. One test per theme checks every text-on-fill pair for AA, including tile labels over the reduced fills and their darkest stripe pixel.
+  - The system font with `tnum` set once on the window. GPUI resolves `.AppleSystemUIFontMonospaced` to SF Mono (a probe measured equal advances for every glyph), so paths use it and Geist, Geist Mono and `OFL.txt` are gone.
+  - `get_category_totals` (`view.rs`, backend, source). A folder counts for a category when a rule matched it or it holds a project marker or equals a category path; the search stops 4 levels below the root to bound the lazy marker checks. Unclaimed bytes go to `documents_media` or `dev_tools` per top-level folder by media share, so the totals add up to the root size.
+  - `chrome.rs`: 1280×820 default, 960×640 minimum, transparent titlebar with the traffic lights in the sidebar, blurred background on macOS.
+  - gpui-component 0.8.1: `init`, `Root` around `AppModel`, and `theme::sync_components` writing its colors, fonts and radii from our tokens on startup and on every appearance change. Toolbar buttons and their tooltips are its `Button`.
+  - `shell.rs`: sidebar (pages, categories by size as the legend, footer notice for Full Disk Access or unreadable folders, which replaces the banner), unified toolbar in FR-WIN-2 order and an empty 320 pt inspector slot. Overview, Explore and Recommended show the v1 views unchanged; the explorer's scan status and breadcrumb moved to the toolbar.
+  - Menu bar (FR-WIN-4) with its shortcuts in `root.rs`.
+  - `motion.rs`: the 0.35 s and 0.25 s critically damped springs, an easing that never overshoots, and the 150 ms cross-fade under Reduce Motion. `platform` reads Reduce Motion and Reduce Transparency; the sidebar turns opaque under the latter.
+  - Fourteen line icons in `assets/icons/ui/` from the mockup, served by `assets.rs`.
+  - Size with gpui-component: the universal DMG is 13.5 MB (9.0 MB before), the universal binary 26.8 MB; the 25 MB DMG target holds.
+- Decisions:
+  - The light sidebar's secondary text is `#636366`: the mockup's `#6E6E73` measures 4.2:1 on the sidebar fill.
+  - Back goes up one folder and Forward reopens folders Back left, so Esc, Backspace and the toolbar agree; opening a folder or a new snapshot clears Forward.
+  - Until Phase 11, the queue is the v1 selection: the queue button shows its count and size and toggles the inspector; Add to Queue selects the focused row's ready items.
+  - Highlight Cleanable (⌘⇧H) switches the v1 view mode until Phase 10 removes `ViewMode`.
+  - Export Cleanup Script, Command Palette, Show Queue, Quick Look and Keyboard Shortcuts are listed disabled until their phases.
+  - The update banner stays above the page content.
+  - The filter token slot is not drawn yet (Phase 13).
+- Open:
+  - The side-by-side comparison with the mockup and the VoiceOver check are the user's (`docs/QA.md`, Phase 8).
+  - One gate run had four `tests/scanner.rs` failures (sizes read as 0 right after the fixture files were written) that did not reproduce alone or in a second full run. Likely delayed block allocation under load; fix the test if it recurs.
+  - Category folder counts and sizes in the sidebar depend on the depth bound; projects deeper than 4 levels fall back to `dev_tools` or `documents_media`.
+
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
@@ -148,7 +173,7 @@ Decisions (2026-10-29): the active-work guard, staging queue and Copy as Shell S
 | Styling | Theme tokens in `src/ui/theme.rs`; category colors come from `rules.toml` |
 | State | One GPUI entity, `AppModel` (`src/ui/model.rs`) |
 | Treemap | Squarified layout ported from d3 into `src/ui/treemap.rs`, rendered as absolutely positioned divs |
-| Fonts | v1: Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/`. v2: the system font (`.SystemUIFont`) with tabular figures; Geist Mono kept only as the path fallback (Phase 8) |
+| Fonts | v1: Geist and Geist Mono static TTFs (OFL) embedded from `assets/fonts/`. v2 (Phase 8b): the system font (`.SystemUIFont`) with tabular figures (`tnum`, set once on the window); paths in `.AppleSystemUIFontMonospaced` (SF Mono). No font files are bundled |
 | Motion (v2) | GPUI's `spring.rs` and `with_animation`; no extra crate |
 | Tooling | cargo (`fmt`, `clippy`, `test`) |
 | Packaging | `cargo-packager` CLI 0.11.8 (`.app`, DMG, codesign, notarization, minisign update signatures) |
@@ -188,9 +213,8 @@ disklens/
     make-icon.sh        assets/icons/icon.icns from icon.svg
   rules/rules.toml
   assets/
-    fonts/              Geist, Geist Mono (OFL)
     mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
-    icons/              icon.svg (source), icon.icns (generated)
+    icons/              icon.svg (source), icon.icns (generated), ui/*.svg (line icons)
     update.pub          minisign public key for updates
   src/
     main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs, settings.rs, update.rs
@@ -202,9 +226,9 @@ disklens/
     platform/ mod.rs
     ui/       mod.rs, root.rs, model.rs, source.rs, theme.rs, format.rs, stats.rs,
               selection.rs, treemap.rs, screens.rs, stat_cards.rs, explorer.rs,
-              recommendations.rs, cleanup.rs
+              recommendations.rs, cleanup.rs, chrome.rs, shell.rs, motion.rs, assets.rs
     bin/scan-bench.rs
-    v2 adds: ui/chrome.rs, ui/palette.rs, ui/keymap.rs, ui/queue.rs, ui/inspector.rs,
+    v2 adds: ui/palette.rs, ui/keymap.rs, ui/queue.rs, ui/inspector.rs,
              rules/git_state.rs, providers/{store_orphans,containers,models,simruntimes}.rs,
              snapshots.rs (APFS), license.rs, sweep.rs, bin/disklens-agent.rs
   tests/      scanner.rs, rules.rs, rules_doc_sync.rs, sandbox_rows.rs, view.rs,
