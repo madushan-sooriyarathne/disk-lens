@@ -5,8 +5,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use std::time::SystemTime;
+
+use disklens_lib::platform::{Facts, FakeRunner};
+use disklens_lib::recommend::build::analyze;
+use disklens_lib::rules::guards::Env;
+use disklens_lib::rules::model::Rules;
+use disklens_lib::rules::tools::Tools;
 use disklens_lib::scanner::{ScanOptions, scan};
-use disklens_lib::view::{ViewKind, ViewMode, ViewNode, build_view, validated_path};
+use disklens_lib::view::{
+    CategoryTotal, ViewKind, ViewMode, ViewNode, build_view, category_totals, validated_path,
+};
 
 fn scanned(root: &Path) -> disklens_lib::scanner::tree::Snapshot {
     scan(
@@ -68,4 +77,60 @@ fn sandbox_view_is_consistent() {
     assert!(v.children.iter().any(|c| c.name == "Desktop"));
     let desktop = build_view(&snap, &root.join("Desktop"), ViewMode::Cleanup, None).unwrap();
     assert_sums(&desktop);
+}
+
+fn totals_of(files: &[&str]) -> (u64, Vec<CategoryTotal>) {
+    let t = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(t.path()).unwrap();
+    for rel in files {
+        let f = root.join(rel);
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(f, vec![b'x'; 4096]).unwrap();
+    }
+    let rules = Rules::embedded();
+    let snap = scanned(&root);
+    let facts = Facts::default();
+    let runner = FakeRunner::default();
+    let tools = Tools::new(vec![], false);
+    let env = Env {
+        facts: &facts,
+        runner: &runner,
+        tools: &tools,
+        now: SystemTime::now(),
+    };
+    let totals = category_totals(&snap, rules, &analyze(rules, &snap, &env));
+    (snap.nodes[0].size, totals)
+}
+
+fn folders(totals: &[CategoryTotal], id: &str) -> u32 {
+    totals.iter().find(|t| t.category == id).unwrap().folders
+}
+
+#[test]
+fn category_totals_sum_to_the_root_size() {
+    let (root_size, totals) = totals_of(&[
+        "Documents/a.txt",
+        "Library/Android/sdk/a",
+        "Developer/x/Cargo.toml",
+        "top.txt",
+    ]);
+    assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), root_size);
+}
+
+#[test]
+fn a_rule_matched_folder_counts_once_for_its_category() {
+    let (_, totals) = totals_of(&["Library/Android/sdk/a/f", "Library/Android/sdk/b/f"]);
+    assert_eq!(folders(&totals, "mobile_sdks"), 1);
+}
+
+#[test]
+fn a_folder_with_a_project_marker_is_a_code_project() {
+    let (_, totals) = totals_of(&["Developer/x/Cargo.toml", "Developer/x/src/main.rs"]);
+    assert_eq!(folders(&totals, "code_projects"), 1);
+}
+
+#[test]
+fn a_project_deeper_than_the_depth_limit_is_not_claimed() {
+    let (_, totals) = totals_of(&["a/b/c/d/e/Cargo.toml"]);
+    assert_eq!(folders(&totals, "code_projects"), 0);
 }

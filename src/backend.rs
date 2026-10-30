@@ -17,7 +17,7 @@ use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, Snapshot, SnapshotMeta};
 use crate::scanner::{self, ScanOptions, snapshot};
 use crate::state::{AppState, Current};
-use crate::view::{self, ViewMode, ViewNode};
+use crate::view::{self, CategoryTotal, ViewMode, ViewNode};
 
 /// System Settings, Privacy & Security, Full Disk Access (PRD 7.8).
 const FDA_SETTINGS: &str =
@@ -133,6 +133,16 @@ pub fn get_view(state: &Arc<AppState>, node_path: String, mode: ViewMode) -> Res
         mode,
         Some((Rules::embedded(), &cur.analysis)),
     )
+}
+
+/// Bytes and folder counts per category for the sidebar.
+pub fn get_category_totals(state: &Arc<AppState>) -> Result<Vec<CategoryTotal>> {
+    let cur = current(state)?;
+    Ok(view::category_totals(
+        &cur.snapshot,
+        Rules::embedded(),
+        &cur.analysis,
+    ))
 }
 
 /// Rows for the current snapshot. Blocking guards are evaluated now, so calling
