@@ -46,7 +46,7 @@ pub fn render(
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(Hsla { a: 0.35, ..t.text })
+                .bg(Hsla { a: 0.35, ..t.label })
                 .occlude()
                 .child(card),
         )
@@ -73,8 +73,8 @@ pub fn toast(model: &AppModel, window: &mut Window) -> Option<AnyElement> {
                         .px_4()
                         .py_2()
                         .rounded_lg()
-                        .bg(t.text)
-                        .text_color(t.card)
+                        .bg(t.label)
+                        .text_color(t.widget)
                         .text_size(px(13.))
                         .child(text),
                 ),
@@ -131,9 +131,9 @@ fn card(t: &Theme) -> Div {
         .p_6()
         .rounded(px(12.))
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card)
-        .text_color(t.text)
+        .border_color(t.separator)
+        .bg(t.widget)
+        .text_color(t.label)
 }
 
 fn heading(text: String) -> Div {
@@ -148,7 +148,7 @@ fn muted(t: &Theme, text: impl Into<String>) -> Div {
         .mt_2()
         .text_size(px(13.))
         .line_height(px(20.))
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .child(text.into())
 }
 
@@ -167,9 +167,9 @@ fn button(t: &Theme, id: &'static str, label: String, primary: bool) -> gpui::St
         .cursor_pointer()
         .child(label);
     if primary {
-        b.bg(t.text).text_color(t.card)
+        b.bg(t.label).text_color(t.widget)
     } else {
-        b.border_1().border_color(t.card_border)
+        b.border_1().border_color(t.separator)
     }
 }
 
@@ -189,9 +189,9 @@ fn confirm(
         .min_h_0()
         .overflow_y_scroll()
         .border_t_1()
-        .border_color(t.divider);
+        .border_color(t.separator);
     for (label, actions) in groups(plan) {
-        let mut group = div().py_2().border_b_1().border_color(t.divider).child(
+        let mut group = div().py_2().border_b_1().border_color(t.separator).child(
             div()
                 .flex()
                 .items_center()
@@ -216,7 +216,7 @@ fn confirm(
                             .child(div().truncate().child(tilde(&a.path, root)))
                             .child(
                                 div()
-                                    .text_color(t.muted)
+                                    .text_color(t.secondary)
                                     .child(method_words(&a.method, root)),
                             ),
                     )
@@ -322,12 +322,12 @@ fn running(t: &Theme, plan: &CleanupPlan, done: usize, current: Option<&str>) ->
                 .h(px(6.))
                 .w_full()
                 .rounded_full()
-                .bg(t.divider)
+                .bg(t.separator)
                 .child(
                     div()
                         .h_full()
                         .rounded_full()
-                        .bg(t.text)
+                        .bg(t.label)
                         .w(relative(done as f32 / total as f32)),
                 ),
         )
@@ -363,7 +363,7 @@ fn results(t: &Theme, s: &CleanupSummary, cx: &mut Context<AppModel>) -> Div {
                 div()
                     .mt_1()
                     .text_size(px(12.))
-                    .text_color(t.error)
+                    .text_color(t.danger)
                     .child(format!("{}: {}", item.name, item.reason)),
             );
         }

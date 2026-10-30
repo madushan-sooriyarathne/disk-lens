@@ -38,8 +38,8 @@ pub fn render(
         .overflow_hidden()
         .rounded(px(12.))
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card);
+        .border_color(t.separator)
+        .bg(t.widget);
     let Some(meta) = &model.meta else {
         return card;
     };
@@ -53,7 +53,7 @@ pub fn render(
         .min_h_0()
         .overflow_y_scroll()
         .border_t_1()
-        .border_color(t.divider);
+        .border_color(t.separator);
     if recs.is_empty() {
         body = body.child(
             div()
@@ -62,7 +62,7 @@ pub fn render(
                 .flex()
                 .justify_center()
                 .text_size(px(13.))
-                .text_color(t.muted)
+                .text_color(t.secondary)
                 .child("Nothing to clean up in this scan."),
         );
     }
@@ -83,13 +83,13 @@ pub fn render(
                 .px_5()
                 .py_2()
                 .border_b_1()
-                .border_color(t.divider)
+                .border_color(t.separator)
                 .child(tier_pill(&t, tier))
                 .child(
                     div()
                         .font_family(MONO)
                         .text_size(px(13.))
-                        .text_color(t.muted)
+                        .text_color(t.secondary)
                         .child(format_bytes(total)),
                 ),
         );
@@ -114,7 +114,7 @@ pub fn render(
                     div()
                         .mt_0p5()
                         .text_size(px(13.))
-                        .text_color(t.muted)
+                        .text_color(t.secondary)
                         .child("Select items to build a cleanup script"),
                 ),
         )
@@ -154,8 +154,8 @@ fn tier_label(tier: Tier) -> &'static str {
 
 pub(super) fn tier_pill(t: &Theme, tier: Tier) -> Div {
     let (color, fill) = match tier {
-        Tier::Safe => (t.safe, t.safe_fill),
-        Tier::Review => (t.review, t.review_fill),
+        Tier::Safe => (t.safe_text, t.safe_tint),
+        Tier::Review => (t.review_text, t.review_tint),
     };
     div()
         .px_2()
@@ -203,8 +203,8 @@ impl Render for Tip {
             .px_2()
             .py_1()
             .rounded_md()
-            .bg(t.text)
-            .text_color(t.card)
+            .bg(t.label)
+            .text_color(t.widget)
             .text_size(px(12.))
             .child(self.0.clone())
     }
@@ -242,14 +242,14 @@ pub(super) fn checkbox(
         .justify_center()
         .rounded(px(4.))
         .border_1()
-        .border_color(if on { t.text } else { t.muted })
-        .bg(if on { t.text } else { t.card })
-        .text_color(t.card)
+        .border_color(if on { t.label } else { t.secondary })
+        .bg(if on { t.label } else { t.widget })
+        .text_color(t.widget)
         .text_size(px(size - 4.))
         .font_weight(FontWeight::SEMIBOLD);
     b = match state {
         RowState::All => b.child("✓"),
-        RowState::Some => b.child(div().w(px(size - 8.)).h(px(2.)).rounded_full().bg(t.card)),
+        RowState::Some => b.child(div().w(px(size - 8.)).h(px(2.)).rounded_full().bg(t.widget)),
         RowState::None => b,
     };
     if disabled {
@@ -261,7 +261,7 @@ pub(super) fn checkbox(
 
 /// A small muted glyph or word button with a hover background.
 fn ghost_button(t: &Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
-    let (bg, text) = (t.bg, t.text);
+    let (bg, text) = (t.content, t.label);
     div()
         .id(id)
         .flex_none()
@@ -269,7 +269,7 @@ fn ghost_button(t: &Theme, id: impl Into<ElementId>, label: &'static str) -> Sta
         .py_0p5()
         .rounded_md()
         .cursor_pointer()
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .hover(move |s| s.bg(bg).text_color(text))
         .child(label)
 }
@@ -313,10 +313,10 @@ fn row(
         .text_size(px(12.))
         .line_height(px(16.));
     let sub = match reason {
-        Some(reason) => sub.text_color(t.review).child(reason.to_owned()),
+        Some(reason) => sub.text_color(t.review_text).child(reason.to_owned()),
         None => sub
             .font_family(MONO)
-            .text_color(t.muted)
+            .text_color(t.secondary)
             .tooltip(tip(paths))
             .child(r.paths_hint.clone()),
     };
@@ -327,7 +327,7 @@ fn row(
         .gap_3()
         .px_5()
         .py_3()
-        .border_color(t.divider)
+        .border_color(t.separator)
         .child(check)
         .child(
             div()
@@ -339,7 +339,11 @@ fn row(
                         .text_size(px(15.))
                         .line_height(px(20.))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(if reason.is_some() { t.muted } else { t.text })
+                        .text_color(if reason.is_some() {
+                            t.secondary
+                        } else {
+                            t.label
+                        })
                         .child(r.label.clone()),
                 )
                 .child(sub),
@@ -387,30 +391,30 @@ fn footer(
             .py_1p5()
             .rounded_lg()
             .border_1()
-            .border_color(t.card_border)
+            .border_color(t.separator)
             .text_size(px(13.))
             .font_weight(FontWeight::MEDIUM)
             .child(label)
     };
-    let bg = t.bg;
+    let bg = t.content;
     let nothing = rows == 0;
     div()
         .px_5()
         .py_4()
         .border_t_1()
-        .border_color(t.divider)
+        .border_color(t.separator)
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap_1()
                 .text_size(px(13.))
-                .text_color(t.muted)
+                .text_color(t.secondary)
                 .child(
                     div()
                         .font_family(MONO)
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(t.text)
+                        .text_color(t.label)
                         .child(format_bytes(size)),
                 )
                 .child(format!(
@@ -456,8 +460,8 @@ fn footer(
                         .px_3()
                         .py_1p5()
                         .rounded_lg()
-                        .bg(t.text)
-                        .text_color(t.card)
+                        .bg(t.label)
+                        .text_color(t.widget)
                         .text_size(px(13.))
                         .font_weight(FontWeight::MEDIUM)
                         .child("Clean selected");
@@ -483,7 +487,7 @@ fn section(t: &Theme, title: &'static str, body: impl IntoElement) -> impl IntoE
             div()
                 .text_size(px(12.))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(t.muted)
+                .text_color(t.secondary)
                 .child(title.to_uppercase()),
         )
         .child(
@@ -528,12 +532,16 @@ fn drawer(
         Some(d) => content
             .child(section(t, "What it is", d.description.clone()))
             .child(section(t, "What happens if removed", d.regenerates.clone())),
-        None => content.child(div().mt_4().text_size(px(13.)).text_color(t.muted).child(
-            match details_error {
-                Some(e) => format!("Could not load details: {e}"),
-                None => "Loading details…".into(),
-            },
-        )),
+        None => content.child(
+            div()
+                .mt_4()
+                .text_size(px(13.))
+                .text_color(t.secondary)
+                .child(match details_error {
+                    Some(e) => format!("Could not load details: {e}"),
+                    None => "Loading details…".into(),
+                }),
+        ),
     };
     content = content
         .child(section(
@@ -559,7 +567,7 @@ fn drawer(
                             .min_w_0()
                             .truncate()
                             .font_family(MONO)
-                            .text_color(t.muted)
+                            .text_color(t.secondary)
                             .tooltip(tip(f.path.clone()))
                             .child(tilde(&f.path, root)),
                     )
@@ -580,7 +588,7 @@ fn drawer(
         .w_full()
         .flex()
         .flex_col()
-        .bg(t.card)
+        .bg(t.widget)
         .occlude()
         .child(
             div()
@@ -591,7 +599,7 @@ fn drawer(
                 .pt_5()
                 .pb_4()
                 .border_b_1()
-                .border_color(t.divider)
+                .border_color(t.separator)
                 .child(
                     theme::focusable(
                         ghost_button(t, "drawer-close", "←"),
@@ -677,10 +685,10 @@ fn item(
         .text_size(px(12.))
         .tooltip(tip(i.path.clone()));
     let sub = match blocked {
-        Some(reason) => sub.text_color(t.review).child(reason.to_owned()),
+        Some(reason) => sub.text_color(t.review_text).child(reason.to_owned()),
         None => sub
             .font_family(MONO)
-            .text_color(t.muted)
+            .text_color(t.secondary)
             .child(tilde(&i.path, root)),
     };
     div()

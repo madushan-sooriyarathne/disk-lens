@@ -106,7 +106,7 @@ impl ExplorerState {
 /// window scale factor.
 fn hatch(color: Hsla, scale: f32) -> gpui::Background {
     let s = scale * std::f32::consts::SQRT_2;
-    pattern_slash(color.opacity(theme::HATCH_OPACITY), 2.0 * s, 5.0 * s)
+    pattern_slash(color.opacity(theme::STRIPE_ALPHA), 2.0 * s, 5.0 * s)
 }
 
 /// One line on what a tile is: its rule's description, else its category's.
@@ -140,9 +140,9 @@ impl Render for TooltipView {
             .max_w(px(420.))
             .rounded_lg()
             .border_1()
-            .border_color(t.card_border)
-            .bg(t.card)
-            .text_color(t.text)
+            .border_color(t.separator)
+            .bg(t.widget)
+            .text_color(t.label)
             .font_family(theme::SANS)
             .shadow_lg()
             .px_3()
@@ -152,7 +152,7 @@ impl Render for TooltipView {
                 div()
                     .font_family(theme::MONO)
                     .text_size(px(11.))
-                    .text_color(t.muted)
+                    .text_color(t.secondary)
                     .child(self.path.clone()),
             )
             .child(
@@ -168,7 +168,7 @@ impl Render for TooltipView {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.size.clone()),
                     )
-                    .child(div().text_color(t.muted).child(self.category)),
+                    .child(div().text_color(t.secondary).child(self.category)),
             )
             .children(self.description.map(|d| div().mt_1().child(d)))
     }
@@ -199,7 +199,7 @@ pub fn render(
                 .pt_10()
                 .text_center()
                 .text_size(px(13.))
-                .text_color(t.muted)
+                .text_color(t.secondary)
                 .child("Nothing to show here. Press Esc to go back."),
         ),
         Some(v) => {
@@ -226,8 +226,8 @@ pub fn render(
         .flex_col()
         .rounded(px(12.))
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card)
+        .border_color(t.separator)
+        .bg(t.widget)
         .child(header(
             model.mode,
             model.scan.as_ref(),
@@ -311,9 +311,9 @@ fn header(
     // Re-rendered on window focus and every interaction, so the age stays current enough.
     let status = status_label(scan, error, scanned_at, now_ms() as i64 / 1000);
     let status_color = if scan.is_none() && error.is_some() {
-        t.review
+        t.review_text
     } else {
-        t.muted
+        t.secondary
     };
     let scanning = scan.is_some();
     let (button_id, button_label) = match (scanning, error.is_some()) {
@@ -340,11 +340,11 @@ fn header(
             .py_1()
             .text_size(px(13.))
             .border_1()
-            .border_color(if active { t.card_border } else { t.bg })
+            .border_color(if active { t.separator } else { t.content })
             .when(active, |d| {
-                d.bg(t.card).font_weight(FontWeight::MEDIUM).shadow_sm()
+                d.bg(t.widget).font_weight(FontWeight::MEDIUM).shadow_sm()
             })
-            .when(!active, |d| d.text_color(t.muted))
+            .when(!active, |d| d.text_color(t.secondary))
             .child(label)
             .on_click(cx.listener(move |model, _, _, cx| model.set_mode(m, cx)))
     });
@@ -366,7 +366,7 @@ fn header(
                     div()
                         .mt(px(2.))
                         .text_size(px(13.))
-                        .text_color(t.muted)
+                        .text_color(t.secondary)
                         .child("Your home folder, sized by space used. Click a tile to open it."),
                 ),
         )
@@ -385,8 +385,8 @@ fn header(
                         .px_3()
                         .py_1()
                         .text_size(px(13.))
-                        .text_color(t.muted)
-                        .hover(move |s| s.bg(t.bg).text_color(t.text))
+                        .text_color(t.secondary)
+                        .hover(move |s| s.bg(t.content).text_color(t.label))
                         .child(button_label)
                         .on_click(cx.listener(move |model, _, _, cx| {
                             if scanning {
@@ -400,7 +400,7 @@ fn header(
                     div()
                         .flex()
                         .rounded_lg()
-                        .bg(t.bg)
+                        .bg(t.content)
                         .p(px(2.))
                         .children(toggle),
                 ),
@@ -413,7 +413,7 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
     let items = trail.into_iter().enumerate().flat_map(|(i, c)| {
         let sep = (i > 0).then(|| div().child("/").into_any_element());
         let label = if i == last {
-            div().text_color(t.text).child(c.label).into_any_element()
+            div().text_color(t.label).child(c.label).into_any_element()
         } else {
             let path = c.path;
             theme::focusable(
@@ -423,7 +423,7 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
                 format!("Go to {}", c.label),
             )
             .cursor_pointer()
-            .hover(move |s| s.text_color(t.text).underline())
+            .hover(move |s| s.text_color(t.label).underline())
             .child(c.label)
             .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
             .into_any_element()
@@ -433,14 +433,14 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
     div()
         .mt_3()
         .border_t_1()
-        .border_color(t.divider)
+        .border_color(t.separator)
         .flex()
         .items_center()
         .justify_between()
         .px_5()
         .py(px(10.))
         .text_size(px(13.))
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .child(div().flex().items_center().gap(px(6.)).children(items))
         .children(
             model
@@ -460,7 +460,7 @@ fn legend(t: Theme) -> impl IntoElement {
         .pb_4()
         .pt_3()
         .text_size(px(13.))
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .children(theme::LEGEND_ORDER.into_iter().map(|id| {
             div()
                 .flex()
@@ -586,7 +586,7 @@ fn tile(
                             .flex_none()
                             .font_family(theme::MONO)
                             .text_size(px(12.))
-                            .text_color(t.muted)
+                            .text_color(t.secondary)
                             .child(size),
                     )
                 }),
@@ -640,7 +640,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
             .px_3()
             .py(px(6.))
             .text_size(px(13.))
-            .hover(move |s| s.bg(t.bg))
+            .hover(move |s| s.bg(t.content))
             .child(label)
     };
     let panel = div()
@@ -648,9 +648,9 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
         .min_w(px(192.))
         .rounded_lg()
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card)
-        .text_color(t.text)
+        .border_color(t.separator)
+        .bg(t.widget)
+        .text_color(t.label)
         .font_family(theme::SANS)
         .shadow_lg()
         .p_1()

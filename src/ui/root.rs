@@ -25,8 +25,8 @@ impl Render for AppModel {
             .size_full()
             .flex()
             .p_4()
-            .bg(t.bg)
-            .text_color(t.text)
+            .bg(t.content)
+            .text_color(t.label)
             .font_family(theme::SANS);
         let body = match self.phase {
             Phase::Loading => body,
