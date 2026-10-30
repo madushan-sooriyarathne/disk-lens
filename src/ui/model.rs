@@ -12,6 +12,7 @@ use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
+use super::theme;
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
@@ -247,7 +248,11 @@ impl AppModel {
                 this.refresh(cx);
             }
         });
-        let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
+        theme::sync_components(window, cx);
+        let appearance = cx.observe_window_appearance(window, |_, window, cx| {
+            theme::sync_components(window, cx);
+            cx.notify();
+        });
         // A focused tile or row vanishes on drill-down or rescan. Window-wide keys
         // (Esc, Tab) dispatch from the focused element, so focus must go back to the root.
         let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
@@ -968,6 +973,7 @@ mod tests {
         cx: &mut TestAppContext,
         preselect: bool,
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(preselect).with_step(Duration::ZERO));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
@@ -1037,6 +1043,7 @@ mod tests {
 
     /// A model over the mock, started without Full Disk Access.
     fn setup_without_access(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let mock = MockData::new(false).with_step(Duration::ZERO);
         mock.full_disk_access.store(false, Ordering::Relaxed);
@@ -1332,6 +1339,7 @@ mod tests {
 
     #[gpui::test]
     fn a_cancelled_scan_reports_the_notice(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         // Slow enough that the cancel lands before the first step ends.
         let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
@@ -1428,6 +1436,7 @@ mod tests {
 
     #[gpui::test]
     fn cleanup_is_refused_while_scanning(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(true).with_step(Duration::from_millis(30)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
@@ -1445,6 +1454,7 @@ mod tests {
         cx: &mut TestAppContext,
         age_secs: i64,
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let now = crate::cleanup::audit::now_ms() as i64 / 1000;
         let mock = MockData::new(false)
@@ -1606,6 +1616,7 @@ mod tests {
 
     #[gpui::test]
     fn a_cancelled_rescan_keeps_the_view(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));

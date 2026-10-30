@@ -33,6 +33,7 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features =
 trash = "5.2.9"
 shell-escape = "0.1.5"
 cargo-packager-updater = { version = "0.2.3", default-features = false, features = ["native-tls"] }
+gpui-component = "=0.8.1"
 
 [profile.release]
 codegen-units = 1

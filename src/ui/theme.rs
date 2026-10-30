@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    FontFeatures, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window,
-    WindowAppearance, rgb, rgba,
+    App, FontFeatures, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window,
+    WindowAppearance, px, rgb, rgba,
 };
 
 use crate::recommend::model::Tier;
@@ -168,6 +168,55 @@ pub fn current(window: &Window) -> Theme {
         WindowAppearance::Dark | WindowAppearance::VibrantDark => Theme::dark(),
         WindowAppearance::Light | WindowAppearance::VibrantLight => Theme::light(),
     }
+}
+
+/// Drives gpui-component's theme from these tokens, so its controls match the
+/// hand-built views. Called at startup and on every appearance change: `change`
+/// reloads the component defaults for the mode, then ours overwrite them.
+pub fn sync_components(window: &mut Window, cx: &mut App) {
+    use gpui_component::{Theme as Kit, ThemeMode};
+    let t = current(window);
+    let mode = if t.dark {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
+    Kit::change(mode, Some(window), cx);
+    Kit::update(cx, |k| {
+        let c = &mut k.colors;
+        c.background = t.content;
+        c.foreground = t.label;
+        c.muted = t.widget;
+        c.muted_foreground = t.secondary;
+        c.border = t.separator;
+        c.input = t.separator;
+        c.ring = t.accent;
+        c.caret = t.accent;
+        c.selection = t.accent.opacity(0.25);
+        c.accent = t.hover;
+        c.accent_foreground = t.label;
+        c.secondary = t.widget;
+        c.secondary_hover = t.hover;
+        c.secondary_active = t.selected;
+        c.secondary_foreground = t.label;
+        c.primary = t.clean;
+        c.primary_hover = t.clean;
+        c.primary_active = t.clean;
+        c.primary_foreground = t.clean_text;
+        c.button_primary = t.clean;
+        c.danger = t.danger;
+        c.popover = t.popover;
+        c.popover_foreground = t.label;
+        c.list_hover = t.hover;
+        c.list_active = t.selected;
+        c.sidebar = t.sidebar;
+        c.title_bar = t.content;
+        k.font_family = SANS.into();
+        k.font_size = px(T_BODY);
+        k.mono_font_family = MONO.into();
+        k.radius = px(R_CONTROL);
+        k.radius_lg = px(R_WIDGET);
+    });
 }
 
 /// Makes a clickable element a Tab stop that VoiceOver names (PRD 10). Enter

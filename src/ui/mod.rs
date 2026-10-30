@@ -30,9 +30,12 @@ pub fn run() {
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(|cx: &mut App| {
+            gpui_component::init(cx);
             root::bind_keys(cx);
             cx.open_window(chrome::window_options(cx), |window, cx| {
-                cx.new(|cx| AppModel::new(Source::from_env(), window, cx))
+                let model = cx.new(|cx| AppModel::new(Source::from_env(), window, cx));
+                // gpui-component's popovers, tooltips and sheets mount under Root.
+                cx.new(|cx| gpui_component::Root::new(model, window, cx))
             })
             .expect("open main window");
             cx.on_window_closed(|cx, _| cx.quit()).detach();
