@@ -104,7 +104,7 @@ Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo 
 
 **Phase 8a: GPUI bump, gpui-component evaluation, mockup**
 - Built:
-  - GPUI `=0.3.10` (`gpui-pre`, `gpui-pre-platform`, test-support). No source changes; the lockfile moves only GPUI's own tree (wgpu and naga 30, taffy 0.15); `accesskit_macos` is still pulled in.
+  - GPUI `=0.3.10` (`gpui-pre`, `gpui-pre-platform`, test-support). No source changes; the lockfile moves only GPUI's own tree (wgpu and naga 30, taffy 0.15); `accesskit_macos` is still pulled in. Mock and sandbox runs launch without errors, and the v1 UI renders as before in the native window (checked by the user in dark mode, 2026-10-31).
   - `docs/mockup-v2/mockup.html` with its token block (type scale, radii, spacing, system and status colors with AA ratios, the muted category palette, texture opacities), rendered by `scripts/render-mockup.sh` to `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`. Eight frames: Overview, Explore with textures and the inspector, Recommended, queue, command palette, cleanup sheet, onboarding (Full Disk Access), Explore inside `~/Library` with Highlight Cleanable during a background rescan.
 - gpui-component 0.8.1 evaluation (scratch spike, not committed; the dependency is added in 8b with its first use):
   - Theming: every color in the components checked (button, input, sidebar, menus, popover, tooltip, list, command, sheet, title bar, checkbox, switch) comes from `ThemeColor`; none is hardcoded. `Theme::global_mut` also takes the font family and size, both radii and shadows, so `theme.rs` can drive it entirely. Control heights come from `Size` (26, 30, 32, 40 pt by default, taller than macOS controls); `Size::Size(px)` sets HIG heights per control.
@@ -115,7 +115,6 @@ Last full gate run on macOS (Phase 8a, 2026-10-31): `cargo fmt --check`, `cargo 
 - Approved (2026-10-31): the mockup, as rendered at commit 715ee69, is the visual target for 8b onward.
 - Mockup decisions: the Clean up button fill is `#1E7A34` (white text 5.4:1) because the PRD's system green with white text fails AA; tile size lines use `--tile-secondary`, which passes on every fill and stripe pixel; the `-dark` board is a second file next to `docs/mockup-v2.png`; the mock JSON is unchanged (numbers the v2 screens need beyond it are marked "not in mock" in the HTML).
 - Open:
-  - The bump's smoke runs (mock and sandbox) launched without errors, but window capture was refused in the session, so a visual check of the 0.3.10 build is still open.
   - VoiceOver over gpui-component controls is checked in 8b once the shell uses them.
   - The Overview leaves the lower half of the window empty at the default size; the approved mockup keeps it that way, revisit in Phase 9 if it reads as unfinished in the app.
 
