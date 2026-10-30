@@ -12,12 +12,12 @@ use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
-use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary};
+use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{ViewMode, ViewNode};
+use crate::view::{ViewKind, ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
@@ -180,6 +180,20 @@ fn is_stale(now: i64, scanned_at: i64) -> bool {
     now.saturating_sub(scanned_at) > STALE_AFTER
 }
 
+/// Takes `size` off every node on the way to `path` and drops the node at it, so the treemap
+/// matches the disk before the rescan lands.
+fn subtract(node: &mut ViewNode, path: &str, size: u64) {
+    // "Other" carries its folder's path but only stands for leftovers.
+    if node.kind == ViewKind::Other || !is_within(path, &node.path) {
+        return;
+    }
+    node.size = node.size.saturating_sub(size);
+    node.children.retain(|c| c.path != path);
+    for child in &mut node.children {
+        subtract(child, path, size);
+    }
+}
+
 /// The folder above `path`, like `parentOf` in the old view store.
 fn parent_of(path: &str) -> &str {
     path.rfind('/')
@@ -188,13 +202,17 @@ fn parent_of(path: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// Whether `path` is `dir` or below it.
+fn is_within(path: &str, dir: &str) -> bool {
+    path == dir
+        || path
+            .strip_prefix(dir.trim_end_matches('/'))
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// `path` and its parents down to `root`, nearest first. A path outside `root` gives just `root`.
 fn ancestors<'a>(path: &'a str, root: &'a str) -> Vec<&'a str> {
-    let inside = path == root
-        || path
-            .strip_prefix(root.trim_end_matches('/'))
-            .is_some_and(|rest| rest.starts_with('/'));
-    if !inside {
+    if !is_within(path, root) {
         return vec![root];
     }
     let mut chain = vec![path];
@@ -851,9 +869,21 @@ impl AppModel {
                 *current = Some(item_id);
                 false
             }
-            CleanupEvent::ItemFinished { .. } => {
+            CleanupEvent::ItemFinished {
+                item_id, outcome, ..
+            } => {
                 *done += 1;
                 *current = None;
+                // Deleted or trashed items are gone for sure (FR-BG-6). A command frees an
+                // estimate and its folder stays until the rescan, and the rest changed nothing.
+                if matches!(outcome, Outcome::Deleted | Outcome::Trashed)
+                    && let Some(item) = selection::forget_item(&mut self.recommendations, &item_id)
+                {
+                    if let Some(view) = &mut self.view {
+                        subtract(view, &item.path, item.size);
+                    }
+                    self.selected.remove(&item_id);
+                }
                 false
             }
             CleanupEvent::Finished { summary } => {
@@ -1434,6 +1464,132 @@ mod tests {
     #[test]
     fn a_day_and_a_second_old_is_stale() {
         assert!(is_stale(STALE_AFTER + 1, 0));
+    }
+
+    fn view_node(path: &str, size: u64, children: Vec<ViewNode>) -> ViewNode {
+        ViewNode {
+            id: path.into(),
+            name: path.into(),
+            path: path.into(),
+            size,
+            category: "dev_tools".into(),
+            tier: None,
+            rule_id: None,
+            kind: ViewKind::Dir,
+            children,
+        }
+    }
+
+    #[test]
+    fn subtract_removes_the_exact_node() {
+        let mut root = view_node(
+            "~",
+            10,
+            vec![view_node("~/a", 4, vec![]), view_node("~/b", 6, vec![])],
+        );
+        subtract(&mut root, "~/a", 4);
+        assert_eq!(
+            root.children
+                .iter()
+                .map(|c| c.path.as_str())
+                .collect::<Vec<_>>(),
+            ["~/b"]
+        );
+    }
+
+    #[test]
+    fn subtract_shrinks_the_folders_above() {
+        let mut root = view_node(
+            "~",
+            10,
+            vec![view_node("~/a", 4, vec![view_node("~/a/x", 3, vec![])])],
+        );
+        subtract(&mut root, "~/a/x", 3);
+        assert_eq!((root.size, root.children[0].size), (7, 1));
+    }
+
+    #[test]
+    fn subtract_leaves_a_look_alike_sibling_alone() {
+        let mut root = view_node("~", 10, vec![view_node("~/ab", 4, vec![])]);
+        subtract(&mut root, "~/a", 3);
+        assert_eq!(root.children[0].size, 4);
+    }
+
+    /// The model with a running cleanup that no event has touched yet.
+    fn setup_running(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| {
+            m.cleanup = Some(Cleanup::Running {
+                plan: CleanupPlan {
+                    plan_id: "p".into(),
+                    snapshot_id: "s".into(),
+                    actions: Vec::new(),
+                    total: 0,
+                    trash_total: 0,
+                    permanent_available: false,
+                    warnings: Vec::new(),
+                },
+                done: 0,
+                current: None,
+            });
+        });
+        (model, cx)
+    }
+
+    /// Finishes the first item of the first row with `outcome`; returns that item.
+    fn finish_first_item(
+        model: &Entity<AppModel>,
+        cx: &mut VisualTestContext,
+        outcome: Outcome,
+    ) -> crate::recommend::model::RecItem {
+        model.update(cx, |m, _| {
+            let item = m.recommendations[0].items[0].clone();
+            m.selected.insert(item.item_id.clone());
+            m.on_cleanup_event(CleanupEvent::ItemFinished {
+                item_id: item.item_id.clone(),
+                freed: item.size,
+                outcome,
+            });
+            item
+        })
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_leaves_the_recommendations(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        assert!(model.read_with(cx, |m, _| {
+            m.recommendations
+                .iter()
+                .all(|r| r.items.iter().all(|i| i.item_id != item.item_id))
+        }));
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_shrinks_the_view(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let before = model.read_with(cx, |m, _| m.view.as_ref().map(|v| v.size));
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        let after = model.read_with(cx, |m, _| m.view.as_ref().map(|v| v.size));
+        assert_eq!(after, before.map(|b| b - item.size));
+    }
+
+    #[gpui::test]
+    fn a_trashed_item_leaves_the_selection(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let item = finish_first_item(&model, cx, Outcome::Trashed);
+        assert!(!model.read_with(cx, |m, _| m.selected.contains(&item.item_id)));
+    }
+
+    #[gpui::test]
+    fn a_dry_run_item_stays(cx: &mut TestAppContext) {
+        let (model, cx) = setup_running(cx);
+        let before = model.read_with(cx, |m, _| m.recommendations.clone());
+        finish_first_item(&model, cx, Outcome::DryRun);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.recommendations.clone()),
+            before
+        );
     }
 
     #[gpui::test]

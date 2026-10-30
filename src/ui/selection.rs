@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::recommend::model::{ItemStatus, Recommendation, Tier};
+use crate::recommend::model::{ItemStatus, RecItem, Recommendation, Tier};
 use crate::view::ViewNode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +103,21 @@ pub fn carry_over(
         }
     }
     (kept, dropped)
+}
+
+/// Removes one item from its row and shrinks the row by it; a row left empty goes too.
+pub fn forget_item(recs: &mut Vec<Recommendation>, item_id: &str) -> Option<RecItem> {
+    let (row_at, item_at) = recs
+        .iter()
+        .enumerate()
+        .find_map(|(r, row)| Some((r, row.items.iter().position(|i| i.item_id == item_id)?)))?;
+    let row = recs.get_mut(row_at)?;
+    let item = row.items.remove(item_at);
+    row.size = row.size.saturating_sub(item.size);
+    if row.items.is_empty() {
+        recs.remove(row_at);
+    }
+    Some(item)
 }
 
 /// The reason shown on a row whose items are all blocked, else `None`.
@@ -264,6 +279,20 @@ mod tests {
     fn carry_over_counts_gone_and_unknown_ids() {
         let (_, dropped) = carry_over(&[npm()], &set(&["a", "gone"]), &[trash()]);
         assert_eq!(dropped, 2);
+    }
+
+    #[test]
+    fn forget_item_removes_a_row_it_empties() {
+        let mut recs = vec![npm(), trash()];
+        forget_item(&mut recs, "t");
+        assert_eq!(recs, [npm()]);
+    }
+
+    #[test]
+    fn forget_item_shrinks_the_row_it_leaves() {
+        let mut recs = vec![Recommendation { size: 5, ..npm() }];
+        forget_item(&mut recs, "a");
+        assert_eq!(recs[0].size, 4);
     }
 
     #[test]
