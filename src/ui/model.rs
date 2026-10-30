@@ -727,7 +727,8 @@ impl AppModel {
 
     /// "Clean selected": builds the plan and opens the confirm dialog.
     pub fn open_cleanup(&mut self, cx: &mut Context<Self>) {
-        if self.selected.is_empty() || self.cleanup.is_some() {
+        // The plan would be built against a snapshot that is about to be replaced.
+        if self.selected.is_empty() || self.cleanup.is_some() || self.scan.is_some() {
             return;
         }
         self.request_plan(false, cx);
@@ -769,7 +770,7 @@ impl AppModel {
         let Some(Cleanup::Confirm { plan, .. }) = self.cleanup.clone() else {
             return;
         };
-        if plan.actions.is_empty() {
+        if plan.actions.is_empty() || self.scan.is_some() {
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -1365,6 +1366,20 @@ mod tests {
         model.update(cx, |m, _| m.focused_row = Some("gone-row".into()));
         rescan(&model, cx);
         assert!(model.read_with(cx, |m, _| m.focused_row.is_none()));
+    }
+
+    #[gpui::test]
+    fn cleanup_is_refused_while_scanning(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let source = Source::Mock(MockData::new(true).with_step(Duration::from_millis(30)));
+        let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.start_scan(cx);
+            m.open_cleanup(cx);
+        });
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.cleanup.is_none()));
     }
 
     #[gpui::test]
