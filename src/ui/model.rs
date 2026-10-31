@@ -558,6 +558,29 @@ impl AppModel {
         );
     }
 
+    /// Starts dragging DiskLens.app, to drop it on the Full Disk Access list.
+    pub fn drag_app(&mut self, window: &Window) {
+        let Some(bundle) = platform::drag::app_bundle() else {
+            return;
+        };
+        if let Err(e) = platform::drag::drag_app(window, &bundle) {
+            tracing::warn!("could not drag the app: {e}");
+        }
+    }
+
+    /// Selects DiskLens in Finder, to drag it from there.
+    pub fn reveal_app(&mut self, cx: &mut Context<Self>) {
+        let task = cx.background_spawn(async { platform::drag::reveal_app() });
+        cx.spawn(async move |this, cx| {
+            if let Err(e) = task.await {
+                tracing::warn!("could not show the app in Finder: {e}");
+                this.update(cx, |m, cx| m.show_toast("Could not open Finder".into(), cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
     /// Moves on without access (FR-ONB-3a). Onboarding is finished only by the first scan.
     pub fn continue_without_access(&mut self, cx: &mut Context<Self>) {
         self.first_scan(cx);

@@ -1,19 +1,24 @@
 //! First launch (PRD 13.4.1): Welcome, Full Disk Access and the first scan, in one
 //! card with a page indicator.
 
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use gpui::{
-    Context, Div, FontWeight, Image, ImageFormat, IntoElement, ParentElement, Role, Stateful,
-    Styled, Window, div, img, prelude::*, px, relative,
+    Animation, AnimationExt, Context, CursorStyle, Div, FontWeight, Image, ImageFormat,
+    IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, div, img, prelude::*,
+    px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Disableable, Sizable, Size};
 
 use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, Step};
+use super::motion;
 use super::shell::CONTROL_HEIGHT;
 use super::theme::{self, Theme};
+use crate::platform::drag;
 
 const CARD_WIDTH: f32 = 520.;
 const ICON: f32 = 96.;
@@ -24,6 +29,14 @@ static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
         include_bytes!("../../assets/icons/icon.svg").to_vec(),
     ))
 });
+
+const TOGGLE_W: f32 = 34.;
+const TOGGLE_H: f32 = 20.;
+const TOGGLE_LOOP: Duration = Duration::from_millis(2400);
+const DRAG_ICON: f32 = 40.;
+
+/// The bundle to drag; none under `cargo run`, where only the Finder link shows.
+static BUNDLE: LazyLock<Option<PathBuf>> = LazyLock::new(drag::app_bundle);
 
 const POINTS: [&str; 3] = [
     "See what fills your disk, folder by folder.",
@@ -142,7 +155,8 @@ fn access(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> (Div, Vec<
             "macOS hides some folders, such as Mail and other apps' data, until you allow \
              Full Disk Access. DiskLens only measures folder sizes and never opens your files.",
         ))
-        .child(status);
+        .child(status)
+        .child(drag_card(t, model, cx));
     let skip = button("onboarding-skip", "Continue Without")
         .ghost()
         .on_click(cx.listener(|m, _, _, cx| m.continue_without_access(cx)));
@@ -151,6 +165,80 @@ fn access(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> (Div, Vec<
         .disabled(model.access_confirmed)
         .on_click(cx.listener(|m, _, window, cx| m.open_fda_settings(window, cx)));
     (content, vec![skip, open])
+}
+
+/// The toggle switching on, and the app to drag into the list when it is missing.
+fn drag_card(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> Div {
+    let (off, lit, knob) = (t.tertiary, t.safe, t.widget);
+    let toggle = move |on: f32| {
+        div()
+            .w(px(TOGGLE_W))
+            .h(px(TOGGLE_H))
+            .rounded_full()
+            .bg(theme::mix(off, lit, on))
+            .child(
+                div()
+                    .mt(px(2.))
+                    .ml(px(2. + on * (TOGGLE_W - TOGGLE_H)))
+                    .size(px(TOGGLE_H - 4.))
+                    .rounded_full()
+                    .bg(knob),
+            )
+    };
+    let toggle = if model.reduce_motion {
+        toggle(1.).into_any_element()
+    } else {
+        div()
+            .child(toggle(0.))
+            .with_animation(
+                "fda-toggle",
+                Animation::new(TOGGLE_LOOP).repeat(),
+                move |_, d| {
+                    // Off, switching on, then on for most of the loop.
+                    let on = motion::ease(((d - 0.2) / 0.2).clamp(0., 1.));
+                    div().child(toggle(on))
+                },
+            )
+            .into_any_element()
+    };
+    let row = div().flex().items_center().gap_3().child(toggle).child(
+        div()
+            .flex_1()
+            .text_color(t.secondary)
+            .child("Don't see DiskLens? Drag this icon into the list."),
+    );
+    let row = if BUNDLE.is_some() {
+        row.child(
+            div()
+                .id("drag-app")
+                .cursor(CursorStyle::OpenHand)
+                .role(Role::Image)
+                .aria_label("DiskLens app icon, drag it into the Full Disk Access list")
+                .child(img(APP_ICON.clone()).size(px(DRAG_ICON)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|m, _, window, _| m.drag_app(window)),
+                ),
+        )
+    } else {
+        row
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p(px(theme::GAP_WIDGET))
+        .rounded(px(theme::R_CONTROL))
+        .bg(t.content)
+        .child(row)
+        .child(
+            div().flex().child(
+                Button::new("reveal-app")
+                    .link()
+                    .label("Show DiskLens in Finder")
+                    .on_click(cx.listener(|m, _, _, cx| m.reveal_app(cx))),
+            ),
+        )
 }
 
 fn first_scan(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> (Div, Vec<Button>) {

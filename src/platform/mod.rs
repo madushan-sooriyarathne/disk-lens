@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use wait_timeout::ChildExt;
 
+pub mod drag;
 mod quick_look;
 mod snapshots;
 pub mod window;
