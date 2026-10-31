@@ -134,6 +134,12 @@ pub fn get_view(state: &Arc<AppState>, node_path: String) -> Result<ViewNode> {
     )
 }
 
+/// The absolute path to preview for `node_path`; paths outside the snapshot are refused.
+pub fn quick_look(state: &Arc<AppState>, node_path: String) -> Result<std::path::PathBuf> {
+    let cur = current(state)?;
+    view::validated_path(&cur.snapshot, Path::new(&node_path))
+}
+
 /// Bytes and folder counts per category for the sidebar.
 pub fn get_category_totals(state: &Arc<AppState>) -> Result<Vec<CategoryTotal>> {
     let cur = current(state)?;

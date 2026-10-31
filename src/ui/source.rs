@@ -372,6 +372,14 @@ impl Source {
         }
     }
 
+    /// The validated path to preview. Mock paths are not on disk, so the mock has none.
+    pub fn quick_look(&self, path: &str) -> Result<std::path::PathBuf> {
+        match self {
+            Self::Live(state) => backend::quick_look(state, path.to_owned()),
+            Self::Mock(_) => Err(Error::NotInSnapshot(path.into())),
+        }
+    }
+
     pub fn reveal(&self, path: &str) -> Result<()> {
         match self {
             Self::Live(state) => backend::reveal_in_finder(state, path.to_owned()),

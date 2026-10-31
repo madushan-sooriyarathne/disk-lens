@@ -8,9 +8,7 @@ use gpui::{
     WindowAppearance, px, rgb, rgba,
 };
 
-use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
-use crate::view::ViewNode;
 
 pub const SANS: &str = ".SystemUIFont";
 /// SF Mono on macOS; GPUI resolves CoreText's hidden system name (checked in Phase 8).
@@ -327,27 +325,6 @@ pub fn tile_fill(t: &Theme, category: &str, texture: Texture) -> (Hsla, Option<H
         Texture::Restorable => (mix(t.content, fill, TEX_MIX), None),
         Texture::Disposable => (mix(t.content, fill, TEX_MIX), Some(border)),
         Texture::System | Texture::Smaller => (t.neutral, None),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TileColors {
-    pub fill: Hsla,
-    pub border: Hsla,
-    /// Tier color for the hatch overlay, when a recommendation matches.
-    pub hatch: Option<Hsla>,
-}
-
-pub fn tile_colors(theme: &Theme, node: &ViewNode) -> TileColors {
-    let hatch = node.tier.map(|t| match t {
-        Tier::Safe => theme.safe,
-        Tier::Review => theme.review,
-    });
-    let (fill, border) = category_colors(theme, &node.category);
-    TileColors {
-        fill,
-        border: hatch.unwrap_or(border),
-        hatch,
     }
 }
 
