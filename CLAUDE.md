@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - v1 target UI; v2 target is `docs/mockup-v2.png` and `docs/mockup-v2-dark.png` (from `docs/mockup-v2/mockup.html`)
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8 is split: 8a (GPUI 0.3.10, gpui-component evaluation, v2 mockup) merged; 8b (tokens, system font, window chrome, shell, menus, motion, icons) built on `feat/phase-8b-window-shell`, visual check approved, awaiting review); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8, design foundation and window shell, merged in two parts, 8a and 8b; Phase 9, Overview, built on `feat/phase-9-overview`, visual check approved, awaiting review); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
@@ -55,7 +55,7 @@ UI (`src/ui/`, GPUI):
 - `model.rs`: `AppModel`, the single GPUI entity (phase, page, sidebar and inspector visibility, running scan, snapshot meta, category totals, explorer path, forward history and mode, recommendations, selected item IDs, drawer row, Reduce Motion and Reduce Transparency). Backend calls run off the UI thread; recommendations refresh on window activation.
 - `source.rs`: `Source::Live` (calls `backend.rs`) or `Source::Mock` (`assets/mock/snapshot.mock.json`, chosen by `DISKLENS_MOCK`).
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3), `stats.rs`, `selection.rs`, `format.rs`, `motion.rs` (spring presets, Reduce Motion cross-fade), `theme.rs` (v2 tokens with a WCAG AA test over every text-on-fill pair; category colors from `rules.toml`; also drives gpui-component's theme).
-- Views stay presentational: `screens.rs`, `stat_cards.rs`, `explorer.rs`, `recommendations.rs`, `cleanup.rs` (confirm, progress and results dialog, toast). After a cleanup the model rescans the whole root.
+- Views stay presentational: `screens.rs`, `overview.rs`, `explorer.rs`, `recommendations.rs`, `cleanup.rs` (confirm, progress and results dialog, toast). After a cleanup the model rescans the whole root.
 
 ## Safety rules (non-negotiable)
 

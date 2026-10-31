@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
-use tree::{MediaExtensions, Snapshot, SnapshotMeta, VolumeInfo};
+use tree::{MediaExtensions, Snapshot, SnapshotMeta};
 pub use walk::Progress;
 
 /// What the scan records besides sizes.
@@ -45,10 +45,7 @@ pub fn scan(
         root: root.display().to_string(),
         scanned_at: now.as_secs() as i64,
         duration_ms: started.elapsed().as_millis() as u64,
-        volume: volume::volume_info(root).unwrap_or(VolumeInfo {
-            total: 0,
-            available: 0,
-        }),
+        volume: volume::volume_info(root).unwrap_or_default(),
         scanned_size: walked.nodes.first().map_or(0, |n| n.size),
         inaccessible_count: walked.inaccessible_count,
     };

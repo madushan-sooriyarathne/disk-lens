@@ -15,8 +15,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
-| 8 Design foundation and window shell | 8a merged; 8b built, visual check approved, awaiting review | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) on branch `feat/phase-8b-window-shell` |
-| 9 Overview | Not started | v2, PRD section 13.4.4 |
+| 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
+| 9 Overview | Built, visual check approved, awaiting review | v2, PRD section 13.4.4. Branch `feat/phase-9-overview` |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 8b, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (355 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 9, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (376 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -144,6 +144,21 @@ Last full gate run on macOS (Phase 8b, 2026-10-31): `cargo fmt --check`, `cargo 
   - One gate run had four `tests/scanner.rs` failures (sizes read as 0 right after the fixture files were written) that did not reproduce alone or in a second full run. Likely delayed block allocation under load; fix the test if it recurs.
   - Category folder counts and sizes in the sidebar depend on the depth bound; projects deeper than 4 levels fall back to `dev_tools` or `documents_media`.
 
+**Phase 9: Overview**
+- Built:
+  - `VolumeInfo` records the localized volume name and the purgeable total (important-usage available minus `statfs` free). Both default when an older snapshot loads, so the Disk widget reads "Disk" until the next scan.
+  - `overview.rs` replaces `stat_cards.rs`: Disk (free space, "+X after cleanup" with a selection, capacity bar of the six categories, System and apps, and Free, with its legend, and the purgeable line), Safe to clean with Select Safe Items, Worth a look with Review, and the five largest folders under the scan root, which open Explore at that folder (`AppModel::explore`).
+  - `stats.rs`: tier counts are ready items (the mockup's 8 and 10), `capacity_segments` and `largest_folders`; `free_after_cleanup` is gone. Each widget carries a one-sentence accessibility label, unit-tested.
+  - The mock gains `volume.name` "Macintosh HD" and 4.2 GB purgeable, the mockup's illustrative value.
+- Decisions:
+  - The purgeable line reads "Up to X of this is purgeable, mostly local Time Machine snapshots." The mockup's "Up to 4.2 GB more is held by…" would double count, because the available figure already includes purgeable space. The line shows from 1 GB.
+  - Sizes of 100 GB and more keep the app's whole-number format, so the volume total reads "463 GB" where the mockup shows "462.5 GB".
+  - `largest_folders` is loaded with each snapshot from the root view and stays as it is after a cleanup until the follow-up rescan, like the category totals.
+- Visual check (2026-10-31, light and dark, against frame 1): approved. The one difference found, Select Safe Items and Review stretching across the widget, is fixed: they are label width and 28 pt high like the mockup's buttons. The other differences are the two decisions above.
+- Open:
+  - The rest of `docs/QA.md`, Phase 9: the selection and navigation clicks, VoiceOver, and the sandbox run.
+  - Whether the lower half of the window still reads as empty at the default size (8a open item).
+
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
@@ -226,7 +241,7 @@ disklens/
     cleanup/  model.rs, protected.rs, plan.rs, revalidate.rs, execute.rs, script.rs, audit.rs
     platform/ mod.rs
     ui/       mod.rs, root.rs, model.rs, source.rs, theme.rs, format.rs, stats.rs,
-              selection.rs, treemap.rs, screens.rs, stat_cards.rs, explorer.rs,
+              selection.rs, treemap.rs, screens.rs, overview.rs, explorer.rs,
               recommendations.rs, cleanup.rs, chrome.rs, shell.rs, motion.rs, assets.rs
     bin/scan-bench.rs
     v2 adds: ui/palette.rs, ui/keymap.rs, ui/queue.rs, ui/inspector.rs,
@@ -242,7 +257,7 @@ disklens/
 Rust types derive `Serialize` and `Deserialize` (snapshot persistence and the mock). The UI uses these types directly; there is no separate frontend contract.
 
 ```rust
-pub struct VolumeInfo { pub total: u64, pub available: u64 }
+pub struct VolumeInfo { pub total: u64, pub available: u64, pub name: String, pub purgeable: u64 }
 
 pub struct DirNode {
     pub id: u32, pub parent: Option<u32>, pub name: String,

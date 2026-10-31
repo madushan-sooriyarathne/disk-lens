@@ -18,7 +18,7 @@ use crate::cleanup::audit::now_ms;
 
 /// Room for the traffic lights when the sidebar is hidden.
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
-const CONTROL_HEIGHT: f32 = 28.;
+pub(super) const CONTROL_HEIGHT: f32 = 28.;
 
 fn icon(name: &str, color: Hsla) -> impl IntoElement {
     svg()
@@ -338,7 +338,7 @@ pub fn inspector(t: Theme) -> impl IntoElement {
 /// The page under the toolbar.
 pub fn page(model: &mut AppModel, window: &mut Window, cx: &mut Context<AppModel>) -> AnyElement {
     match model.page {
-        Page::Overview => super::stat_cards::render(model, window, cx).into_any_element(),
+        Page::Overview => super::overview::render(model, window, cx).into_any_element(),
         Page::Explore => explorer::render(model, window, cx).into_any_element(),
         Page::Recommended => super::recommendations::render(model, window, cx).into_any_element(),
     }

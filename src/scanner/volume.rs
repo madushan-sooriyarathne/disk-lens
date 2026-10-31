@@ -1,5 +1,6 @@
 //! Volume capacity. Prefers the "important usage" figure Finder shows (it counts
-//! purgeable space as available), falling back to `statfs`.
+//! purgeable space as available), falling back to `statfs`. The gap between the
+//! two is the purgeable total (PRD FR-SNAP-2).
 
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
@@ -9,7 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
     NSArray, NSNumber, NSString, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey,
-    NSURLVolumeTotalCapacityKey,
+    NSURLVolumeLocalizedNameKey, NSURLVolumeTotalCapacityKey,
 };
 
 use super::tree::VolumeInfo;
@@ -21,14 +22,15 @@ pub fn volume_info(path: &Path) -> Option<VolumeInfo> {
 fn ns_volume_info(path: &Path) -> Option<VolumeInfo> {
     let ns_path = NSString::from_str(&path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&ns_path);
-    // SAFETY: both statics are valid NSString constants provided by Foundation.
-    let (total_key, avail_key) = unsafe {
+    // SAFETY: all three statics are valid NSString constants provided by Foundation.
+    let (total_key, avail_key, name_key) = unsafe {
         (
             NSURLVolumeTotalCapacityKey,
             NSURLVolumeAvailableCapacityForImportantUsageKey,
+            NSURLVolumeLocalizedNameKey,
         )
     };
-    let keys = NSArray::from_slice(&[total_key, avail_key]);
+    let keys = NSArray::from_slice(&[total_key, avail_key, name_key]);
     let values = url.resourceValuesForKeys_error(&keys).ok()?;
     let read = |key| -> Option<u64> {
         let obj: Retained<AnyObject> = values.objectForKey(key)?;
@@ -37,7 +39,17 @@ fn ns_volume_info(path: &Path) -> Option<VolumeInfo> {
     };
     let total = read(total_key)?;
     let available = read(avail_key)?;
-    sanitize(total, available)
+    let name = values
+        .objectForKey(name_key)
+        .and_then(|obj| obj.downcast_ref::<NSString>().map(|s| s.to_string()))
+        .unwrap_or_default();
+    // Without statfs there is no second figure to compare against.
+    let free = statfs_volume_info(path).map_or(available, |v| v.available);
+    Some(VolumeInfo {
+        name,
+        purgeable: available.saturating_sub(free),
+        ..sanitize(total, available)?
+    })
 }
 
 fn statfs_volume_info(path: &Path) -> Option<VolumeInfo> {
@@ -61,7 +73,11 @@ fn from_blocks(blocks: u64, avail_blocks: u64, block_size: u64) -> Option<Volume
 
 /// Reject nonsense (zero total, available above total).
 fn sanitize(total: u64, available: u64) -> Option<VolumeInfo> {
-    (total > 0 && available <= total).then_some(VolumeInfo { total, available })
+    (total > 0 && available <= total).then(|| VolumeInfo {
+        total,
+        available,
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]
@@ -87,5 +103,17 @@ mod tests {
         assert!(v.total > 0 && v.available <= v.total);
         let fb = statfs_volume_info(Path::new("/")).expect("statfs for /");
         assert!(fb.total > 0);
+    }
+
+    #[test]
+    fn root_volume_purgeable_fits_in_available() {
+        let v = volume_info(Path::new("/")).expect("capacity for /");
+        assert!(v.purgeable <= v.available);
+    }
+
+    #[test]
+    fn root_volume_has_a_name() {
+        let v = volume_info(Path::new("/")).expect("capacity for /");
+        assert!(!v.name.is_empty());
     }
 }
