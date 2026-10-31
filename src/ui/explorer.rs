@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Role,
-    SharedString, Toggled, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
+    SharedString, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
 };
 
 use super::format::{format_age, format_bytes, group_digits};
@@ -17,7 +17,7 @@ use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
 use crate::rules::model::Rules;
-use crate::view::{ViewKind, ViewMode, ViewNode};
+use crate::view::{ViewKind, ViewNode};
 
 /// Context menu opened by a right click on a tile.
 struct Menu {
@@ -226,7 +226,6 @@ pub fn render(
         .border_1()
         .border_color(t.separator)
         .bg(t.widget)
-        .child(header(model.mode, t, cx))
         .child(treemap)
         .child(legend(t))
         .children(context_menu(model, t, cx))
@@ -287,69 +286,6 @@ pub(super) fn status_label(
         return Some(error.to_owned());
     }
     scanned_at.map(|at| format!("Scanned {}", format_age(now, at)))
-}
-
-/// Title and the view-mode toggle. The scan status lives in the toolbar.
-fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
-    let toggle = [
-        (ViewMode::Category, "Category"),
-        (ViewMode::Cleanup, "Cleanup"),
-    ]
-    .into_iter()
-    .map(|(m, label)| {
-        let active = mode == m;
-        theme::focusable(div().id(label), &t, Role::Button, format!("{label} view"))
-            .aria_toggled(if active {
-                Toggled::True
-            } else {
-                Toggled::False
-            })
-            .cursor_pointer()
-            .rounded_md()
-            .px_3()
-            .py_1()
-            .text_size(px(13.))
-            .border_1()
-            .border_color(if active { t.separator } else { t.content })
-            .when(active, |d| {
-                d.bg(t.widget).font_weight(FontWeight::MEDIUM).shadow_sm()
-            })
-            .when(!active, |d| d.text_color(t.secondary))
-            .child(label)
-            .on_click(cx.listener(move |model, _, _, cx| model.set_mode(m, cx)))
-    });
-    div()
-        .flex()
-        .items_start()
-        .justify_between()
-        .px_5()
-        .pt_5()
-        .child(
-            div()
-                .child(
-                    div()
-                        .text_size(px(15.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Explorer"),
-                )
-                .child(
-                    div()
-                        .mt(px(2.))
-                        .text_size(px(13.))
-                        .text_color(t.secondary)
-                        .child("Your home folder, sized by space used. Click a tile to open it."),
-                ),
-        )
-        .child(
-            div().flex().items_center().gap_2().child(
-                div()
-                    .flex()
-                    .rounded_lg()
-                    .bg(t.content)
-                    .p(px(2.))
-                    .children(toggle),
-            ),
-        )
 }
 
 /// The path from the scan root to the open folder; earlier parts are links.
@@ -418,7 +354,7 @@ fn legend(t: Theme) -> impl IntoElement {
 /// One absolutely positioned tile or group. Tiles occlude the mouse, so a
 /// group under a tile never sees its clicks, hover or right clicks.
 fn tile(
-    model: &AppModel,
+    _model: &AppModel,
     node: &ViewNode,
     r: &Rect,
     t: Theme,
@@ -426,7 +362,7 @@ fn tile(
     menu_open: bool,
     cx: &mut Context<AppModel>,
 ) -> AnyElement {
-    let colors = theme::tile_colors(&t, node, model.mode);
+    let colors = theme::tile_colors(&t, node);
     let is_dir = node.kind == ViewKind::Dir;
     let size = format_bytes(node.size);
     let radius = px(if r.group { 10. } else { 8. });
@@ -567,7 +503,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
         .and_then(|v| treemap::find(v, &menu.node_id))?;
     let row_id = row_for_node(&model.recommendations, node).map(|r| r.row_id.clone());
     let path = node.path.clone();
-    let can_reveal = node.kind != ViewKind::Other;
+    let can_reveal = node.kind != ViewKind::Smaller;
 
     let item = |id: &'static str, label: &'static str| {
         div()
@@ -671,6 +607,9 @@ mod tests {
             tier: None,
             rule_id: None,
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: vec![],
         }
     }

@@ -422,6 +422,9 @@ mod tests {
             } else {
                 ViewKind::Dir
             },
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children,
         }
     }

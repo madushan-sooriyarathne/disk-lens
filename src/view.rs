@@ -8,17 +8,12 @@ use crate::rules::category::{self, MEDIA_SHARE};
 use crate::rules::model::Rules;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ViewMode {
-    Category,
-    Cleanup,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewKind {
     Dir,
     File,
-    /// Several small siblings merged into one tile.
-    Other,
+    /// The children beyond the largest, merged into one tile (PRD FR-EXP-2). It
+    /// carries its folder's path; its own children are the merged items.
+    Smaller,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +26,14 @@ pub struct ViewNode {
     pub tier: Option<Tier>,
     pub rule_id: Option<String>,
     pub kind: ViewKind,
+    #[serde(default)]
+    pub file_count: u64,
+    /// Bytes of recommended items at or below this node (PRD FR-EXP-5).
+    #[serde(default)]
+    pub cleanable: u64,
+    /// Protected, or a `~/Library` folder with nothing to recommend (PRD FR-EXP-6).
+    #[serde(default)]
+    pub system_managed: bool,
     pub children: Vec<ViewNode>,
 }
 
@@ -48,12 +51,13 @@ pub struct CategoryTotal {
 
 use std::path::{Component, Path, PathBuf};
 
+use crate::cleanup::protected::Protected;
 use crate::error::{Error, Result};
-use crate::scanner::tree::{DirNode, Snapshot};
+use crate::scanner::tree::Snapshot;
 
-/// Children smaller than this share of their parent merge into "Other".
-const MIN_SHARE_PERMILLE: u64 = 5;
-const MAX_CHILDREN: usize = 24;
+/// Children smaller than this share of their parent merge into the smaller-items tile.
+const MIN_SHARE_PERMILLE: u64 = 10;
+const MAX_TILES: usize = 12;
 /// Category when no analysis is available.
 const DEFAULT_CATEGORY: &str = "dev_tools";
 
@@ -159,18 +163,59 @@ pub fn validated_path(snap: &Snapshot, path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// The folder at `path` plus two levels below it. Mode only changes colors,
-/// which the frontend applies.
-pub fn build_view(
-    snap: &Snapshot,
-    path: &Path,
-    _mode: ViewMode,
-    ann: Annotate,
-) -> Result<ViewNode> {
+/// The folder at `path` and its direct children (PRD FR-EXP-1).
+pub fn build_view(snap: &Snapshot, path: &Path, ann: Annotate) -> Result<ViewNode> {
     match resolve(snap, path) {
-        Some(Target::Dir(id)) => Ok(dir_view(snap, id, 2, ann)),
+        Some(Target::Dir(id)) => Ok(dir_view(snap, id, ann)),
         _ => Err(Error::NotInSnapshot(path.display().to_string())),
     }
+}
+
+/// At most 12 children of 1% or more of `parent`, largest first, then one tile
+/// for the rest: the merged items plus whatever the folder holds that no child
+/// lists (its own blocks, files beyond the top 20). Shared with the mock.
+pub fn merge_smaller(parent: &ViewNode, mut children: Vec<ViewNode>) -> Vec<ViewNode> {
+    children.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+    let min = parent.size.saturating_mul(MIN_SHARE_PERMILLE) / 1000;
+    let mut shown = Vec::new();
+    let mut merged = Vec::new();
+    // A child that is already a smaller-items tile stands for leftovers, which the
+    // parent's size accounts for.
+    for c in children
+        .into_iter()
+        .filter(|c| c.size > 0 && c.kind != ViewKind::Smaller)
+    {
+        if shown.len() < MAX_TILES && c.size >= min {
+            shown.push(c);
+        } else {
+            merged.push(c);
+        }
+    }
+    let rest = parent
+        .size
+        .saturating_sub(shown.iter().map(|c| c.size).sum());
+    if rest > 0 && (!merged.is_empty() || rest >= min.max(1)) {
+        let name = match merged.len() {
+            0 => "Other files".to_owned(),
+            1 => "1 smaller item".to_owned(),
+            n => format!("{n} smaller items"),
+        };
+        shown.push(ViewNode {
+            id: format!("{}:smaller", parent.id),
+            name,
+            path: parent.path.clone(),
+            size: rest,
+            category: parent.category.clone(),
+            tier: None,
+            rule_id: None,
+            kind: ViewKind::Smaller,
+            file_count: 0,
+            cleanable: merged.iter().map(|c| c.cleanable).sum(),
+            system_managed: false,
+            children: merged,
+        });
+    }
+    shown
 }
 
 /// Levels below the root searched for claimed folders.
@@ -258,98 +303,107 @@ fn add(totals: &mut [CategoryTotal], category: &str, size: u64, folders: u32) {
     }
 }
 
-enum Cand<'a> {
-    Dir(&'a DirNode),
-    File(&'a str, u64),
+/// What the analysis adds per node: cleanable bytes and the system-managed test.
+struct Context<'a> {
+    analysis: &'a Analysis,
+    protected: Protected,
+    library: PathBuf,
 }
 
-impl Cand<'_> {
-    fn size(&self) -> u64 {
-        match self {
-            Cand::Dir(n) => n.size,
-            Cand::File(_, s) => *s,
-        }
+impl Context<'_> {
+    fn cleanable(&self, path: &Path) -> u64 {
+        // ponytail: scans every item per tile; index items by node if views get slow.
+        self.analysis
+            .items
+            .iter()
+            .filter(|i| i.path.starts_with(path))
+            .map(|i| i.size)
+            .sum()
     }
-    fn name(&self) -> &str {
-        match self {
-            Cand::Dir(n) => &n.name,
-            Cand::File(n, _) => n,
-        }
+
+    fn system_managed(&self, path: &Path, cleanable: u64) -> bool {
+        self.protected.is_protected(path)
+            || (cleanable == 0 && path.starts_with(&self.library) && path != self.library)
     }
 }
 
-fn leaf(id: String, name: &str, path: String, size: u64, kind: ViewKind, look: &Look) -> ViewNode {
+fn leaf(id: String, name: &str, path: &Path, size: u64, kind: ViewKind, look: &Look) -> ViewNode {
     ViewNode {
         id,
         name: name.to_owned(),
-        path,
+        path: path.display().to_string(),
         size,
         category: look.category.clone(),
         tier: look.tier,
         rule_id: look.rule_id.clone(),
         kind,
+        file_count: 0,
+        cleanable: 0,
+        system_managed: false,
         children: Vec::new(),
     }
 }
 
-fn dir_view(snap: &Snapshot, id: u32, levels: u8, ann: Annotate) -> ViewNode {
+fn dir_leaf(
+    snap: &Snapshot,
+    id: u32,
+    path: &Path,
+    ann: Annotate,
+    ctx: Option<&Context>,
+) -> ViewNode {
     let node = &snap.nodes[id as usize];
-    let path = dir_path(snap, id);
-    let path_str = path.display().to_string();
-    let look = look(snap, id, ann);
     let mut view = leaf(
         id.to_string(),
         &node.name,
-        path_str.clone(),
+        path,
         node.size,
         ViewKind::Dir,
-        &look,
+        &look(snap, id, ann),
     );
-    if levels == 0 {
-        return view;
+    view.file_count = node.file_count;
+    if let Some(ctx) = ctx {
+        view.cleanable = ctx.cleanable(path);
+        view.system_managed = ctx.system_managed(path, view.cleanable);
     }
+    view
+}
 
-    let mut cands: Vec<Cand> = node
+fn dir_view(snap: &Snapshot, id: u32, ann: Annotate) -> ViewNode {
+    let ctx = ann.map(|(rules, analysis)| {
+        let protect: Vec<String> = rules.protect.iter().map(|p| p.path.clone()).collect();
+        Context {
+            analysis,
+            protected: Protected::new(&snap.meta.root, &protect),
+            library: Path::new(&snap.meta.root).join("Library"),
+        }
+    });
+    let node = &snap.nodes[id as usize];
+    let path = dir_path(snap, id);
+    let mut view = dir_leaf(snap, id, &path, ann, ctx.as_ref());
+    // Listed files take their folder's look: a matched folder's files are matched too.
+    let look = look(snap, id, ann);
+    let children = node
         .children
         .iter()
-        .map(|&c| Cand::Dir(&snap.nodes[c as usize]))
-        .chain(node.top_files.iter().map(|f| Cand::File(&f.name, f.size)))
-        .collect();
-    cands.sort_by(|a, b| b.size().cmp(&a.size()).then_with(|| a.name().cmp(b.name())));
-
-    let min_size = node.size.saturating_mul(MIN_SHARE_PERMILLE) / 1000;
-    let mut shown = 0u64;
-    let mut merged_any = false;
-    for (rank, cand) in cands.iter().enumerate() {
-        if rank >= MAX_CHILDREN || cand.size() < min_size || cand.size() == 0 {
-            merged_any = true;
-            continue;
-        }
-        shown += cand.size();
-        view.children.push(match cand {
-            Cand::Dir(n) => dir_view(snap, n.id, levels - 1, ann),
-            Cand::File(name, size) => leaf(
-                format!("{id}:f:{name}"),
-                name,
-                path.join(name).display().to_string(),
-                *size,
+        .map(|&c| {
+            let child = path.join(&snap.nodes[c as usize].name);
+            dir_leaf(snap, c, &child, ann, ctx.as_ref())
+        })
+        .chain(node.top_files.iter().map(|f| {
+            let file = path.join(&f.name);
+            let mut v = leaf(
+                format!("{id}:f:{}", f.name),
+                &f.name,
+                &file,
+                f.size,
                 ViewKind::File,
                 &look,
-            ),
-        });
-    }
-    // Everything not shown: pruned siblings, files beyond the top 20, and the folder's own blocks.
-    let rest = node.size.saturating_sub(shown);
-    if rest > 0 && (merged_any || rest >= min_size.max(1)) {
-        view.children.push(leaf(
-            format!("{id}:other"),
-            "Other",
-            path_str,
-            rest,
-            ViewKind::Other,
-            &look,
-        ));
-    }
+            );
+            v.cleanable = ctx.as_ref().map_or(0, |c| c.cleanable(&file));
+            v
+        }))
+        .collect();
+    view.children = merge_smaller(&view, children);
     view
 }
 
@@ -382,74 +436,121 @@ mod tests {
     }
 
     fn view(s: &Snapshot, p: &str) -> ViewNode {
-        build_view(s, Path::new(p), ViewMode::Category, None).unwrap()
+        build_view(s, Path::new(p), None).unwrap()
+    }
+
+    fn names(v: &ViewNode) -> Vec<&str> {
+        v.children.iter().map(|c| c.name.as_str()).collect()
+    }
+
+    fn node(name: &str, size: u64) -> ViewNode {
+        ViewNode {
+            id: name.into(),
+            name: name.into(),
+            path: format!("/r/{name}"),
+            size,
+            category: DEFAULT_CATEGORY.into(),
+            tier: None,
+            rule_id: None,
+            kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
+            children: Vec::new(),
+        }
     }
 
     #[test]
-    fn root_plus_two_levels() {
+    fn shows_one_level() {
         let s = snap(|b| {
             b.push_dir(1, "a".into(), 0, NodeFlags::default());
             b.push_dir(2, "b".into(), 0, NodeFlags::default());
-            b.push_dir(3, "c".into(), 0, NodeFlags::default());
-            b.add_file(4, "deep", 1000, 1000, None);
+            b.add_file(3, "deep", 1000, 1000, None);
         });
-        let v = view(&s, "/r");
-        let a = &v.children[0];
-        let b = &a.children[0];
-        assert_eq!((a.name.as_str(), b.name.as_str()), ("a", "b"));
-        assert!(b.children.is_empty(), "third level is cut");
-        assert_eq!(b.size, 1000);
+        assert!(view(&s, "/r").children[0].children.is_empty());
     }
 
     #[test]
-    fn small_children_merge_into_other_and_sizes_add_up() {
+    fn at_most_12_tiles_then_one_smaller_tile() {
         let s = snap(|b| {
-            b.add_file(1, "big", 100_000, 1, None);
-            for i in 0..10 {
-                b.add_file(1, &format!("tiny{i}"), 10, 1, None); // 0.01% each
-            }
-        });
-        let v = view(&s, "/r");
-        let names: Vec<_> = v.children.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["big", "Other"]);
-        assert_eq!(v.children[1].kind, ViewKind::Other);
-        assert_eq!(v.children.iter().map(|c| c.size).sum::<u64>(), v.size);
-    }
-
-    #[test]
-    fn at_most_24_children_beyond_that_merge() {
-        let s = snap(|b| {
-            for i in 0..30u64 {
+            for i in 0..20u64 {
                 b.push_dir(1, format!("d{i:02}"), 0, NodeFlags::default());
                 b.add_file(2, "f", 1000 + i, 1, None);
             }
         });
         let v = view(&s, "/r");
-        assert_eq!(v.children.len(), 25, "24 tiles plus Other");
-        assert_eq!(v.children.last().unwrap().kind, ViewKind::Other);
+        assert_eq!(v.children.len(), 13);
+    }
+
+    #[test]
+    fn the_smaller_tile_lists_what_it_merged() {
+        let s = snap(|b| {
+            for i in 0..20u64 {
+                b.push_dir(1, format!("d{i:02}"), 0, NodeFlags::default());
+                b.add_file(2, "f", 1000 + i, 1, None);
+            }
+        });
+        let smaller = view(&s, "/r").children.pop().unwrap();
+        assert_eq!(
+            (smaller.kind, smaller.name.as_str(), smaller.children.len()),
+            (ViewKind::Smaller, "8 smaller items", 8)
+        );
+    }
+
+    #[test]
+    fn tiles_and_the_smaller_tile_add_up_to_the_folder() {
+        let s = snap(|b| {
+            for i in 0..20u64 {
+                b.push_dir(1, format!("d{i:02}"), 0, NodeFlags::default());
+                b.add_file(2, "f", 1000 + i, 1, None);
+            }
+        });
+        let v = view(&s, "/r");
         assert_eq!(v.children.iter().map(|c| c.size).sum::<u64>(), v.size);
     }
 
     #[test]
-    fn files_beyond_top_twenty_land_in_other() {
+    fn children_under_one_percent_merge() {
+        let s = snap(|b| {
+            b.add_file(1, "big", 100_000, 1, None);
+            b.add_file(1, "tiny", 900, 1, None); // 0.9%
+        });
+        assert_eq!(names(&view(&s, "/r")), ["big", "1 smaller item"]);
+    }
+
+    #[test]
+    fn leftover_bytes_alone_read_as_other_files() {
+        let parent = node("r", 100);
+        let merged = merge_smaller(&parent, vec![node("a", 60), node("b", 30)]);
+        assert_eq!(merged[2].name, "Other files");
+    }
+
+    #[test]
+    fn a_mock_leftover_tile_counts_as_bytes_not_an_item() {
+        let parent = node("r", 100);
+        let leftover = ViewNode {
+            kind: ViewKind::Smaller,
+            ..node("Other", 10)
+        };
+        let merged = merge_smaller(&parent, vec![node("a", 90), leftover]);
+        assert_eq!(
+            names(&ViewNode {
+                children: merged,
+                ..parent
+            }),
+            ["a", "Other files"]
+        );
+    }
+
+    #[test]
+    fn files_beyond_top_twenty_count_in_the_smaller_tile() {
         let s = snap(|b| {
             for i in 0..30u64 {
                 b.add_file(1, &format!("f{i:02}"), 1000, 1, None);
             }
         });
-        let v = view(&s, "/r");
-        let files = v
-            .children
-            .iter()
-            .filter(|c| c.kind == ViewKind::File)
-            .count();
-        assert_eq!(files, 20);
-        let other = v
-            .children
-            .iter()
-            .find(|c| c.kind == ViewKind::Other)
-            .unwrap();
-        assert_eq!(other.size, 10_000);
+        let smaller = view(&s, "/r").children.pop().unwrap();
+        assert_eq!(smaller.size, 18_000, "8 listed plus 10 unlisted files");
     }
 
     #[test]
@@ -460,10 +561,10 @@ mod tests {
             b.add_file(3, "x", 5000, 1, None);
         });
         let v = view(&s, "/r/a");
-        assert_eq!(v.name, "a");
-        assert_eq!(v.path, "/r/a");
-        assert_eq!(v.children[0].path, "/r/a/b");
-        assert_eq!(v.children[0].children[0].path, "/r/a/b/x");
+        assert_eq!(
+            (v.path.as_str(), v.children[0].path.as_str()),
+            ("/r/a", "/r/a/b")
+        );
     }
 
     #[test]
@@ -472,10 +573,7 @@ mod tests {
             b.push_dir(1, "a".into(), 0, NodeFlags::default());
         });
         for p in ["/r/nope", "/other", "/r/a/../a", "/r/../etc", "relative"] {
-            assert!(
-                build_view(&s, Path::new(p), ViewMode::Category, None).is_err(),
-                "{p}"
-            );
+            assert!(build_view(&s, Path::new(p), None).is_err(), "{p}");
             assert!(validated_path(&s, Path::new(p)).is_err(), "{p}");
         }
     }
@@ -491,6 +589,6 @@ mod tests {
             PathBuf::from("/r/a/big.bin")
         );
         assert!(validated_path(&s, Path::new("/r/a/unlisted.bin")).is_err());
-        assert!(build_view(&s, Path::new("/r/a/big.bin"), ViewMode::Category, None).is_err());
+        assert!(build_view(&s, Path::new("/r/a/big.bin"), None).is_err());
     }
 }

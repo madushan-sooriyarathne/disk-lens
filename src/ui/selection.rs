@@ -131,7 +131,7 @@ pub fn blocked_reason(row: &Recommendation) -> Option<&str> {
     }
 }
 
-fn within(path: &str, dir: &str) -> bool {
+pub(super) fn within(path: &str, dir: &str) -> bool {
     path.strip_prefix(dir)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
@@ -318,6 +318,9 @@ mod tests {
             tier: rule.map(|_| Tier::Review),
             rule_id: rule.map(String::from),
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: vec![],
         }
     }

@@ -17,7 +17,7 @@ use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, Snapshot, SnapshotMeta};
 use crate::scanner::{self, ScanOptions, snapshot};
 use crate::state::{AppState, Current};
-use crate::view::{self, CategoryTotal, ViewMode, ViewNode};
+use crate::view::{self, CategoryTotal, ViewNode};
 
 /// System Settings, Privacy & Security, Full Disk Access (PRD 7.8).
 const FDA_SETTINGS: &str =
@@ -124,13 +124,12 @@ fn current(state: &AppState) -> Result<Arc<Current>> {
         .ok_or(Error::NoSnapshot)
 }
 
-/// The folder at `node_path` plus two levels below it.
-pub fn get_view(state: &Arc<AppState>, node_path: String, mode: ViewMode) -> Result<ViewNode> {
+/// The folder at `node_path` and its direct children.
+pub fn get_view(state: &Arc<AppState>, node_path: String) -> Result<ViewNode> {
     let cur = current(state)?;
     view::build_view(
         &cur.snapshot,
         Path::new(&node_path),
-        mode,
         Some((Rules::embedded(), &cur.analysis)),
     )
 }

@@ -6,7 +6,6 @@ use gpui::{
 
 use super::model::{AppModel, Cleanup, Page, Phase};
 use super::{cleanup, screens, shell, theme};
-use crate::view::ViewMode;
 
 actions!(
     disklens,
@@ -199,14 +198,7 @@ impl Render for AppModel {
             )
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| this.toggle_inspector(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
-            .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| {
-                // The v1 cleanup view stands in until Phase 10 replaces ViewMode with dimming.
-                let mode = match this.mode {
-                    ViewMode::Category => ViewMode::Cleanup,
-                    ViewMode::Cleanup => ViewMode::Category,
-                };
-                this.set_mode(mode, cx);
-            }))
+            .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
             // Esc closes the cleanup dialog (not while it runs), then the context
             // menu, then the detail drawer, otherwise goes up one folder.
             .on_action(cx.listener(|this, _: &Back, _, cx| {

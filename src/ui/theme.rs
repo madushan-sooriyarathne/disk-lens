@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
-use crate::view::{ViewMode, ViewNode};
+use crate::view::ViewNode;
 
 pub const SANS: &str = ".SystemUIFont";
 /// SF Mono on macOS; GPUI resolves CoreText's hidden system name (checked in Phase 8).
@@ -298,56 +298,25 @@ pub struct TileColors {
     pub hatch: Option<Hsla>,
 }
 
-pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors {
+pub fn tile_colors(theme: &Theme, node: &ViewNode) -> TileColors {
     let hatch = node.tier.map(|t| match t {
         Tier::Safe => theme.safe,
         Tier::Review => theme.review,
     });
-    match mode {
-        ViewMode::Cleanup => {
-            let (fill, border) = category_colors(theme, FALLBACK_CATEGORY);
-            let tint = node.tier.map(|t| match t {
-                Tier::Safe => theme.safe_tint,
-                Tier::Review => theme.review_tint,
-            });
-            TileColors {
-                fill: tint.unwrap_or(fill),
-                border: hatch.unwrap_or(border),
-                hatch,
-            }
-        }
-        ViewMode::Category => {
-            let (fill, border) = category_colors(theme, &node.category);
-            TileColors {
-                fill,
-                border: hatch.unwrap_or(border),
-                hatch,
-            }
-        }
+    let (fill, border) = category_colors(theme, &node.category);
+    TileColors {
+        fill,
+        border: hatch.unwrap_or(border),
+        hatch,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::ViewKind;
 
     fn hex(v: u32) -> Hsla {
         rgb(v).into()
-    }
-
-    fn node(category: &str, tier: Option<Tier>) -> ViewNode {
-        ViewNode {
-            id: "n".into(),
-            name: "n".into(),
-            path: "/n".into(),
-            size: 1,
-            category: category.into(),
-            tier,
-            rule_id: None,
-            kind: ViewKind::Dir,
-            children: vec![],
-        }
     }
 
     #[test]
@@ -499,33 +468,5 @@ mod tests {
         legend.sort();
         ids.sort();
         assert_eq!(legend, ids);
-    }
-
-    #[test]
-    fn tile_colors_by_mode_and_tier() {
-        let t = Theme::light();
-        let (dev_fill, dev_border) = category_colors(&t, "dev_tools");
-        let (ai_fill, ai_border) = category_colors(&t, "ai_models");
-        let parts = |c: TileColors| (c.fill, c.border, c.hatch);
-
-        let c = tile_colors(&t, &node("ai_models", None), ViewMode::Cleanup);
-        assert_eq!(parts(c), (dev_fill, dev_border, None));
-        let c = tile_colors(&t, &node("ai_models", Some(Tier::Safe)), ViewMode::Cleanup);
-        assert_eq!(parts(c), (t.safe_tint, t.safe, Some(t.safe)));
-        let c = tile_colors(
-            &t,
-            &node("ai_models", Some(Tier::Review)),
-            ViewMode::Cleanup,
-        );
-        assert_eq!(parts(c), (t.review_tint, t.review, Some(t.review)));
-
-        let c = tile_colors(&t, &node("ai_models", None), ViewMode::Category);
-        assert_eq!(parts(c), (ai_fill, ai_border, None));
-        let c = tile_colors(
-            &t,
-            &node("ai_models", Some(Tier::Review)),
-            ViewMode::Category,
-        );
-        assert_eq!(parts(c), (ai_fill, t.review, Some(t.review)));
     }
 }

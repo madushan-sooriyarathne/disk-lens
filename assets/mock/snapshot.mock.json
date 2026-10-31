@@ -33,6 +33,7 @@
     "tier": null,
     "rule_id": null,
     "kind": "Dir",
+    "file_count": 612480,
     "children": [
      {
       "id": "2",
@@ -108,7 +109,7 @@
       "category": "code_projects",
       "tier": null,
       "rule_id": null,
-      "kind": "Other",
+      "kind": "Smaller",
       "children": []
      }
     ]
@@ -221,7 +222,7 @@
       "category": "package_caches",
       "tier": null,
       "rule_id": null,
-      "kind": "Other",
+      "kind": "Smaller",
       "children": []
      }
     ]
@@ -266,7 +267,7 @@
       "category": "dev_tools",
       "tier": null,
       "rule_id": null,
-      "kind": "Other",
+      "kind": "Smaller",
       "children": []
      }
     ]
@@ -311,7 +312,7 @@
       "category": "documents_media",
       "tier": null,
       "rule_id": null,
-      "kind": "Other",
+      "kind": "Smaller",
       "children": []
      }
     ]
@@ -411,7 +412,7 @@
       "category": "package_caches",
       "tier": null,
       "rule_id": null,
-      "kind": "Other",
+      "kind": "Smaller",
       "children": []
      }
     ]
@@ -435,7 +436,7 @@
     "category": "dev_tools",
     "tier": null,
     "rule_id": null,
-    "kind": "Other",
+    "kind": "Smaller",
     "children": []
    }
   ]

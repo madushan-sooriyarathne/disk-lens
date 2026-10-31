@@ -20,7 +20,7 @@ use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
+use crate::view::{CategoryTotal, ViewKind, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
@@ -102,7 +102,6 @@ pub struct AppModel {
     pub full_disk_access: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
-    pub mode: ViewMode,
     /// Path of the scan root, as the snapshot reports it.
     pub root_path: String,
     /// Folder the explorer shows.
@@ -112,6 +111,8 @@ pub struct AppModel {
     pub page: Page,
     pub sidebar_visible: bool,
     pub inspector_visible: bool,
+    /// Highlight Cleanable (PRD FR-EXP-7): tiles with nothing to clean are dimmed.
+    pub highlight_cleanable: bool,
     /// Accessibility display settings, reread whenever the window becomes active.
     pub reduce_motion: bool,
     pub reduce_transparency: bool,
@@ -206,8 +207,8 @@ fn is_stale(now: i64, scanned_at: i64) -> bool {
 /// Takes `size` off every node on the way to `path` and drops the node at it, so the treemap
 /// matches the disk before the rescan lands.
 fn subtract(node: &mut ViewNode, path: &str, size: u64) {
-    // "Other" carries its folder's path but only stands for leftovers.
-    if node.kind == ViewKind::Other || !is_within(path, &node.path) {
+    // The smaller-items tile carries its folder's path; only its children have their own.
+    if node.kind == ViewKind::Smaller || !is_within(path, &node.path) {
         return;
     }
     node.size = node.size.saturating_sub(size);
@@ -311,13 +312,13 @@ impl AppModel {
             scan: None,
             full_disk_access: false,
             error: None,
-            mode: ViewMode::Category,
             root_path: String::new(),
             path: String::new(),
             forward: Vec::new(),
             page: Page::Overview,
             sidebar_visible: true,
             inspector_visible: false,
+            highlight_cleanable: false,
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
@@ -448,7 +449,6 @@ impl AppModel {
     fn enter(&mut self, meta: SnapshotMeta, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
-        let mode = self.mode;
         let first = self.meta.is_none();
         let candidates: Vec<String> = if first {
             vec![meta.root.clone()]
@@ -465,13 +465,13 @@ impl AppModel {
             move |s| {
                 let mut view = Err(Error::NotInSnapshot(root.clone()));
                 for candidate in &candidates {
-                    view = s.view(candidate, mode);
+                    view = s.view(candidate);
                     if view.is_ok() {
                         break;
                     }
                 }
                 // The explorer may sit deeper than the root; the Overview always lists the root.
-                let largest = stats::largest_folders(&s.view(&root, mode)?, 5);
+                let largest = stats::largest_folders(&s.view(&root)?, 5);
                 Ok::<_, Error>((
                     view?,
                     s.recommendations()?,
@@ -662,15 +662,15 @@ impl AppModel {
         self.source.cancel_scan();
     }
 
-    /// Loads the view of `path` in `mode`; the model changes once it arrives.
-    fn load_view(&mut self, path: String, mode: ViewMode, cx: &mut Context<Self>) {
+    /// Loads the view of `path`; the model changes once it arrives.
+    fn load_view(&mut self, path: String, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
         let wanted = path.clone();
         off_thread(
             &self.source,
             cx,
-            move |s| s.view(&wanted, mode),
+            move |s| s.view(&wanted),
             move |this, loaded, _| {
                 if this.view_seq != seq {
                     return;
@@ -678,7 +678,6 @@ impl AppModel {
                 match loaded {
                     Ok(view) => {
                         this.path = path;
-                        this.mode = mode;
                         this.view = Some(view);
                         this.hovered = None;
                     }
@@ -691,21 +690,21 @@ impl AppModel {
     /// Shows the folder at `path` in the explorer.
     pub fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
         self.forward.clear();
-        self.load_view(path, self.mode, cx);
+        self.load_view(path, cx);
     }
 
     /// Goes up one folder, remembered for Forward; does nothing at the scan root.
     pub fn up(&mut self, cx: &mut Context<Self>) {
         if self.path != self.root_path {
             self.forward.push(self.path.clone());
-            self.load_view(parent_of(&self.path).to_owned(), self.mode, cx);
+            self.load_view(parent_of(&self.path).to_owned(), cx);
         }
     }
 
     /// Reopens the folder the last Back left.
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.forward.pop() {
-            self.load_view(path, self.mode, cx);
+            self.load_view(path, cx);
         }
     }
 
@@ -730,8 +729,10 @@ impl AppModel {
         cx.notify();
     }
 
-    pub fn set_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
-        self.load_view(self.path.clone(), mode, cx);
+    /// Dims tiles with nothing to clean (PRD FR-EXP-7).
+    pub fn toggle_highlight(&mut self, cx: &mut Context<Self>) {
+        self.highlight_cleanable = !self.highlight_cleanable;
+        cx.notify();
     }
 
     pub fn hover(&mut self, node_id: Option<String>, cx: &mut Context<Self>) {
@@ -1364,17 +1365,6 @@ mod tests {
     }
 
     #[gpui::test]
-    fn set_mode_reloads_the_same_folder(cx: &mut TestAppContext) {
-        let (model, cx) = setup(cx, false);
-        model.update(cx, |m, cx| m.set_mode(ViewMode::Cleanup, cx));
-        cx.run_until_parked();
-        model.read_with(cx, |m, _| {
-            assert_eq!(m.mode, ViewMode::Cleanup);
-            assert_eq!(m.path, m.root_path);
-        });
-    }
-
-    #[gpui::test]
     fn hover_only_sets_the_id(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, cx| m.hover(Some("n1".into()), cx));
@@ -1680,6 +1670,9 @@ mod tests {
             tier: None,
             rule_id: None,
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children,
         }
     }

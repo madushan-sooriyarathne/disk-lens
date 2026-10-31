@@ -334,12 +334,15 @@ mod tests {
             tier: None,
             rule_id: None,
             kind,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: Vec::new(),
         };
         let root = ViewNode {
             children: vec![
                 leaf("big.iso", ViewKind::File, 9 * GB),
-                leaf("Other", ViewKind::Other, 8 * GB),
+                leaf("Other", ViewKind::Smaller, 8 * GB),
                 leaf("Projects", ViewKind::Dir, GB),
             ],
             ..leaf("~", ViewKind::Dir, 18 * GB)
