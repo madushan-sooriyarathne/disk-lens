@@ -17,8 +17,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
-| 10 Explore and inspector | Built, QA passed, awaiting review | v2, PRD sections 13.4.5 and 13.4.7. Branch `feat/phase-10-explore` |
-| 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
+| 10 Explore and inspector | Merged | v2, PRD sections 13.4.5 and 13.4.7 |
+| 11 Recommended and cleanup sheet | Built, awaiting review | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10. Branch `feat/phase-11-recommended`; `docs/QA.md` Phase 11 still to run |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Not started | v2, PRD section 13.4.11 (free) |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 10, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (429 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (458 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -179,6 +179,29 @@ Last full gate run on macOS (Phase 10, 2026-10-31): `cargo fmt --check`, `cargo 
 - Open:
   - Screenshots of the real home scan at the minimum window size are not saved in `docs/QA.md` yet (PRD V2-G2 asks for them).
   - Free disk space ran out once during this phase (`target/debug/incremental` had reached 4.3 GB); it was cleared, and the build cache will grow back.
+
+**Phase 11: Recommended, staging queue and cleanup sheet**
+- Built:
+  - `recommendations.rs`: the Recommended page (tier pills and totals, 52 pt rows with a selected state, the bottom fade, the footer queue summary with Select Safe Items) and the row context menu. `keymap.rs` binds j/k, the arrows, Space and Return in the list's own context; `AppModel::move_row`, `stage_row` and `open_row` act on them.
+  - `inspector.rs`: the recommendation panel (the v1 drawer content) and the queue panel. The drawer is gone. `AppModel::show_row` opens Recommended with a row; Show Recommendation and "Recommended inside" use it.
+  - The queue: `selection::queue_groups`, `AppModel::queue_open` and `toggle_queue`, the toolbar queue button and View › Show Queue on every page. `shell::clean_button` is shared by the toolbar and the queue.
+  - Export Cleanup Script… (⌘E, the queue, the row menu) through the save panel, and Copy as Shell Script, both from one builder (`queue_script`).
+  - `cleanup.rs`: one sheet under the toolbar for confirm, progress and results, sliding down and back up on the `NAV` spring (cross-fade under Reduce Motion); `sheet_exit` keeps the closed sheet only while it slides away.
+  - `platform::local_snapshot_count` (`/usr/bin/tmutil listlocalsnapshots /` through the Runner), `backend::free_space` (available minus purgeable) and `cleanup::held_by_snapshots` for the results line.
+- Decisions (2026-10-31):
+  - The snapshot count is pulled forward from Phase 17; the results line links nowhere until Phase 17 builds the inspector.
+  - Badges wait for Phase 14, which adds their data.
+  - The row menu's script covers the whole queue, like the File menu and the queue panel.
+  - The queue opens in the inspector on every page, the Overview included.
+  - The queue stays the selection: never saved (S-09) and carried over by `(rule_id, path)`.
+  - The follow-up rescan starts when the cleanup finishes, so the results show "Updating results…"; Done only closes the sheet and clears the queue.
+  - A single-item row gets one Reveal in Finder button in the inspector; a row with several items gets one Reveal per item.
+  - The confirm view lists one line per row with its methods (a command shows its program); paths are in the queue panel and the script.
+  - The mock's script uses the mock's scan time, so two exports of one plan are equal.
+- Open:
+  - `docs/QA.md`, Phase 11: every check, including the mockup comparisons of frames 3, 4 and 6 in light and dark. Screen capture was not available to the agent, so nothing in this phase was checked in the native window yet.
+  - The held line needs a machine with local snapshots and a real cleanup.
+  - Switching to Recommended does not move keyboard focus into the list; click a row or Tab to it first.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
