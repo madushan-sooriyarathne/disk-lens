@@ -3,9 +3,9 @@
 use std::collections::HashSet;
 
 use gpui::{
-    AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight, Role, ScrollHandle,
-    SharedString, Stateful, Toggled, Window, div, linear_color_stop, linear_gradient, prelude::*,
-    px, svg,
+    AnyElement, AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, ScrollHandle, SharedString, Stateful, Toggled, Window,
+    anchored, deferred, div, linear_color_stop, linear_gradient, prelude::*, px, svg,
 };
 use gpui_component::button::Button;
 use gpui_component::{Sizable, Size};
@@ -24,6 +24,15 @@ use crate::recommend::model::{Recommendation, Tier};
 pub struct PanelState {
     /// The list, so j/k can bring the focused row into view.
     pub(super) scroll: ScrollHandle,
+    /// The row context menu: pointer position in window coordinates, and the row.
+    menu: Option<(Point<Pixels>, String)>,
+}
+
+impl PanelState {
+    /// Closes the row menu; true if one was open (Esc closes it first).
+    pub fn close_menu(&mut self) -> bool {
+        self.menu.take().is_some()
+    }
 }
 
 const TIERS: [Tier; 2] = [Tier::Safe, Tier::Review];
@@ -156,6 +165,7 @@ pub fn render(
 
     page.child(list)
         .child(footer(&t, chosen.selected, chosen.selected_rows, cx))
+        .children(context_menu(model, t, cx))
 }
 
 fn tier_label(tier: Tier) -> &'static str {
@@ -361,12 +371,22 @@ fn row(
             .flex_none()
             .text_color(t.tertiary),
     )
-    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-        // Clicking a row hands the keyboard to the list.
-        window.focus(&this.list_focus, cx);
-        this.focus_row(Some(open_id.clone()), cx);
-        this.inspector_visible = true;
-    }));
+    .on_click({
+        let id = open_id.clone();
+        cx.listener(move |this, _: &ClickEvent, window, cx| {
+            // Clicking a row hands the keyboard to the list.
+            window.focus(&this.list_focus, cx);
+            this.focus_row(Some(id.clone()), cx);
+            this.inspector_visible = true;
+        })
+    })
+    .on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+            this.panel.menu = Some((e.position, open_id.clone()));
+            this.focus_row(Some(open_id.clone()), cx);
+        }),
+    );
     // The hairline sits outside the rounded row so it stays straight.
     div()
         .border_t_1()
@@ -401,6 +421,106 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
                 .with_size(Size::Size(px(CONTROL_HEIGHT)))
                 .on_click(cx.listener(|m, _, _, cx| m.select_safe(cx))),
         )
+}
+
+/// The row's right-click menu (PRD FR-REC-3): stage or unstage it, reveal it, and
+/// the queue's script. Closed by any outside press.
+fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Option<AnyElement> {
+    let (pos, row_id) = model.panel.menu.as_ref()?;
+    let row = model.recommendations.iter().find(|r| &r.row_id == row_id)?;
+    let staged = row_state(row, &model.selected) == RowState::All;
+    let can_stage = blocked_reason(row).is_none();
+    let queue_empty = model.selected.is_empty();
+    let first = row.items.first().map(|i| i.path.clone());
+    let id = row.row_id.clone();
+
+    let item = |key: &'static str, label: &'static str, enabled: bool| {
+        div()
+            .id(key)
+            .rounded(px(5.))
+            .px_2()
+            .py(px(3.))
+            .text_size(px(theme::T_BODY))
+            .when(enabled, |d| {
+                d.cursor_pointer()
+                    .hover(move |s| s.bg(t.accent).text_color(gpui::white()))
+            })
+            .when(!enabled, |d| d.text_color(t.tertiary))
+            .child(label)
+    };
+    let panel = div()
+        .occlude()
+        .min_w(px(220.))
+        .rounded(px(theme::R_CONTROL))
+        .border_1()
+        .border_color(t.separator)
+        .bg(t.popover)
+        .text_color(t.label)
+        .font_family(theme::SANS)
+        .shadow_lg()
+        .p_1()
+        .on_mouse_down_out(cx.listener(|m, _, _, cx| {
+            m.panel.menu = None;
+            cx.notify();
+        }))
+        .when(can_stage, |d| {
+            d.child(
+                item(
+                    "row-menu-stage",
+                    if staged {
+                        "Remove from Queue"
+                    } else {
+                        "Add to Queue"
+                    },
+                    true,
+                )
+                .on_click(cx.listener(move |m, _, _, cx| {
+                    m.panel.menu = None;
+                    m.toggle_row(&id, cx);
+                })),
+            )
+        })
+        .when_some(first, |d, path| {
+            d.child(
+                item("row-menu-reveal", "Reveal in Finder", true).on_click(cx.listener(
+                    move |m, _, _, cx| {
+                        m.panel.menu = None;
+                        m.reveal(path.clone(), cx);
+                        cx.notify();
+                    },
+                )),
+            )
+        })
+        .child(div().my_1().mx_2().h(px(1.)).bg(t.separator))
+        .child(
+            item("row-menu-export", "Export Cleanup Script…", !queue_empty).when(
+                !queue_empty,
+                |d| {
+                    d.on_click(cx.listener(|m, _, _, cx| {
+                        m.panel.menu = None;
+                        m.export_script(cx);
+                    }))
+                },
+            ),
+        )
+        .child(
+            item("row-menu-copy", "Copy to Clipboard", !queue_empty).when(!queue_empty, |d| {
+                d.on_click(cx.listener(|m, _, _, cx| {
+                    m.panel.menu = None;
+                    m.copy_script(cx);
+                }))
+            }),
+        );
+    Some(
+        deferred(
+            anchored()
+                .position(*pos)
+                .snap_to_window_with_margin(px(8.))
+                .child(panel),
+        )
+        .priority(1)
+        .into_any_element(),
+    )
 }
 
 #[cfg(test)]

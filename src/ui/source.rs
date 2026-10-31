@@ -451,9 +451,10 @@ impl Source {
     pub fn export_script(&self, plan_id: &str) -> Result<String> {
         match self {
             Self::Live(state) => backend::export_script(state, plan_id),
+            // The mock's own scan time, so two exports of one plan are byte-equal.
             Self::Mock(m) => Ok(script::render(
                 &m.stored_plan(plan_id)?,
-                crate::cleanup::audit::now_ms() as i64 / 1000,
+                m.file.meta.scanned_at,
             )),
         }
     }

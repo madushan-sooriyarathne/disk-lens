@@ -464,12 +464,25 @@ fn queue(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> AnyElement {
         .flex_col()
         .gap_2()
         .child(
-            Button::new("queue-copy")
-                .label("Copy as Shell Script")
-                .w_full()
-                .with_size(Size::Size(px(CONTROL_HEIGHT)))
-                .disabled(empty)
-                .on_click(cx.listener(|m, _, _, cx| m.copy_script(cx))),
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("queue-copy")
+                        .label("Copy as Shell Script")
+                        .flex_1()
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.copy_script(cx))),
+                )
+                .child(
+                    Button::new("queue-export")
+                        .label("Export…")
+                        .flex_1()
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.export_script(cx))),
+                ),
         )
         .child(
             div()

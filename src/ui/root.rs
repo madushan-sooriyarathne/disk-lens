@@ -79,8 +79,7 @@ pub fn set_menus(cx: &mut App) {
         ]),
         Menu::new("File").items([
             MenuItem::action("Rescan", Rescan),
-            // The save panel arrives with the queue (Phase 11).
-            later("Export Cleanup Script…", Box::new(ExportScript)),
+            MenuItem::action("Export Cleanup Script…", ExportScript),
             MenuItem::action("Reveal in Finder", RevealInFinder),
         ]),
         Menu::new("Edit").items([
@@ -216,6 +215,7 @@ impl Render for AppModel {
             )
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| this.toggle_inspector(cx)))
             .on_action(cx.listener(|this, _: &ShowQueue, _, cx| this.toggle_queue(cx)))
+            .on_action(cx.listener(|this, _: &ExportScript, _, cx| this.export_script(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
             // Esc closes the cleanup dialog (not while it runs), then the context
@@ -226,7 +226,7 @@ impl Render for AppModel {
                     if !matches!(stage, Cleanup::Running { .. }) {
                         this.close_cleanup(cx);
                     }
-                } else if this.explorer.close_menu() {
+                } else if this.explorer.close_menu() || this.panel.close_menu() {
                     cx.notify();
                 } else if this.queue_open {
                     this.queue_open = false;

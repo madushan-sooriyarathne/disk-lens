@@ -1280,8 +1280,13 @@ impl AppModel {
         }
     }
 
-    /// "Copy script": the selection's plan as a bash script on the clipboard.
-    pub fn copy_script(&mut self, cx: &mut Context<Self>) {
+    /// Builds the queue's plan and its script off the UI thread, then hands the script
+    /// to `then`. Copy and Export share it, so both match `export_script` (FR-Q-4).
+    fn queue_script(
+        &mut self,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, String, &mut Context<Self>) + 'static,
+    ) {
         if self.selected.is_empty() {
             return;
         }
@@ -1294,13 +1299,47 @@ impl AppModel {
                 s.export_script(&plan.plan_id)
             },
             |this, script, cx| match script {
-                Ok(script) => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(script));
-                    this.show_toast("Cleanup script copied to the clipboard".into(), cx);
-                }
+                Ok(script) => then(this, script, cx),
                 Err(e) => this.show_toast(format!("Could not export the script: {e}"), cx),
             },
         );
+    }
+
+    /// Copy as Shell Script: the queue's script on the clipboard.
+    pub fn copy_script(&mut self, cx: &mut Context<Self>) {
+        self.queue_script(cx, |this, script, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(script));
+            this.show_toast("Cleanup script copied to the clipboard".into(), cx);
+        });
+    }
+
+    /// Export Cleanup Script…: the queue's script, saved where the save panel says.
+    pub fn export_script(&mut self, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let dir = home
+            .map(|h| h.join("Downloads"))
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(|| std::path::PathBuf::from(&self.root_path));
+        self.queue_script(cx, move |_, script, cx| {
+            let picked = cx.prompt_for_new_path(&dir, Some("disklens-cleanup.sh"));
+            cx.spawn(async move |this, cx| {
+                let saved = match picked.await {
+                    Ok(Ok(Some(path))) => std::fs::write(&path, script)
+                        .map_err(|e| format!("{}: {e}", path.display())),
+                    Ok(Ok(None)) | Err(_) => return,
+                    Ok(Err(e)) => Err(e.to_string()),
+                };
+                let text = match saved {
+                    Ok(()) => "Cleanup script saved".to_owned(),
+                    Err(e) => {
+                        tracing::warn!("could not save the cleanup script: {e}");
+                        "Could not save the script".to_owned()
+                    }
+                };
+                this.update(cx, |m, cx| m.show_toast(text, cx)).ok();
+            })
+            .detach();
+        });
     }
 
     fn show_toast(&mut self, text: String, cx: &mut Context<Self>) {
@@ -2466,6 +2505,51 @@ mod tests {
             };
             assert_eq!((*permanent, plan.trash_total), (true, 0));
         });
+    }
+
+    /// What `export_script` gives for the current queue.
+    fn expected_script(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        model.read_with(cx, |m, _| {
+            let plan = m
+                .source
+                .build_plan(&m.snapshot_id(), m.selected_ids(), false)
+                .unwrap();
+            m.source.export_script(&plan.plan_id).unwrap()
+        })
+    }
+
+    #[gpui::test]
+    fn copy_as_shell_script_matches_export_script(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.copy_script(cx));
+        cx.run_until_parked();
+        let copied = cx.read_from_clipboard().and_then(|c| c.text());
+        assert_eq!(copied, Some(expected_script(&model, cx)));
+    }
+
+    #[gpui::test]
+    fn the_exported_file_matches_export_script(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cleanup.sh");
+        model.update(cx, |m, cx| m.export_script(cx));
+        cx.run_until_parked();
+        cx.simulate_new_path_selection(|_| Some(path.clone()));
+        cx.run_until_parked();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            expected_script(&model, cx)
+        );
+    }
+
+    #[gpui::test]
+    fn a_cancelled_save_panel_writes_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.export_script(cx));
+        cx.run_until_parked();
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.toast.is_none()));
     }
 
     #[gpui::test]
