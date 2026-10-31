@@ -205,11 +205,12 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
 
 **Phase 12: Onboarding**
 - Built:
-  - `onboarding.rs`: Welcome, Full Disk Access and First scan in one card with a page indicator (`Phase::Onboarding(Step)`). It shows when no last snapshot loads and `onboarding_done` is false.
+  - `onboarding.rs`: Welcome, Full Disk Access and First scan (`Phase::Onboarding(Step)`), centred on the window over a warm gradient from the top and film grain (`assets/onboarding/noise.png` from `scripts/make-noise.py`), with the page indicator at the bottom. It shows when no last snapshot loads and `onboarding_done` is false.
+  - `fda_preview.rs`: a drawn copy of the macOS 26 Full Disk Access pane (from the user's screenshot) with DiskLens switching on, in light or dark with the app. The other rows are neutral placeholders, so no other app's name or icon is shown. In a short window the pane is cropped below the DiskLens row.
   - The access step checks the probe at once and every 500 ms (`ACCESS_POLL`) while it is on screen, and on window activation; a grant shows a check mark and moves on after 400 ms. Leaving the step drops the poll.
   - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. During onboarding the window moves to the right half of its screen and returns when the step ends (`chrome::dock_right`, `platform/window.rs`, through the NSWindow behind GPUI's AppKit handle).
-  - Drag card: a looping toggle (still with Reduce Motion) and, when running from a bundle, the app icon as an AppKit drag source carrying the bundle URL (`platform/drag.rs`). Show DiskLens in Finder is always there as the fallback.
-  - First scan: `category::Live` tallies bytes per category during the walk (path, marker in the folder, media extension); `ScanEvent::Progress` carries the totals, and the first-scan views list the six categories filling in. The exact totals replace them at finish.
+  - Drag card: the app icon as an AppKit drag source carrying the bundle URL (`platform/drag.rs`; under `cargo run`, the binary), with Show in Finder as the fallback.
+  - First scan: `category::Live` tallies bytes per category during the walk (path, marker in the folder, media extension); `ScanEvent::Progress` carries the totals. The step shows the bytes so far large, a stacked category bar and a legend. The exact totals replace them at finish.
   - Full Disk Access checks go through the `platform::Access` trait; `FakeAccess` records paths, and a test proves the onboarding probes never touch Desktop, Documents or Downloads.
   - `DISKLENS_MOCK=onboarding` starts the mock as a first launch; access is granted 6 s after Open System Settings.
 - Decisions (2026-10-31):
@@ -218,6 +219,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
   - The spike runs on this Mac (macOS 26.6) with a fresh account; macOS 13, 14 and 15 are recorded as untested.
   - Onboarding shows only without a last snapshot, so an upgraded v1 user with a snapshot skips it. Continue Without no longer marks it done; the first finished scan does, from onboarding or the idle screen.
   - Cancel during the first scan goes to the idle screen; the next launch starts again at Welcome.
+  - Redesign after the first review (2026-11-01): no card, content on the window like Raycast's onboarding; the animated toggle became the drawn System Settings pane; the drag icon is always shown.
 - Open:
   - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
   - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.

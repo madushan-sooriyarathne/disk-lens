@@ -150,10 +150,13 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance, t
 
 Run with `DISKLENS_MOCK=onboarding cargo run` (access is granted 6 s after Open System Settings), in light and dark appearance.
 
-- [ ] Welcome: app icon, "Welcome to DiskLens", the three points, Continue; the page indicator shows step 1. VoiceOver reads "Step 1 of 3".
-- [ ] Full Disk Access: Open System Settings moves the window to the right half of its screen; within about a second of the simulated grant the check mark shows and the first scan starts without clicking DiskLens; the window returns to its frame. With Reduce Motion on, the toggle in the card is still.
+- [ ] Backdrop: the warm glow at the top is a hint, not a wash; the grain is just visible, in light and dark. Content is centred with no card; the page dots sit at the bottom.
+- [ ] Welcome: app icon, "Welcome to DiskLens", the subtitle, three feature rows, Continue; VoiceOver reads "Step 1 of 3".
+- [ ] Full Disk Access: the System Settings pane matches the real one in the current appearance (capsule, title, description, rows, switches) and DiskLens's switch turns on in a loop (still with Reduce Motion). At 960×640 the pane is cropped below the DiskLens row and nothing overlaps the page dots.
+- [ ] Open System Settings moves the window to the right half of its screen; within about a second of the simulated grant "Full Disk Access is on" shows and the first scan starts without clicking DiskLens; the window returns to its frame.
+- [ ] The DiskLens card: dragging the icon starts a drag of the app (under `cargo run`, the binary); Show in Finder selects it in Finder.
 - [ ] Continue Without goes straight to the first scan.
-- [ ] First scan: files and bytes grow, and the six category rows fill in. Cancel goes to the idle screen. Quit and relaunch with the same mode: Welcome again.
+- [ ] First scan: the large byte count and file count grow, the stacked bar and the legend fill in. Cancel goes to the idle screen. Quit and relaunch with the same mode: Welcome again.
 - [ ] Let a first scan finish: the Overview appears. With the live app, relaunch: no onboarding (`settings.json` has `"onboarding_done": true`).
 - [ ] Keyboard: Tab reaches every button; Return on a focused button activates it.
 
