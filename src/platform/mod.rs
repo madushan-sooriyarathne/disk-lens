@@ -12,7 +12,9 @@ use std::time::Duration;
 use wait_timeout::ChildExt;
 
 mod quick_look;
+mod snapshots;
 pub use quick_look::quick_look;
+pub use snapshots::local_snapshot_count;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Proc {
