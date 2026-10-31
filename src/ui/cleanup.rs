@@ -4,7 +4,7 @@
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, ClickEvent, Context, Div, FontWeight, Role, Window,
-    deferred, div, prelude::*, px, relative,
+    canvas, deferred, div, prelude::*, px, relative,
 };
 
 use super::chrome::{SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
@@ -18,8 +18,10 @@ use super::theme::{self, Theme};
 use crate::cleanup::model::{CleanupPlan, CleanupSummary, PlannedAction, PlannedMethod};
 
 const WIDTH: f32 = 600.;
-/// How far the sheet travels down out of the toolbar; the rest of it starts hidden behind it.
+/// The sheet's travel before its height is first measured.
 const SLIDE: f32 = 480.;
+/// Extra travel so the shadow under the sheet is hidden too.
+const SHADOW: f32 = 32.;
 
 /// The sheet for the model's cleanup stage, or the one sliding away after a close.
 pub fn render(
@@ -61,13 +63,32 @@ pub fn render(
         .size_full()
         .bg(t.scrim)
         .with_animation(id, animation.clone(), move |d, p| d.opacity(shown(p)));
-    let sheet = sheet.with_animation(id, animation, move |d, p| {
-        if moves {
-            d.top(px(-(1. - shown(p)) * SLIDE))
-        } else {
-            d.opacity(shown(p))
-        }
-    });
+    // The sheet travels its own height, measured as it paints, so it ends fully behind
+    // the toolbar whatever its content; the first frame uses the last measurement.
+    let measured = model.sheet_height.clone();
+    let height = model.sheet_height.clone();
+    let sheet = sheet
+        .child(
+            canvas(
+                move |bounds, _, _| measured.set(f32::from(bounds.size.height)),
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
+        .with_animation(id, animation, move |d, p| {
+            if moves {
+                let travel = match height.get() {
+                    h if h > 0. => h,
+                    _ => SLIDE,
+                } + SHADOW;
+                d.top(px(-(1. - shown(p)) * travel))
+            } else {
+                d.opacity(shown(p))
+            }
+        });
     Some(
         deferred(
             div()

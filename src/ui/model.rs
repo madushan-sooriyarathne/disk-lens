@@ -1,7 +1,9 @@
 //! App state and actions: scan phase, explorer path and mode, recommendations,
 //! selection and the row in the inspector. Views read the public fields and call the methods.
 
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
@@ -149,6 +151,8 @@ pub struct AppModel {
     pub sheet_exit: Option<Cleanup>,
     /// Bumped per sheet open and close, so each one plays its animation.
     pub sheet_seq: u64,
+    /// The sheet's last painted height: how far it slides (0 until first painted).
+    pub sheet_height: Rc<Cell<f32>>,
     /// Free space right before the running cleanup, to tell what it freed.
     free_before: Option<u64>,
     /// Short notice at the bottom of the window ("Script copied").
@@ -373,6 +377,7 @@ impl AppModel {
             cleanup: None,
             sheet_exit: None,
             sheet_seq: 0,
+            sheet_height: Rc::default(),
             free_before: None,
             toast: None,
             focus_handle,
