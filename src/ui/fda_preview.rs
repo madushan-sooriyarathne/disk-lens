@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt, AnyElement, Div, FontWeight, Hsla, Image, IntoElement, ParentElement,
-    Styled, div, img, px, rgb, rgba,
+    Styled, Svg, div, img, prelude::*, px, rgb, rgba, svg,
 };
 
 use super::motion;
@@ -80,9 +80,17 @@ fn palette(t: &Theme) -> Palette {
     }
 }
 
-/// Placeholder rows around DiskLens: icon tint, name width, toggle on.
-const ABOVE: [(u32, f32, bool); 2] = [(0x8e8e93, 92., false), (0x5e5ce6, 128., true)];
-const BELOW: [(u32, f32, bool); 2] = [(0x30b0c7, 104., false), (0xff9f0a, 76., true)];
+/// Where the DiskLens row ends, from the pane's top: the onboarding step keeps this
+/// much in view and fades the rest.
+pub const DISKLENS_BOTTOM: f32 = 176.;
+
+/// Placeholder rows under DiskLens: icon tint, name width, toggle on. DiskLens comes
+/// first, so it stays in view when the onboarding step crops the pane.
+const BELOW: [(u32, f32, bool); 3] = [
+    (0x5e5ce6, 128., true),
+    (0x30b0c7, 104., false),
+    (0xff9f0a, 76., true),
+];
 
 pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
     let p = palette(t);
@@ -94,17 +102,16 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
             div()
                 .flex()
                 .items_center()
-                .h(px(28.))
-                .px(px(10.))
-                .gap(px(10.))
+                .h(px(34.))
+                .px(px(12.))
+                .gap(px(12.))
                 .rounded_full()
                 .bg(p.capsule)
                 .border_1()
                 .border_color(p.capsule_border)
-                .text_color(p.secondary)
-                .child("‹")
-                .child(div().w(px(1.)).h(px(14.)).bg(p.capsule_border))
-                .child("›"),
+                .child(chevron("back", p.label))
+                .child(div().w(px(1.)).h(px(16.)).bg(p.capsule_border))
+                .child(chevron("fwd", p.secondary)),
         )
         .child(
             div()
@@ -113,9 +120,10 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
                 .text_color(p.label)
                 .child("Full Disk Access"),
         );
-    let placeholder = |(tint, name, on): (u32, f32, bool)| {
+    let placeholder = |first: bool, (tint, name, on): (u32, f32, bool)| {
         row(
             &p,
+            first,
             div()
                 .size(px(ICON))
                 .rounded(px(5.))
@@ -146,6 +154,7 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
     };
     let disklens = row(
         &p,
+        true,
         img(icon).size(px(ICON)).into_any_element(),
         div()
             .text_color(p.label)
@@ -164,7 +173,9 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
         .child(
             div()
                 .px(px(14.))
-                .py(px(10.))
+                .py(px(12.))
+                .border_b_1()
+                .border_color(p.separator)
                 .text_size(px(12.))
                 .line_height(px(16.))
                 .text_color(p.secondary)
@@ -174,9 +185,8 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
                      users on this Mac.",
                 ),
         )
-        .children(ABOVE.map(placeholder))
         .child(disklens)
-        .children(BELOW.map(placeholder));
+        .children(BELOW.map(|r| placeholder(false, r)));
     div()
         .w(px(WIDTH))
         .flex()
@@ -194,26 +204,40 @@ pub fn render(t: &Theme, icon: Arc<Image>, reduce_motion: bool) -> Div {
         .child(group)
 }
 
-/// One list row: icon, name and toggle, with the separator above it.
-fn row(p: &Palette, icon: AnyElement, name: AnyElement, toggle: AnyElement) -> Div {
+fn chevron(name: &str, color: Hsla) -> Svg {
+    svg()
+        .path(format!("icons/ui/{name}.svg"))
+        .size(px(14.))
+        .text_color(color)
+}
+
+/// One list row: icon, name and toggle. Rows after the first have a separator above,
+/// inset to the icon, as in System Settings.
+fn row(p: &Palette, first: bool, icon: AnyElement, name: AnyElement, toggle: AnyElement) -> Div {
     div()
-        .h(px(ROW))
-        .px(px(14.))
         .flex()
-        .items_center()
-        .gap(px(10.))
-        .border_t_1()
-        .border_color(p.separator)
-        .child(icon)
-        .child(div().flex_1().child(name))
-        .child(toggle)
+        .flex_col()
+        .when(!first, |d| {
+            d.child(div().h(px(1.)).ml(px(14.)).bg(p.separator))
+        })
+        .child(
+            div()
+                .h(px(ROW))
+                .px(px(14.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .child(icon)
+                .child(div().flex_1().child(name))
+                .child(toggle),
+        )
 }
 
 /// The macOS 26 switch: off shows a ring on the right, on shows a bar on the left.
 fn toggle(p: &Palette, on: f32) -> Div {
     let track = theme::mix(p.off_track, p.on_track, on);
     let knob = theme::mix(p.off_knob, p.on_knob, on);
-    let knob_w = TOGGLE_W - TOGGLE_H + 4.;
+    let knob_w = 22.;
     div()
         .relative()
         .w(px(TOGGLE_W))

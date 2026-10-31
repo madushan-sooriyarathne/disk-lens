@@ -63,12 +63,12 @@ pub fn render(
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
+    let viewport = window.viewport_size();
     let content = match step {
         Step::Welcome => welcome(&t, cx),
-        Step::Access => access(&t, model, cx),
+        Step::Access => access(&t, model, f32::from(viewport.height), cx),
         Step::FirstScan => first_scan(&t, model, cx),
     };
-    let viewport = window.viewport_size();
     div()
         .relative()
         .size_full()
@@ -268,14 +268,21 @@ fn welcome(t: &Theme, cx: &mut Context<AppModel>) -> Div {
         )
 }
 
-fn access(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> Div {
-    // The pane fades into the window at its bottom edge.
+/// Height the step needs besides the System Settings pane, so the pane shrinks
+/// first in a short window (down to the minimum, 640 pt).
+const ACCESS_REST: f32 = 420.;
+const HERO_MAX: f32 = 260.;
+const HERO_MIN: f32 = 220.;
+
+fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) -> Div {
+    // The pane fades into the window below the DiskLens row.
+    let hero_h = (height - ACCESS_REST).clamp(HERO_MIN, HERO_MAX);
     let fade = div()
         .absolute()
         .left_0()
         .right_0()
         .bottom_0()
-        .h(px(120.))
+        .h(px((hero_h - fda_preview::DISKLENS_BOTTOM).max(40.)))
         .bg(linear_gradient(
             180.,
             linear_color_stop(t.content.opacity(0.), 0.),
@@ -283,7 +290,7 @@ fn access(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> Div {
         ));
     let hero = div()
         .relative()
-        .h(px(260.))
+        .h(px(hero_h))
         .overflow_hidden()
         .flex()
         .justify_center()
