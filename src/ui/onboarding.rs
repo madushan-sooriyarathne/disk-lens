@@ -149,7 +149,7 @@ fn access(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> (Div, Vec<
     let open = button("onboarding-open", "Open System Settings")
         .primary()
         .disabled(model.access_confirmed)
-        .on_click(cx.listener(|m, _, _, cx| m.open_fda_settings(cx)));
+        .on_click(cx.listener(|m, _, window, cx| m.open_fda_settings(window, cx)));
     (content, vec![skip, open])
 }
 

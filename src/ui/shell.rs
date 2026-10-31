@@ -183,7 +183,7 @@ fn footer_notice(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Opti
                 .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
                 .child("Grant Access…")
-                .on_click(cx.listener(|m, _, _, cx| m.open_fda_settings(cx))),
+                .on_click(cx.listener(|m, _, window, cx| m.open_fda_settings(window, cx))),
             )
             .into_any_element(),
     )

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
+use super::chrome;
 use super::cleanup;
 use super::explorer::{self, ExplorerState};
 use super::motion;
@@ -22,6 +23,7 @@ use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::platform;
+use crate::platform::window::Moved;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
@@ -125,6 +127,8 @@ pub struct AppModel {
     pub access_confirmed: bool,
     /// Checks for a grant while the Full Disk Access step is on screen.
     access_poll: Option<Task<()>>,
+    /// Where the window was before it moved beside System Settings.
+    docked: Option<Moved>,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
     /// Path of the scan root, as the snapshot reports it.
@@ -373,6 +377,7 @@ impl AppModel {
             full_disk_access: false,
             access_confirmed: false,
             access_poll: None,
+            docked: None,
             error: None,
             root_path: String::new(),
             path: String::new(),
@@ -523,13 +528,20 @@ impl AppModel {
     /// Leaves the Full Disk Access step and starts the first scan (FR-ONB-4).
     fn first_scan(&mut self, cx: &mut Context<Self>) {
         self.access_poll = None;
+        if let Some(docked) = self.docked.take() {
+            docked.restore(!self.reduce_motion);
+        }
         self.phase = Phase::Onboarding(Step::FirstScan);
         self.start_scan(cx);
     }
 
     /// Opens the Full Disk Access pane after the pre-seed read, so DiskLens is
-    /// already in the list; the activation recheck notices a grant.
-    pub fn open_fda_settings(&mut self, cx: &mut Context<Self>) {
+    /// already in the list; the activation recheck notices a grant. During onboarding
+    /// the window moves to the right half of its screen, beside System Settings.
+    pub fn open_fda_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.phase == Phase::Onboarding(Step::Access) && self.docked.is_none() {
+            self.docked = chrome::dock_right(window, !self.reduce_motion);
+        }
         off_thread(
             &self.source,
             cx,
@@ -1808,7 +1820,7 @@ mod tests {
     #[gpui::test]
     fn open_settings_preseeds_before_opening(cx: &mut TestAppContext) {
         let (model, cx) = setup_first_run(cx, Duration::ZERO);
-        model.update(cx, |m, cx| m.open_fda_settings(cx));
+        model.update_in(cx, |m, window, cx| m.open_fda_settings(window, cx));
         cx.run_until_parked();
         let calls = model.read_with(cx, |m, _| match m.source.as_ref() {
             Source::Mock(mock) => mock.fda_calls.lock().unwrap().clone(),
