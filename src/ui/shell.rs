@@ -302,10 +302,10 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .child(scan_button),
         )
         .child(
-            // Only Explore has an inspector until Phase 11 adds Recommended.
+            // The Overview has no inspector.
             icon_button("toggle-inspector", "inspector", "Inspector", &t)
-                .selected(model.inspector_visible && model.page == Page::Explore)
-                .disabled(model.page != Page::Explore)
+                .selected(model.inspector_visible && model.page != Page::Overview)
+                .disabled(model.page == Page::Overview)
                 .on_click(cx.listener(|m, _, _, cx| m.toggle_inspector(cx))),
         )
         .child(

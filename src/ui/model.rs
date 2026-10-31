@@ -1,5 +1,5 @@
 //! App state and actions: scan phase, explorer path and mode, recommendations,
-//! selection and the open drawer. Views read the public fields and call the methods.
+//! selection and the row in the inspector. Views read the public fields and call the methods.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -132,7 +132,7 @@ pub struct AppModel {
     pub recommendations: Vec<Recommendation>,
     /// Selected item IDs. Empty by default (S-09); only ready items.
     pub selected: HashSet<String>,
-    /// Row whose detail drawer is open.
+    /// Row shown in the inspector on Recommended.
     pub focused_row: Option<String>,
     /// Details of `focused_row`, once loaded.
     pub details: Option<ItemDetails>,
@@ -543,7 +543,7 @@ impl AppModel {
                             }
                             kept
                         };
-                        let drawer = this
+                        let inspected = this
                             .focused_row
                             .clone()
                             .filter(|id| recommendations.iter().any(|r| &r.row_id == id));
@@ -574,8 +574,8 @@ impl AppModel {
                         this.focused_row = None;
                         this.details = None;
                         this.details_error = None;
-                        if drawer.is_some() {
-                            this.focus_row(drawer, cx);
+                        if inspected.is_some() {
+                            this.focus_row(inspected, cx);
                         }
                         this.error = None;
                         this.phase = Phase::Ready;
@@ -1035,7 +1035,17 @@ impl AppModel {
         }
     }
 
-    /// Opens the detail drawer for `row_id` and loads its details; `None` closes it.
+    /// "Show Recommendation": opens Recommended with `row_id` in the inspector.
+    pub fn show_row(&mut self, row_id: String, cx: &mut Context<Self>) {
+        self.page = Page::Recommended;
+        self.inspector_visible = true;
+        self.focus_row(Some(row_id.clone()), cx);
+        if let Some(ix) = recommendations::list_index(&self.recommendations, &row_id) {
+            self.panel.scroll.scroll_to_item(ix);
+        }
+    }
+
+    /// Shows `row_id` in the inspector and loads its details; `None` clears it.
     pub fn focus_row(&mut self, row_id: Option<String>, cx: &mut Context<Self>) {
         self.focused_row = row_id.clone();
         self.details = None;
@@ -1912,6 +1922,16 @@ mod tests {
     }
 
     #[gpui::test]
+    fn show_recommendation_opens_recommended_with_the_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.show_row("npm-cache".into(), cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| (m.page, m.focused_row.clone())),
+            (Page::Recommended, Some("npm-cache".into()))
+        );
+    }
+
+    #[gpui::test]
     fn toggle_row_selects_then_clears(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, cx| m.toggle_row("npm-cache", cx));
@@ -2076,7 +2096,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn drawer_closes_when_its_row_is_gone(cx: &mut TestAppContext) {
+    fn the_inspected_row_clears_when_it_is_gone(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, _| m.focused_row = Some("gone-row".into()));
         rescan(&model, cx);

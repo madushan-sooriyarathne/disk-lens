@@ -839,7 +839,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
                 item("menu-show", "Show Recommendation").on_click(cx.listener(
                     move |m, _, _, cx| {
                         m.explorer.menu = None;
-                        m.focus_row(Some(row_id.clone()), cx);
+                        m.show_row(row_id.clone(), cx);
                     },
                 )),
             )

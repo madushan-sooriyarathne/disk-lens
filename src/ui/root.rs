@@ -158,7 +158,7 @@ impl Render for AppModel {
                                         .children(screens::update_banner(self, window, cx))
                                         .child(shell::page(self, window, cx)),
                                 )
-                                .when(self.inspector_visible && self.page == Page::Explore, |d| {
+                                .when(self.inspector_visible && self.page != Page::Overview, |d| {
                                     d.child(inspector::render(self, t, cx))
                                 }),
                         ),
@@ -216,7 +216,7 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
             // Esc closes the cleanup dialog (not while it runs), then the context
-            // menu, then the detail drawer, otherwise goes up one folder.
+            // menu, then clears the inspected row on Recommended, otherwise goes up.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
                 if let Some(stage) = &this.cleanup {
                     if !matches!(stage, Cleanup::Running { .. }) {
@@ -224,7 +224,7 @@ impl Render for AppModel {
                     }
                 } else if this.explorer.close_menu() {
                     cx.notify();
-                } else if this.focused_row.is_some() {
+                } else if this.page == Page::Recommended && this.focused_row.is_some() {
                     this.focus_row(None, cx);
                 } else {
                     this.up(cx);

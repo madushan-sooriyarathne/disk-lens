@@ -1,12 +1,11 @@
 //! Recommended page (PRD 13.4.6): tier sections, rows and the queue footer.
 
 use std::collections::HashSet;
-use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight,
-    Role, ScrollHandle, SharedString, Stateful, Toggled, Window, div, ease_out_quint,
-    linear_color_stop, linear_gradient, prelude::*, px, svg,
+    AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight, Role, ScrollHandle,
+    SharedString, Stateful, Toggled, Window, div, linear_color_stop, linear_gradient, prelude::*,
+    px, svg,
 };
 use gpui_component::button::Button;
 use gpui_component::{Sizable, Size};
@@ -18,7 +17,7 @@ use super::selection::{RowState, blocked_reason, row_state};
 use super::shell::CONTROL_HEIGHT;
 use super::stats::compute_stats;
 use super::theme::{self, MONO, Theme};
-use crate::recommend::model::{ItemDetails, ItemStatus, MethodView, RecItem, Recommendation, Tier};
+use crate::recommend::model::{Recommendation, Tier};
 
 /// Page-only UI state; selection, focus and details live in the model.
 #[derive(Default)]
@@ -155,26 +154,8 @@ pub fn render(
         .child(list)
         .child(fade);
 
-    let page = page
-        .child(list)
-        .child(footer(&t, chosen.selected, chosen.selected_rows, cx));
-
-    match model
-        .focused_row
-        .as_ref()
-        .and_then(|id| recs.iter().find(|r| &r.row_id == id))
-    {
-        Some(r) => page.child(drawer(
-            &t,
-            r,
-            model.details.as_ref().filter(|d| d.row_id == r.row_id),
-            model.details_error.as_deref(),
-            &model.selected,
-            &meta.root,
-            cx,
-        )),
-        None => page,
-    }
+    page.child(list)
+        .child(footer(&t, chosen.selected, chosen.selected_rows, cx))
 }
 
 fn tier_label(tier: Tier) -> &'static str {
@@ -200,27 +181,11 @@ pub(super) fn tier_pill(t: &Theme, tier: Tier) -> Div {
         .child(tier_label(tier))
 }
 
-/// Plain-words removal method (DetailDrawer.tsx `methodWords`).
-fn method_words(m: &MethodView) -> String {
-    match m {
-        MethodView::Delete => "Deleted permanently".into(),
-        MethodView::Trash => "Moved to Trash".into(),
-        MethodView::Command { display } => format!("Runs `{display}`"),
-    }
-}
-
 /// `/Users/x/.npm` -> `~/.npm` under the scan root.
 pub(super) fn tilde(path: &str, root: &str) -> String {
     match path.strip_prefix(root) {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
         _ => path.to_owned(),
-    }
-}
-
-fn blocked_of(item: &RecItem) -> Option<&str> {
-    match &item.status {
-        ItemStatus::Blocked { reason } => Some(reason),
-        ItemStatus::Ready => None,
     }
 }
 
@@ -242,7 +207,7 @@ impl Render for Tip {
     }
 }
 
-fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+pub(super) fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = SharedString::from(text);
     move |_, cx| cx.new(|_| Tip(text.clone())).into()
 }
@@ -295,21 +260,6 @@ pub(super) fn checkbox(
     } else {
         b.cursor_pointer()
     }
-}
-
-/// A small muted glyph or word button with a hover background.
-fn ghost_button(t: &Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
-    let (bg, text) = (t.content, t.label);
-    div()
-        .id(id)
-        .flex_none()
-        .px_1p5()
-        .py_0p5()
-        .rounded_md()
-        .cursor_pointer()
-        .text_color(t.secondary)
-        .hover(move |s| s.bg(bg).text_color(text))
-        .child(label)
 }
 
 fn row(
@@ -453,271 +403,9 @@ fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl
         )
 }
 
-fn section(t: &Theme, title: &'static str, body: impl IntoElement) -> impl IntoElement {
-    div()
-        .mt_5()
-        .child(
-            div()
-                .text_size(px(12.))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(t.secondary)
-                .child(title.to_uppercase()),
-        )
-        .child(
-            div()
-                .mt_1p5()
-                .text_size(px(13.))
-                .line_height(px(20.))
-                .child(body),
-        )
-}
-
-/// Slides over the recommendations card (PRD section 7.5).
-fn drawer(
-    t: &Theme,
-    r: &Recommendation,
-    details: Option<&ItemDetails>,
-    details_error: Option<&str>,
-    selected: &HashSet<String>,
-    root: &str,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let mut methods: Vec<String> = Vec::new();
-    for i in &r.items {
-        let m = method_words(&i.method);
-        if !methods.contains(&m) {
-            methods.push(m);
-        }
-    }
-
-    let mut list = div().flex().flex_col();
-    for i in &r.items {
-        list = list.child(item(t, r, i, selected, root, cx));
-    }
-    let mut content = div()
-        .id("drawer-body")
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .px_5()
-        .pb_5();
-    content = match details {
-        Some(d) => content
-            .child(section(t, "What it is", d.description.clone()))
-            .child(section(t, "What happens if removed", d.regenerates.clone())),
-        None => content.child(
-            div()
-                .mt_4()
-                .text_size(px(13.))
-                .text_color(t.secondary)
-                .child(match details_error {
-                    Some(e) => format!("Could not load details: {e}"),
-                    None => "Loading details…".into(),
-                }),
-        ),
-    };
-    content = content
-        .child(section(
-            t,
-            "How it is removed",
-            div().children(methods.into_iter().map(|m| div().child(m))),
-        ))
-        .child(section(t, "Items", list));
-    if let Some(d) = details.filter(|d| !d.largest_subfolders.is_empty()) {
-        content = content.child(section(
-            t,
-            "Largest subfolders",
-            div().children(d.largest_subfolders.iter().map(|f| {
-                div()
-                    .flex()
-                    .gap_2()
-                    .py_0p5()
-                    .text_size(px(12.))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("sub-{}", f.path)))
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_family(MONO)
-                            .text_color(t.secondary)
-                            .tooltip(tip(f.path.clone()))
-                            .child(tilde(&f.path, root)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family(MONO)
-                            .child(format_bytes(f.size)),
-                    )
-            })),
-        ));
-    }
-
-    div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .w_full()
-        .flex()
-        .flex_col()
-        .bg(t.widget)
-        .occlude()
-        .child(
-            div()
-                .flex()
-                .items_start()
-                .gap_2()
-                .px_5()
-                .pt_5()
-                .pb_4()
-                .border_b_1()
-                .border_color(t.separator)
-                .child(
-                    theme::focusable(
-                        ghost_button(t, "drawer-close", "←"),
-                        t,
-                        Role::Button,
-                        "Back to recommendations",
-                    )
-                    .text_size(px(16.))
-                    .line_height(px(18.))
-                    .ml(px(-6.))
-                    .tooltip(tip("Back to recommendations".into()))
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.focus_row(None, cx);
-                    })),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .text_size(px(15.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(r.label.clone()),
-                        )
-                        .child(
-                            div()
-                                .mt_1()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(tier_pill(t, r.tier))
-                                .child(
-                                    div()
-                                        .font_family(MONO)
-                                        .text_size(px(13.))
-                                        .child(format_size(r.size, r.size_is_estimate)),
-                                ),
-                        ),
-                ),
-        )
-        .child(content)
-        .with_animation(
-            SharedString::from(format!("drawer-slide-{}", r.row_id)),
-            Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
-            |el, delta| el.left(px((1.0 - delta) * 56.)).opacity(delta),
-        )
-}
-
-fn item(
-    t: &Theme,
-    r: &Recommendation,
-    i: &RecItem,
-    selected: &HashSet<String>,
-    root: &str,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let blocked = blocked_of(i);
-    let state = if selected.contains(&i.item_id) {
-        RowState::All
-    } else {
-        RowState::None
-    };
-    let mut check = checkbox(
-        t,
-        SharedString::from(format!("item-{}", i.item_id)),
-        state,
-        blocked.is_some(),
-        16.,
-    );
-    if blocked.is_none() {
-        let id = i.item_id.clone();
-        check = theme::focusable(check, t, Role::CheckBox, format!("Select {}", i.name))
-            .aria_toggled(toggled(state))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.toggle_item(&id, cx);
-            }));
-    }
-    let path = i.path.clone();
-    let sub = div()
-        .id(SharedString::from(format!("item-path-{}", i.item_id)))
-        .truncate()
-        .text_size(px(12.))
-        .tooltip(tip(i.path.clone()));
-    let sub = match blocked {
-        Some(reason) => sub.text_color(t.review_text).child(reason.to_owned()),
-        None => sub
-            .font_family(MONO)
-            .text_color(t.secondary)
-            .child(tilde(&i.path, root)),
-    };
-    div()
-        .flex()
-        .items_center()
-        .gap_2p5()
-        .py_1p5()
-        .child(check)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(div().truncate().child(i.name.clone()))
-                .child(sub),
-        )
-        .child(
-            div()
-                .flex_none()
-                .font_family(MONO)
-                .text_size(px(13.))
-                .child(format_size(i.size, r.size_is_estimate)),
-        )
-        .child(
-            theme::focusable(
-                ghost_button(
-                    t,
-                    SharedString::from(format!("reveal-{}", i.item_id)),
-                    "Reveal",
-                ),
-                t,
-                Role::Button,
-                format!("Reveal {} in Finder", i.name),
-            )
-            .text_size(px(12.))
-            .tooltip(tip("Reveal in Finder".into()))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.reveal(path.clone(), cx);
-            })),
-        )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn method_words_read_plainly() {
-        assert_eq!(method_words(&MethodView::Delete), "Deleted permanently");
-        assert_eq!(method_words(&MethodView::Trash), "Moved to Trash");
-        assert_eq!(
-            method_words(&MethodView::Command {
-                display: "brew cleanup".into()
-            }),
-            "Runs `brew cleanup`"
-        );
-    }
 
     fn rec(row_id: &str, tier: Tier) -> Recommendation {
         Recommendation {
