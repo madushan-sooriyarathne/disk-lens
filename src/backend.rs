@@ -10,12 +10,12 @@ use crate::cleanup::plan::{self, Request};
 use crate::cleanup::revalidate::GROWTH_FLOOR;
 use crate::cleanup::script;
 use crate::error::{Error, Result};
-use crate::platform::Facts;
+use crate::platform::{self, Facts};
 use crate::recommend::build::analyze;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, Snapshot, SnapshotMeta};
-use crate::scanner::{self, ScanOptions, snapshot};
+use crate::scanner::{self, ScanOptions, snapshot, volume};
 use crate::state::{AppState, Current};
 use crate::view::{self, CategoryTotal, ViewNode};
 
@@ -306,4 +306,18 @@ pub fn execute_cleanup(
         }
     });
     Ok(())
+}
+
+/// Free bytes on the scan root's volume without purgeable space: blocks a local snapshot
+/// still holds are purgeable, not free, so they stay out (PRD 13.4.8).
+pub fn free_space(state: &Arc<AppState>) -> Option<u64> {
+    let root = state.config.root()?;
+    volume::volume_info(&root).map(|v| v.available.saturating_sub(v.purgeable))
+}
+
+/// Local Time Machine snapshots of the boot volume.
+pub fn local_snapshot_count(state: &Arc<AppState>) -> Result<usize> {
+    Ok(platform::local_snapshot_count(
+        state.machine.runner.as_ref(),
+    )?)
 }

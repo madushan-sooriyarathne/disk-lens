@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
+use super::cleanup;
 use super::explorer::{self, ExplorerState};
 use super::motion;
 use super::recommendations::{self, PanelState};
@@ -69,6 +70,8 @@ pub enum Cleanup {
     },
     Results {
         summary: CleanupSummary,
+        /// Freed bytes local snapshots still hold, and how many snapshots (PRD 13.4.8).
+        held: Option<(u64, usize)>,
     },
 }
 
@@ -140,8 +143,14 @@ pub struct AppModel {
     pub details: Option<ItemDetails>,
     /// Why the details of `focused_row` could not be loaded.
     pub details_error: Option<String>,
-    /// Open cleanup dialog, if any.
+    /// Open cleanup sheet, if any.
     pub cleanup: Option<Cleanup>,
+    /// The sheet as it was when closed, drawn while it slides back up.
+    pub sheet_exit: Option<Cleanup>,
+    /// Bumped per sheet open and close, so each one plays its animation.
+    pub sheet_seq: u64,
+    /// Free space right before the running cleanup, to tell what it freed.
+    free_before: Option<u64>,
     /// Short notice at the bottom of the window ("Script copied").
     pub toast: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
@@ -362,6 +371,9 @@ impl AppModel {
             details: None,
             details_error: None,
             cleanup: None,
+            sheet_exit: None,
+            sheet_seq: 0,
+            free_before: None,
             toast: None,
             focus_handle,
             treemap_focus: cx.focus_handle(),
@@ -1145,6 +1157,10 @@ impl AppModel {
     }
 
     fn request_plan(&mut self, permanent: bool, cx: &mut Context<Self>) {
+        if self.cleanup.is_none() {
+            self.sheet_exit = None;
+            self.sheet_seq += 1;
+        }
         self.cleanup = Some(Cleanup::Planning);
         cx.notify();
         let (snapshot, ids) = (self.snapshot_id(), self.selected_ids());
@@ -1185,6 +1201,7 @@ impl AppModel {
             self.show_toast(format!("Could not start the cleanup: {e}"), cx);
             return;
         }
+        self.free_before = self.source.free_space();
         self.cleanup = Some(Cleanup::Running {
             plan,
             done: 0,
@@ -1214,9 +1231,13 @@ impl AppModel {
                     if gone && !done {
                         model.cleanup = Some(Cleanup::Results {
                             summary: CleanupSummary::default(),
+                            held: None,
                         });
                         model.show_toast("The cleanup stopped unexpectedly".into(), cx);
                         done = true;
+                    }
+                    if done {
+                        model.finish_cleanup(cx);
                     }
                     cx.notify();
                     done
@@ -1256,28 +1277,72 @@ impl AppModel {
                 false
             }
             CleanupEvent::Finished { summary } => {
-                self.cleanup = Some(Cleanup::Results { summary });
+                self.cleanup = Some(Cleanup::Results {
+                    summary,
+                    held: None,
+                });
                 true
             }
         }
     }
 
-    /// Cancel in the confirm dialog, or Done in the results. After a cleanup
-    /// the selection is cleared and the scan root is rescanned, so sizes and
-    /// recommendations reflect the disk (PRD section 7.6, step 8).
+    /// After the last item the follow-up rescan starts at once, so the results can say
+    /// "Updating results…" (FR-BG-6), and they learn whether local snapshots still hold
+    /// some of the freed space (PRD 13.4.8).
+    fn finish_cleanup(&mut self, cx: &mut Context<Self>) {
+        self.start_scan(cx);
+        let before = self.free_before.take();
+        let Some(Cleanup::Results { summary, .. }) = &self.cleanup else {
+            return;
+        };
+        // A dry run frees nothing, so there is nothing to explain.
+        if summary.dry_run {
+            return;
+        }
+        let freed = summary.freed;
+        off_thread(
+            &self.source,
+            cx,
+            |s| (s.free_space(), s.local_snapshot_count()),
+            move |this, (after, snapshots), _| {
+                let snapshots = match snapshots {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::warn!("could not list local snapshots: {e}");
+                        return;
+                    }
+                };
+                if let Some(Cleanup::Results { held, .. }) = &mut this.cleanup {
+                    *held = cleanup::held_by_snapshots(before, after, freed, snapshots);
+                }
+            },
+        );
+    }
+
+    /// Cancel in the confirm view, or Done in the results, which also clears the queue (the
+    /// rescan already started when the cleanup finished). The sheet slides back up.
     pub fn close_cleanup(&mut self, cx: &mut Context<Self>) {
         match self.cleanup {
-            Some(Cleanup::Running { .. }) | None => {}
-            Some(Cleanup::Results { .. }) => {
-                self.cleanup = None;
-                self.selected.clear();
-                self.start_scan(cx);
-            }
-            Some(Cleanup::Planning | Cleanup::Confirm { .. }) => {
-                self.cleanup = None;
-                cx.notify();
-            }
+            Some(Cleanup::Running { .. }) | None => return,
+            Some(Cleanup::Results { .. }) => self.selected.clear(),
+            Some(Cleanup::Planning | Cleanup::Confirm { .. }) => {}
         }
+        self.sheet_exit = self.cleanup.take();
+        self.sheet_seq += 1;
+        cx.notify();
+        let seq = self.sheet_seq;
+        let exit = motion::Transition::new(motion::NAV, self.reduce_motion).duration();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(exit).await;
+            this.update(cx, |m, cx| {
+                if m.sheet_seq == seq {
+                    m.sheet_exit = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Builds the queue's plan and its script off the UI thread, then hands the script
@@ -2427,29 +2492,97 @@ mod tests {
             matches!(m.cleanup, Some(Cleanup::Results { .. }))
         });
         model.read_with(cx, |m, _| {
-            let Some(Cleanup::Results { summary }) = &m.cleanup else {
+            let Some(Cleanup::Results { summary, .. }) = &m.cleanup else {
                 unreachable!()
             };
             assert!(summary.dry_run);
         });
     }
 
-    #[gpui::test]
-    fn closing_the_results_clears_the_selection_and_rescans(cx: &mut TestAppContext) {
-        let (model, cx) = setup(cx, true);
+    /// Opens the sheet over the preselected mock queue and runs it to the results.
+    fn run_cleanup(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
         model.update(cx, |m, cx| m.open_cleanup(cx));
         cx.run_until_parked();
         model.update(cx, |m, cx| m.confirm_cleanup(cx));
-        settle(cx, &model, |m| {
+        settle(cx, model, |m| {
             matches!(m.cleanup, Some(Cleanup::Results { .. }))
         });
-        model.update(cx, |m, cx| m.close_cleanup(cx));
-        model.read_with(cx, |m, _| {
-            assert_eq!(
-                (m.phase, m.scan.is_some(), m.selected.is_empty()),
-                (Phase::Ready, true, true)
-            );
+    }
+
+    #[gpui::test]
+    fn enter_never_confirms_the_cleanup(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::ui::root::bind_keys(cx);
         });
+        let source = Source::Mock(MockData::new(true).with_step(Duration::ZERO));
+        let (model, cx) = cx.add_window_view(|window, cx| AppModel::new(source, window, cx));
+        cx.run_until_parked();
+        // Enter on each Tab stop in turn. The sheet paints last, so its stops come last in
+        // Tab order: walking back from the window root reaches them first. Enter on
+        // Cancel closes the sheet, so each stop gets a fresh sheet and a fresh walk.
+        for stops in 1..=10 {
+            model.update_in(cx, |m, window, cx| {
+                m.open_cleanup(cx);
+                window.focus(&m.focus_handle, cx);
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes(&"shift-tab ".repeat(stops));
+            // A focused element clicks on the key up that follows its key down.
+            let enter = gpui::Keystroke::parse("enter").unwrap();
+            cx.simulate_event(gpui::KeyDownEvent {
+                keystroke: enter.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(gpui::KeyUpEvent { keystroke: enter });
+            cx.run_until_parked();
+            let confirmed = model.read_with(cx, |m, _| {
+                matches!(
+                    m.cleanup,
+                    Some(Cleanup::Running { .. } | Cleanup::Results { .. })
+                )
+            });
+            assert!(
+                !confirmed,
+                "Enter confirmed after {stops} Shift-Tab presses"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn finishing_a_cleanup_starts_the_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        run_cleanup(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
+    }
+
+    #[gpui::test]
+    fn closing_the_results_clears_the_queue(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        run_cleanup(&model, cx);
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        assert!(model.read_with(cx, |m, _| m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_sheet_slides_up_after_closing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        assert!(model.read_with(cx, |m, _| m.sheet_exit.is_some()));
+    }
+
+    #[gpui::test]
+    fn the_sheet_is_gone_after_its_exit(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.sheet_exit.is_none()));
     }
 
     #[gpui::test]

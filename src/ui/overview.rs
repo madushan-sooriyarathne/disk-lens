@@ -15,7 +15,7 @@ use super::theme::{self, Theme};
 use crate::view::ViewNode;
 
 /// Purgeable totals below this are noise and stay hidden.
-const PURGEABLE_MIN: u64 = 1_000_000_000;
+pub(super) const PURGEABLE_MIN: u64 = 1_000_000_000;
 const SAFE_LINE: &str = "Caches and build output that rebuild on their own";
 const REVIEW_LINE: &str = "Models, SDKs and backups you may still need";
 
