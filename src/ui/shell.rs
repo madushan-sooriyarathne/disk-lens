@@ -338,7 +338,7 @@ pub fn inspector(t: Theme) -> impl IntoElement {
 /// The page under the toolbar.
 pub fn page(model: &mut AppModel, window: &mut Window, cx: &mut Context<AppModel>) -> AnyElement {
     match model.page {
-        Page::Overview => super::stat_cards::render(model, window, cx).into_any_element(),
+        Page::Overview => super::overview::render(model, window, cx).into_any_element(),
         Page::Explore => explorer::render(model, window, cx).into_any_element(),
         Page::Recommended => super::recommendations::render(model, window, cx).into_any_element(),
     }

@@ -12,6 +12,7 @@ use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
+use super::stats;
 use super::theme;
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
@@ -116,6 +117,8 @@ pub struct AppModel {
     pub reduce_transparency: bool,
     /// Per-category bytes of the current snapshot, for the sidebar.
     pub category_totals: Vec<CategoryTotal>,
+    /// The five largest folders directly under the scan root, for the Overview.
+    pub largest_folders: Vec<ViewNode>,
     pub view: Option<ViewNode>,
     /// `ViewNode::id` under the pointer.
     pub hovered: Option<String>,
@@ -318,6 +321,7 @@ impl AppModel {
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
+            largest_folders: Vec::new(),
             view: None,
             hovered: None,
             recommendations: Vec::new(),
@@ -459,17 +463,20 @@ impl AppModel {
             &self.source,
             cx,
             move |s| {
-                let mut view = Err(Error::NotInSnapshot(root));
+                let mut view = Err(Error::NotInSnapshot(root.clone()));
                 for candidate in &candidates {
                     view = s.view(candidate, mode);
                     if view.is_ok() {
                         break;
                     }
                 }
+                // The explorer may sit deeper than the root; the Overview always lists the root.
+                let largest = stats::largest_folders(&s.view(&root, mode)?, 5);
                 Ok::<_, Error>((
                     view?,
                     s.recommendations()?,
                     s.category_totals()?,
+                    largest,
                     s.preselected_rows(),
                 ))
             },
@@ -479,7 +486,7 @@ impl AppModel {
                 let navigated = this.view_seq != seq;
                 let mut stale = false;
                 match loaded {
-                    Ok((view, recommendations, totals, preselected)) => {
+                    Ok((view, recommendations, totals, largest, preselected)) => {
                         let selected = if first {
                             let mut selected = HashSet::new();
                             for row in &recommendations {
@@ -523,6 +530,7 @@ impl AppModel {
                         this.meta = Some(meta);
                         this.recommendations = recommendations;
                         this.category_totals = totals;
+                        this.largest_folders = largest;
                         // Folders left behind may be gone from the new snapshot.
                         this.forward.clear();
                         this.selected = selected;
@@ -699,6 +707,12 @@ impl AppModel {
         if let Some(path) = self.forward.pop() {
             self.load_view(path, self.mode, cx);
         }
+    }
+
+    /// Opens `path` on the Explore page (Overview, largest folders).
+    pub fn explore(&mut self, path: String, cx: &mut Context<Self>) {
+        self.page = Page::Explore;
+        self.navigate(path, cx);
     }
 
     pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -1280,6 +1294,33 @@ mod tests {
         cx.run_until_parked();
         open_first_folder(&model, cx);
         model.read_with(cx, |m, _| assert!(m.forward.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_overview_lists_the_five_largest_root_folders(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.read_with(cx, |m, _| assert_eq!(m.largest_folders.len(), 5));
+    }
+
+    #[gpui::test]
+    fn largest_folders_stay_on_the_root_while_exploring(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        open_first_folder(&model, cx);
+        model.update(cx, |m, cx| m.start_scan(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            assert_eq!(m.largest_folders[0].path, "~/Desktop");
+        });
+    }
+
+    #[gpui::test]
+    fn explore_opens_the_folder_on_the_explore_page(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.explore("~/Desktop".into(), cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            assert_eq!((m.page, m.path.as_str()), (Page::Explore, "~/Desktop"));
+        });
     }
 
     #[gpui::test]
