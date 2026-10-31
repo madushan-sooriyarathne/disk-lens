@@ -110,7 +110,7 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
 
 Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
 
-- [ ] Side by side with frame 1 of `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`: Disk (Macintosh HD, 39.5 GB available of 463 GB, +52.5 GB after cleanup, capacity bar and legend, the 4.2 GB purgeable line), Safe to clean (41.7 GB, 8 items), Worth a look (56.0 GB, 10 items), Largest folders (Desktop, Library, .ollama, .npm, .android). List the differences in PLAN.md (Phase 9).
+- [x] Side by side with frame 1 of `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`: Disk (Macintosh HD, 39.5 GB available of 463 GB, +52.5 GB after cleanup, capacity bar and legend, the 4.2 GB purgeable line), Safe to clean (41.7 GB, 8 items), Worth a look (56.0 GB, 10 items), Largest folders (Desktop, Library, .ollama, .npm, .android). List the differences in PLAN.md (Phase 9).
 - [ ] Clear Queue (Edit menu), then Select Safe Items: the toolbar reads "Clean up 41.7 GB" and the "after cleanup" line reads +41.7 GB.
 - [ ] Review opens Recommended. Clicking Desktop opens Explore at `~/Desktop`.
 - [ ] VoiceOver (⌘F5): each widget reads as one sentence, and the folder rows read "Desktop, 41.5 GB, open in Explore".

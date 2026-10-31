@@ -16,7 +16,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
 | 8 Design foundation and window shell | 8a merged; 8b built, visual check approved, awaiting review | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) on branch `feat/phase-8b-window-shell` |
-| 9 Overview | Built, awaiting visual check | v2, PRD section 13.4.4. Branch `feat/phase-9-overview`, stacked on 8b |
+| 9 Overview | Built, visual check approved, awaiting review | v2, PRD section 13.4.4. Branch `feat/phase-9-overview`, stacked on 8b |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
@@ -154,8 +154,9 @@ Last full gate run on macOS (Phase 9, 2026-10-31): `cargo fmt --check`, `cargo c
   - The purgeable line reads "Up to X of this is purgeable, mostly local Time Machine snapshots." The mockup's "Up to 4.2 GB more is held by…" would double count, because the available figure already includes purgeable space. The line shows from 1 GB.
   - Sizes of 100 GB and more keep the app's whole-number format, so the volume total reads "463 GB" where the mockup shows "462.5 GB".
   - `largest_folders` is loaded with each snapshot from the root view and stays as it is after a cleanup until the follow-up rescan, like the category totals.
+- Visual check (2026-10-31, light and dark, against frame 1): approved. The one difference found, Select Safe Items and Review stretching across the widget, is fixed: they are label width and 28 pt high like the mockup's buttons. The other differences are the two decisions above.
 - Open:
-  - Visual check against `docs/mockup-v2.png` frame 1, light and dark, and the VoiceOver check (`docs/QA.md`, Phase 9). Screenshots could not be taken from the agent session, so the layout has only been checked by the tests and a clean launch.
+  - The rest of `docs/QA.md`, Phase 9: the selection and navigation clicks, VoiceOver, and the sandbox run.
   - Whether the lower half of the window still reads as empty at the default size (8a open item).
 
 **Housekeeping**
