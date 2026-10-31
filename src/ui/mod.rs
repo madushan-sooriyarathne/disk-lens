@@ -10,6 +10,7 @@ pub mod inspector;
 pub mod keymap;
 pub mod model;
 pub mod motion;
+pub mod onboarding;
 pub mod overview;
 pub mod recommendations;
 pub mod root;

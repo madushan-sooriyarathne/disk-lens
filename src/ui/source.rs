@@ -38,8 +38,13 @@ pub struct MockData {
     cancelled: Arc<AtomicBool>,
     /// The last plan built; the mock keeps one at a time.
     plan: Mutex<Option<CleanupPlan>>,
-    /// Full Disk Access as the mock reports it. Granted, so mock runs skip onboarding.
-    pub full_disk_access: AtomicBool,
+    /// Full Disk Access as the mock reports it.
+    pub full_disk_access: Arc<AtomicBool>,
+    /// Whether a last snapshot exists; a first run has none until a scan finishes.
+    has_snapshot: Arc<AtomicBool>,
+    /// `DISKLENS_MOCK=onboarding`: access is granted this long after System Settings
+    /// opens, so the poll can be watched advancing the step.
+    grant_after: Option<Duration>,
     /// In memory only: the mock never writes settings.
     onboarding_done: AtomicBool,
     /// "preseed" and "open", in the order the Full Disk Access step made them.
@@ -70,10 +75,19 @@ impl MockData {
             step: Duration::from_millis(150),
             cancelled: Arc::new(AtomicBool::new(false)),
             plan: Mutex::new(None),
-            full_disk_access: AtomicBool::new(true),
+            full_disk_access: Arc::new(AtomicBool::new(true)),
+            has_snapshot: Arc::new(AtomicBool::new(true)),
+            grant_after: None,
             onboarding_done: AtomicBool::new(false),
             fda_calls: Mutex::new(Vec::new()),
         }
+    }
+
+    /// A first launch: no snapshot, onboarding not done, no Full Disk Access.
+    pub fn first_run(self) -> Self {
+        self.has_snapshot.store(false, Ordering::Relaxed);
+        self.full_disk_access.store(false, Ordering::Relaxed);
+        self
     }
 
     /// Pause between simulated scan steps (150 ms by default).
@@ -95,6 +109,7 @@ impl MockData {
         // A finished scan is fresh, like a real one.
         meta.scanned_at = crate::cleanup::audit::now_ms() as i64 / 1000;
         let step = self.step;
+        let has_snapshot = self.has_snapshot.clone();
         // The mock's category totals in rules order, grown evenly over the steps.
         let totals = self.category_totals();
         let full: Vec<u64> = crate::rules::model::Rules::embedded()
@@ -123,6 +138,7 @@ impl MockData {
                     categories: full.iter().map(|b| b * i / SCAN_STEPS).collect(),
                 });
             }
+            has_snapshot.store(true, Ordering::Relaxed);
             on_event(ScanEvent::Finished { meta });
         });
     }
@@ -326,12 +342,17 @@ fn find<'a>(node: &'a ViewNode, path: &str) -> Option<&'a ViewNode> {
 }
 
 impl Source {
-    /// `DISKLENS_MOCK=1` serves the mock, `DISKLENS_MOCK=preselect` also selects
-    /// the mockup's rows; otherwise the live backend.
+    /// `DISKLENS_MOCK=1` serves the mock, `DISKLENS_MOCK=preselect` also selects the
+    /// mockup's rows, `DISKLENS_MOCK=onboarding` starts it as a first launch; otherwise
+    /// the live backend.
     pub fn from_env() -> Self {
         match std::env::var("DISKLENS_MOCK").as_deref() {
             Ok("1" | "true") => Self::Mock(Box::new(MockData::new(false))),
             Ok("preselect") => Self::Mock(Box::new(MockData::new(true))),
+            Ok("onboarding") => Self::Mock(Box::new(MockData {
+                grant_after: Some(Duration::from_secs(6)),
+                ..MockData::new(false).first_run()
+            })),
             _ => Self::Live(Arc::new(AppState::new(Config::from_env()))),
         }
     }
@@ -339,7 +360,10 @@ impl Source {
     pub fn load_last(&self) -> Option<SnapshotMeta> {
         match self {
             Self::Live(state) => backend::load_last_snapshot(state),
-            Self::Mock(m) => Some(m.file.meta.clone()),
+            Self::Mock(m) => m
+                .has_snapshot
+                .load(Ordering::Relaxed)
+                .then(|| m.file.meta.clone()),
         }
     }
 
@@ -443,6 +467,13 @@ impl Source {
             Self::Live(_) => backend::open_fda_settings(),
             Self::Mock(m) => {
                 m.fda_calls.lock().expect("mock calls").push("open");
+                if let Some(after) = m.grant_after {
+                    let granted = m.full_disk_access.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(after);
+                        granted.store(true, Ordering::Relaxed);
+                    });
+                }
                 Ok(())
             }
         }

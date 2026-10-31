@@ -33,6 +33,10 @@ const SCAN_POLL: Duration = Duration::from_millis(100);
 const STALE_AFTER: i64 = 24 * 3_600;
 /// How long a toast stays up.
 const TOAST: Duration = Duration::from_secs(3);
+/// How often the Full Disk Access step checks for a grant (PRD FR-ONB-3b).
+const ACCESS_POLL: Duration = Duration::from_millis(500);
+/// How long the check mark shows before the next step; with the poll, under a second.
+const ADVANCE_PAUSE: Duration = Duration::from_millis(400);
 
 /// Sidebar pages (PRD FR-WIN-1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,11 +46,19 @@ pub enum Page {
     Recommended,
 }
 
+/// Onboarding steps (PRD FR-ONB-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Welcome,
+    Access,
+    FirstScan,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Loading,
-    /// Full Disk Access is missing and the user has not moved past it yet (US-01).
-    Onboarding,
+    /// First launch: no snapshot yet and onboarding never finished (PRD 13.4.1).
+    Onboarding(Step),
     Idle,
     Scanning,
     Ready,
@@ -109,6 +121,10 @@ pub struct AppModel {
     pub scan: Option<ScanProgress>,
     /// Whether the app can read every folder (PRD 7.8); rechecked on window focus.
     pub full_disk_access: bool,
+    /// The Full Disk Access step saw the grant and shows its check mark.
+    pub access_confirmed: bool,
+    /// Checks for a grant while the Full Disk Access step is on screen.
+    access_poll: Option<Task<()>>,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
     /// Path of the scan root, as the snapshot reports it.
@@ -334,17 +350,18 @@ impl AppModel {
         if update::is_enabled(is_mock, is_sandboxed) {
             check_for_update(cx);
         }
-        // Onboarding first when access is missing and was never dismissed.
+        // Onboarding on a first launch. A run cut short before its first scan finished
+        // has no snapshot, so it starts again at Welcome (FR-ONB-5).
         off_thread(
             &source,
             cx,
-            |s| (s.full_disk_access(), s.onboarding_done()),
-            |this, (granted, done), cx| {
+            |s| (s.full_disk_access(), s.onboarding_done(), s.load_last()),
+            |this, (granted, done, last), cx| {
                 this.full_disk_access = granted;
-                if granted || done {
-                    this.load_last(cx);
-                } else {
-                    this.phase = Phase::Onboarding;
+                match last {
+                    Some(meta) => this.enter(meta, cx),
+                    None if done => this.phase = Phase::Idle,
+                    None => this.phase = Phase::Onboarding(Step::Welcome),
                 }
             },
         );
@@ -354,6 +371,8 @@ impl AppModel {
             meta: None,
             scan: None,
             full_disk_access: false,
+            access_confirmed: false,
+            access_poll: None,
             error: None,
             root_path: String::new(),
             path: String::new(),
@@ -400,20 +419,6 @@ impl AppModel {
         }
     }
 
-    /// Last snapshot -> Ready, none -> Idle.
-    fn load_last(&mut self, cx: &mut Context<Self>) {
-        self.phase = Phase::Loading;
-        off_thread(
-            &self.source,
-            cx,
-            |s| s.load_last(),
-            |this, meta, cx| match meta {
-                Some(meta) => this.enter(meta, cx),
-                None => this.phase = Phase::Idle,
-            },
-        );
-    }
-
     /// Installing or restarting under a running scan or cleanup would cut it short.
     pub fn can_install_update(&self) -> bool {
         self.scan.is_none() && self.cleanup.is_none()
@@ -451,7 +456,7 @@ impl AppModel {
         cx.notify();
     }
 
-    /// Updates `full_disk_access`, and leaves onboarding once access is granted.
+    /// Updates `full_disk_access`; a grant moves the Full Disk Access step on.
     pub fn recheck_access(&mut self, cx: &mut Context<Self>) {
         off_thread(
             &self.source,
@@ -459,11 +464,67 @@ impl AppModel {
             |s| s.full_disk_access(),
             |this, granted, cx| {
                 this.full_disk_access = granted;
-                if granted && this.phase == Phase::Onboarding {
-                    this.load_last(cx);
+                if granted {
+                    this.access_granted(cx);
                 }
             },
         );
+    }
+
+    /// Welcome -> Full Disk Access. The step checks for a grant at once, then every
+    /// 500 ms until it is left, so it advances without DiskLens being in front.
+    pub fn onboarding_continue(&mut self, cx: &mut Context<Self>) {
+        self.phase = Phase::Onboarding(Step::Access);
+        self.access_confirmed = false;
+        let source = self.source.clone();
+        self.access_poll = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let s = source.clone();
+                let granted = cx
+                    .background_spawn(async move { s.full_disk_access() })
+                    .await;
+                let gone = this
+                    .update(cx, |m, cx| {
+                        if granted {
+                            m.access_granted(cx);
+                        }
+                    })
+                    .is_err();
+                if granted || gone {
+                    break;
+                }
+                cx.background_executor().timer(ACCESS_POLL).await;
+            }
+        }));
+        cx.notify();
+    }
+
+    /// Shows the check mark, then moves to the first scan.
+    fn access_granted(&mut self, cx: &mut Context<Self>) {
+        self.full_disk_access = true;
+        if self.phase != Phase::Onboarding(Step::Access) || self.access_confirmed {
+            return;
+        }
+        self.access_confirmed = true;
+        self.access_poll = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(ADVANCE_PAUSE).await;
+            this.update(cx, |m, cx| {
+                if m.phase == Phase::Onboarding(Step::Access) {
+                    m.first_scan(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Leaves the Full Disk Access step and starts the first scan (FR-ONB-4).
+    fn first_scan(&mut self, cx: &mut Context<Self>) {
+        self.access_poll = None;
+        self.phase = Phase::Onboarding(Step::FirstScan);
+        self.start_scan(cx);
     }
 
     /// Opens the Full Disk Access pane after the pre-seed read, so DiskLens is
@@ -485,20 +546,9 @@ impl AppModel {
         );
     }
 
-    /// Leaves onboarding without access and remembers that (US-01).
+    /// Moves on without access (FR-ONB-3a). Onboarding is finished only by the first scan.
     pub fn continue_without_access(&mut self, cx: &mut Context<Self>) {
-        off_thread(
-            &self.source,
-            cx,
-            |s| s.set_onboarding_done(),
-            |this, saved, cx| {
-                // Not saving only means onboarding shows again next launch.
-                if let Err(e) = saved {
-                    tracing::warn!("could not save settings: {e}");
-                }
-                this.load_last(cx);
-            },
-        );
+        self.first_scan(cx);
     }
 
     /// Shows a snapshot. The first one opens at the root with the default selection; a later one
@@ -630,7 +680,8 @@ impl AppModel {
         self.scan = Some(ScanProgress::default());
         self.error = None;
         // With a snapshot on screen the scan runs behind it; the explorer keeps working.
-        if self.meta.is_none() {
+        // Onboarding draws its own first-scan step.
+        if self.meta.is_none() && !matches!(self.phase, Phase::Onboarding(_)) {
             self.phase = Phase::Scanning;
         }
         cx.notify();
@@ -706,6 +757,20 @@ impl AppModel {
                 false
             }
             ScanEvent::Finished { meta } => {
+                // The first snapshot finishes onboarding (FR-ONB-5).
+                if self.meta.is_none() {
+                    off_thread(
+                        &self.source,
+                        cx,
+                        |s| s.set_onboarding_done(),
+                        |_, saved, _| {
+                            // Not saving only means onboarding shows again if this snapshot is lost.
+                            if let Err(e) = saved {
+                                tracing::warn!("could not save settings: {e}");
+                            }
+                        },
+                    );
+                }
                 self.enter(meta, cx);
                 true
             }
@@ -1522,12 +1587,14 @@ mod tests {
         });
     }
 
-    /// A model over the mock, started without Full Disk Access.
-    fn setup_without_access(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+    /// A model over the mock as a first launch: no snapshot, no Full Disk Access.
+    fn setup_first_run(
+        cx: &mut TestAppContext,
+        step: Duration,
+    ) -> (Entity<AppModel>, &mut VisualTestContext) {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
-        let mock = MockData::new(false).with_step(Duration::ZERO);
-        mock.full_disk_access.store(false, Ordering::Relaxed);
+        let mock = MockData::new(false).with_step(step).first_run();
         let source = Source::Mock(Box::new(mock));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
@@ -1539,6 +1606,14 @@ mod tests {
             Source::Mock(mock) => mock.full_disk_access.store(true, Ordering::Relaxed),
             Source::Live(_) => unreachable!("tests use the mock"),
         });
+    }
+
+    /// A first launch moved on to the Full Disk Access step.
+    fn at_access_step(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        model.update(cx, |m, cx| m.onboarding_continue(cx));
+        cx.run_until_parked();
+        (model, cx)
     }
 
     #[gpui::test]
@@ -1575,30 +1650,164 @@ mod tests {
     }
 
     #[gpui::test]
-    fn missing_access_starts_with_onboarding(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
-        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Onboarding);
+    fn a_first_run_starts_at_welcome(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Welcome)
+        );
     }
 
     #[gpui::test]
-    fn continue_without_access_reaches_ready(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
-        model.update(cx, |m, cx| m.continue_without_access(cx));
-        cx.run_until_parked();
+    fn a_saved_snapshot_skips_onboarding(cx: &mut TestAppContext) {
+        // The mock has a snapshot and onboarding is not marked done.
+        let (model, cx) = setup(cx, false);
         assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Ready);
     }
 
     #[gpui::test]
-    fn continue_without_access_is_remembered(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
+    fn continue_on_welcome_shows_the_access_step(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Access)
+        );
+    }
+
+    #[gpui::test]
+    fn granted_access_advances_to_the_first_scan(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        grant_access(&model, cx);
+        model.update(cx, |m, cx| m.onboarding_continue(cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(ADVANCE_PAUSE);
+        cx.run_until_parked();
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
+    fn the_poll_advances_without_window_activation(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        grant_access(&model, cx);
+        cx.executor().advance_clock(ACCESS_POLL);
+        cx.run_until_parked();
+        cx.executor().advance_clock(ADVANCE_PAUSE);
+        cx.run_until_parked();
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
+    fn the_poll_shows_the_check_mark_first(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        grant_access(&model, cx);
+        cx.executor().advance_clock(ACCESS_POLL);
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.access_confirmed));
+    }
+
+    #[gpui::test]
+    fn leaving_the_access_step_stops_polling(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        grant_access(&model, cx);
+        cx.executor().advance_clock(ACCESS_POLL);
+        cx.run_until_parked();
+        assert!(!model.read_with(cx, |m, _| m.full_disk_access));
+    }
+
+    #[gpui::test]
+    fn a_recheck_on_activation_confirms_access(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        grant_access(&model, cx);
+        model.update(cx, |m, cx| m.recheck_access(cx));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.access_confirmed));
+    }
+
+    #[gpui::test]
+    fn recheck_without_a_grant_stays_on_the_access_step(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.recheck_access(cx));
+        cx.run_until_parked();
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Access)
+        );
+    }
+
+    #[gpui::test]
+    fn continue_without_access_starts_the_first_scan(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
+    fn continue_without_access_does_not_finish_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
         model.update(cx, |m, cx| m.continue_without_access(cx));
         cx.run_until_parked();
+        assert!(!model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn finishing_the_first_scan_finishes_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        settle(cx, &model, |m| m.phase == Phase::Ready);
         assert!(model.read_with(cx, |m, _| m.source.onboarding_done()));
     }
 
     #[gpui::test]
+    fn a_cancelled_first_scan_goes_idle(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::from_millis(30));
+        model.update(cx, |m, cx| {
+            m.continue_without_access(cx);
+            m.cancel_scan(cx);
+        });
+        settle(cx, &model, |m| m.scan.is_none());
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Idle);
+    }
+
+    #[gpui::test]
+    fn a_cancelled_first_scan_leaves_onboarding_unfinished(cx: &mut TestAppContext) {
+        // With no snapshot and onboarding not done, the next launch starts at Welcome.
+        let (model, cx) = setup_first_run(cx, Duration::from_millis(30));
+        model.update(cx, |m, cx| {
+            m.continue_without_access(cx);
+            m.cancel_scan(cx);
+        });
+        settle(cx, &model, |m| m.scan.is_none());
+        assert!(!model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn first_scan_progress_carries_category_totals(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::from_millis(30));
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        settle(cx, &model, |m| {
+            m.scan
+                .as_ref()
+                .is_some_and(|s| s.categories.iter().any(|&b| b > 0))
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
     fn open_settings_preseeds_before_opening(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
         model.update(cx, |m, cx| m.open_fda_settings(cx));
         cx.run_until_parked();
         let calls = model.read_with(cx, |m, _| match m.source.as_ref() {
@@ -1606,23 +1815,6 @@ mod tests {
             Source::Live(_) => unreachable!("tests use the mock"),
         });
         assert_eq!(calls, ["preseed", "open"]);
-    }
-
-    #[gpui::test]
-    fn granting_access_leaves_onboarding_on_recheck(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
-        grant_access(&model, cx);
-        model.update(cx, |m, cx| m.recheck_access(cx));
-        cx.run_until_parked();
-        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Ready);
-    }
-
-    #[gpui::test]
-    fn recheck_without_a_grant_stays_on_onboarding(cx: &mut TestAppContext) {
-        let (model, cx) = setup_without_access(cx);
-        model.update(cx, |m, cx| m.recheck_access(cx));
-        cx.run_until_parked();
-        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Onboarding);
     }
 
     #[gpui::test]

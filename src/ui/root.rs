@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, inspector, keymap, screens, shell, theme};
+use super::{cleanup, inspector, keymap, onboarding, screens, shell, theme};
 use crate::view::ViewKind;
 
 actions!(
@@ -122,7 +122,9 @@ impl Render for AppModel {
         let full_window = |body: gpui::Div| body.p_4().bg(t.content);
         let body = match self.phase {
             Phase::Loading => full_window(body),
-            Phase::Onboarding => full_window(body).child(screens::onboarding(self, window, cx)),
+            Phase::Onboarding(step) => {
+                full_window(body).child(onboarding::render(self, step, window, cx))
+            }
             Phase::Idle => full_window(body).child(screens::idle(self, window, cx)),
             Phase::Scanning => full_window(body).child(screens::scanning(self, window, cx)),
             Phase::Error => full_window(body).child(screens::error(self, window, cx)),
