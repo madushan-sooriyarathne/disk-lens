@@ -18,7 +18,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Merged | v2, PRD sections 13.4.5 and 13.4.7 |
-| 11 Recommended and cleanup sheet | Built, awaiting review | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10. Branch `feat/phase-11-recommended`; `docs/QA.md` Phase 11 still to run |
+| 11 Recommended and cleanup sheet | Built, QA passed, awaiting review | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10. Branch `feat/phase-11-recommended` |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Not started | v2, PRD section 13.4.11 (free) |
@@ -199,7 +199,7 @@ Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo 
   - The confirm view lists one line per row with its methods (a command shows its program); paths are in the queue panel and the script.
   - The mock's script uses the mock's scan time, so two exports of one plan are equal.
 - Open:
-  - `docs/QA.md`, Phase 11 (2026-10-31): the user checked frames 3, 4 and 6 in light, the row keys, the queue, export and the Enter rule. One finding, fixed: the sheet stopped halfway on its way up and vanished (it slid a fixed 480 pt); it now slides its measured height. Reveal in Finder from the row menu works on the sandbox. Still to run: Show Recommendation from Explore, dark appearance, VoiceOver. The sandbox dry run ("Updating results…", Done empties the queue) passed.
+  - QA (2026-10-31): the user ran every Phase 11 check in `docs/QA.md` (frames 3, 4 and 6 in light and dark, the row keys, the queue, export, the row menu with Reveal on the sandbox, Show Recommendation, the Enter rule, the sandbox dry run, VoiceOver) and reported them passing. One finding, fixed: the sheet stopped halfway on its way up and vanished (it slid a fixed 480 pt); it now slides its measured height.
   - The held line needs a machine with local snapshots and a real cleanup.
   - Switching to Recommended does not move keyboard focus into the list; click a row or Tab to it first.
 
