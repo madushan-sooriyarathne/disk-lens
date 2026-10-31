@@ -18,7 +18,7 @@ use crate::cleanup::audit::now_ms;
 
 /// Room for the traffic lights when the sidebar is hidden.
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
-const CONTROL_HEIGHT: f32 = 28.;
+pub(super) const CONTROL_HEIGHT: f32 = 28.;
 
 fn icon(name: &str, color: Hsla) -> impl IntoElement {
     svg()

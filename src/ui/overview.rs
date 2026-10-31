@@ -5,10 +5,11 @@ use gpui::{
     relative, svg,
 };
 use gpui_component::button::Button;
-use gpui_component::{Disableable, Sizable};
+use gpui_component::{Disableable, Sizable, Size};
 
 use super::format::format_bytes;
 use super::model::{AppModel, Page};
+use super::shell::CONTROL_HEIGHT;
 use super::stats::{Segment, Stats, TierStat, capacity_segments, compute_stats};
 use super::theme::{self, Theme};
 use crate::view::ViewNode;
@@ -33,12 +34,12 @@ pub fn render(
 
     let safe_button = Button::new("select-safe")
         .label("Select Safe Items")
-        .small()
+        .with_size(Size::Size(px(CONTROL_HEIGHT)))
         .disabled(s.safe.items == 0)
         .on_click(cx.listener(|m, _, _, cx| m.select_safe(cx)));
     let review_button = Button::new("review")
         .label("Review")
-        .small()
+        .with_size(Size::Size(px(CONTROL_HEIGHT)))
         .on_click(cx.listener(|m, _, _, cx| m.set_page(Page::Recommended, cx)));
 
     div()
@@ -53,12 +54,12 @@ pub fn render(
         .child(
             tier_widget(&t, "Safe to clean", t.safe_text, s.safe, SAFE_LINE)
                 .aria_label(tier_sentence("Safe to clean", s.safe, SAFE_LINE))
-                .child(div().mt_auto().child(safe_button)),
+                .child(div().mt_auto().flex().child(safe_button)),
         )
         .child(
             tier_widget(&t, "Worth a look", t.review_text, s.review, REVIEW_LINE)
                 .aria_label(tier_sentence("Worth a look", s.review, REVIEW_LINE))
-                .child(div().mt_auto().child(review_button)),
+                .child(div().mt_auto().flex().child(review_button)),
         )
         .child(
             largest(&t, &model.largest_folders, cx)
