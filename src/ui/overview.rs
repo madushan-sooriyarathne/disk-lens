@@ -342,6 +342,9 @@ mod tests {
             tier: None,
             rule_id: None,
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: Vec::new(),
         }
     }

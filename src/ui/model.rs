@@ -8,19 +8,21 @@ use std::time::Duration;
 
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
-use super::explorer::ExplorerState;
+use super::explorer::{self, ExplorerState};
+use super::motion;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
 use super::stats;
 use super::theme;
+use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
+use crate::view::{CategoryTotal, ViewKind, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
@@ -102,7 +104,6 @@ pub struct AppModel {
     pub full_disk_access: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
-    pub mode: ViewMode,
     /// Path of the scan root, as the snapshot reports it.
     pub root_path: String,
     /// Folder the explorer shows.
@@ -112,6 +113,8 @@ pub struct AppModel {
     pub page: Page,
     pub sidebar_visible: bool,
     pub inspector_visible: bool,
+    /// Highlight Cleanable (PRD FR-EXP-7): tiles with nothing to clean are dimmed.
+    pub highlight_cleanable: bool,
     /// Accessibility display settings, reread whenever the window becomes active.
     pub reduce_motion: bool,
     pub reduce_transparency: bool,
@@ -120,6 +123,10 @@ pub struct AppModel {
     /// The five largest folders directly under the scan root, for the Overview.
     pub largest_folders: Vec<ViewNode>,
     pub view: Option<ViewNode>,
+    /// The selected tile in `view`, by `explorer::tile_key`.
+    pub tile: Option<String>,
+    /// The selected folder's own view, for the inspector's largest folders.
+    pub tile_view: Option<ViewNode>,
     /// `ViewNode::id` under the pointer.
     pub hovered: Option<String>,
     pub recommendations: Vec<Recommendation>,
@@ -137,6 +144,8 @@ pub struct AppModel {
     pub toast: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
     pub focus_handle: FocusHandle,
+    /// The treemap, where the Explore keymap applies.
+    pub treemap_focus: FocusHandle,
     pub explorer: ExplorerState,
     pub panel: PanelState,
     pub update_state: UpdateState,
@@ -144,6 +153,8 @@ pub struct AppModel {
     pending_update: Option<update::Update>,
     /// Bumped per view request; an older response is dropped when it arrives late.
     view_seq: u64,
+    /// Bumped per tile selection; an older folder view is dropped when it arrives late.
+    tile_seq: u64,
     /// Polls the running scan's events; dropped when a new scan starts.
     scan_task: Option<Task<()>>,
     /// Polls the running cleanup's events.
@@ -206,14 +217,28 @@ fn is_stale(now: i64, scanned_at: i64) -> bool {
 /// Takes `size` off every node on the way to `path` and drops the node at it, so the treemap
 /// matches the disk before the rescan lands.
 fn subtract(node: &mut ViewNode, path: &str, size: u64) {
-    // "Other" carries its folder's path but only stands for leftovers.
-    if node.kind == ViewKind::Other || !is_within(path, &node.path) {
+    // The smaller-items tile carries its folder's path; only its children have their own.
+    let inside = match node.kind {
+        ViewKind::Smaller => node.children.iter().any(|c| is_within(path, &c.path)),
+        _ => is_within(path, &node.path),
+    };
+    if !inside {
         return;
     }
     node.size = node.size.saturating_sub(size);
+    node.cleanable = node.cleanable.saturating_sub(size);
     node.children.retain(|c| c.path != path);
     for child in &mut node.children {
         subtract(child, path, size);
+    }
+}
+
+/// Where Space looks for items: the tile itself, or for the smaller-items tile,
+/// which carries its folder's path, the items it merged.
+fn stage_paths(node: &ViewNode) -> Vec<&str> {
+    match node.kind {
+        ViewKind::Smaller => node.children.iter().map(|c| c.path.as_str()).collect(),
+        _ => vec![node.path.as_str()],
     }
 }
 
@@ -311,18 +336,20 @@ impl AppModel {
             scan: None,
             full_disk_access: false,
             error: None,
-            mode: ViewMode::Category,
             root_path: String::new(),
             path: String::new(),
             forward: Vec::new(),
             page: Page::Overview,
             sidebar_visible: true,
-            inspector_visible: false,
+            inspector_visible: true,
+            highlight_cleanable: false,
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
             largest_folders: Vec::new(),
             view: None,
+            tile: None,
+            tile_view: None,
             hovered: None,
             recommendations: Vec::new(),
             selected: HashSet::new(),
@@ -332,11 +359,13 @@ impl AppModel {
             cleanup: None,
             toast: None,
             focus_handle,
+            treemap_focus: cx.focus_handle(),
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
             update_state: UpdateState::Idle,
             pending_update: None,
             view_seq: 0,
+            tile_seq: 0,
             scan_task: None,
             cleanup_task: None,
             toast_seq: 0,
@@ -448,7 +477,6 @@ impl AppModel {
     fn enter(&mut self, meta: SnapshotMeta, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
-        let mode = self.mode;
         let first = self.meta.is_none();
         let candidates: Vec<String> = if first {
             vec![meta.root.clone()]
@@ -465,13 +493,13 @@ impl AppModel {
             move |s| {
                 let mut view = Err(Error::NotInSnapshot(root.clone()));
                 for candidate in &candidates {
-                    view = s.view(candidate, mode);
+                    view = s.view(candidate);
                     if view.is_ok() {
                         break;
                     }
                 }
                 // The explorer may sit deeper than the root; the Overview always lists the root.
-                let largest = stats::largest_folders(&s.view(&root, mode)?, 5);
+                let largest = stats::largest_folders(&s.view(&root)?, 5);
                 Ok::<_, Error>((
                     view?,
                     s.recommendations()?,
@@ -523,9 +551,14 @@ impl AppModel {
                             );
                         this.root_path = meta.root.clone();
                         if !navigated {
+                            // Node ids change with the snapshot; the tile key is its path.
+                            let tile = this.tile.take().filter(|k| {
+                                view.children.iter().any(|c| explorer::tile_key(c) == *k)
+                            });
                             this.path = view.path.clone();
                             this.view = Some(view);
                             this.hovered = None;
+                            this.select_tile(tile, cx);
                         }
                         this.meta = Some(meta);
                         this.recommendations = recommendations;
@@ -662,50 +695,80 @@ impl AppModel {
         self.source.cancel_scan();
     }
 
-    /// Loads the view of `path` in `mode`; the model changes once it arrives.
-    fn load_view(&mut self, path: String, mode: ViewMode, cx: &mut Context<Self>) {
+    /// Loads the view of `path` and selects the tile `select` in it; the model changes
+    /// once it arrives.
+    fn load_view(&mut self, path: String, select: Option<String>, cx: &mut Context<Self>) {
         self.view_seq += 1;
         let seq = self.view_seq;
         let wanted = path.clone();
         off_thread(
             &self.source,
             cx,
-            move |s| s.view(&wanted, mode),
-            move |this, loaded, _| {
+            move |s| s.view(&wanted),
+            move |this, loaded, cx| {
                 if this.view_seq != seq {
                     return;
                 }
                 match loaded {
                     Ok(view) => {
                         this.path = path;
-                        this.mode = mode;
                         this.view = Some(view);
                         this.hovered = None;
+                        this.select_tile(select, cx);
+                        this.start_zoom(cx);
                     }
-                    Err(e) => tracing::warn!("could not load {path}: {e}"),
+                    Err(e) => {
+                        this.explorer.clear_zoom();
+                        tracing::warn!("could not load {path}: {e}");
+                    }
                 }
             },
         );
     }
 
+    /// Starts the zoom the last navigation prepared and ends it once it has played.
+    fn start_zoom(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.start_zoom() else {
+            return;
+        };
+        let duration = motion::Transition::new(motion::NAV, self.reduce_motion).duration();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            this.update(cx, |model, cx| {
+                if model.explorer.end_zoom(id) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Shows the folder at `path` in the explorer.
     pub fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
         self.forward.clear();
-        self.load_view(path, self.mode, cx);
+        self.explorer.clear_zoom();
+        self.load_view(path, None, cx);
     }
 
-    /// Goes up one folder, remembered for Forward; does nothing at the scan root.
+    /// Goes up one folder, remembered for Forward, and selects the folder it left;
+    /// does nothing at the scan root.
     pub fn up(&mut self, cx: &mut Context<Self>) {
         if self.path != self.root_path {
-            self.forward.push(self.path.clone());
-            self.load_view(parent_of(&self.path).to_owned(), self.mode, cx);
+            let left = self.path.clone();
+            self.forward.push(left.clone());
+            if let Some(view) = &self.view {
+                self.explorer.prepare_zoom_out(view);
+            }
+            self.load_view(parent_of(&left).to_owned(), Some(left), cx);
         }
     }
 
     /// Reopens the folder the last Back left.
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.forward.pop() {
-            self.load_view(path, self.mode, cx);
+            self.explorer.clear_zoom();
+            self.load_view(path, None, cx);
         }
     }
 
@@ -730,8 +793,139 @@ impl AppModel {
         cx.notify();
     }
 
-    pub fn set_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
-        self.load_view(self.path.clone(), mode, cx);
+    /// The selected tile's node in the current view.
+    pub fn tile_node(&self) -> Option<&ViewNode> {
+        self.find_tile(self.tile.as_deref()?)
+    }
+
+    fn find_tile(&self, key: &str) -> Option<&ViewNode> {
+        self.view
+            .as_ref()?
+            .children
+            .iter()
+            .find(|c| explorer::tile_key(c) == key)
+    }
+
+    /// Selects a tile and, for a folder, loads its own view for the inspector.
+    pub fn select_tile(&mut self, key: Option<String>, cx: &mut Context<Self>) {
+        self.tile = key;
+        self.tile_view = None;
+        self.tile_seq += 1;
+        cx.notify();
+        let Some(path) = self
+            .tile_node()
+            .filter(|n| n.kind == ViewKind::Dir)
+            .map(|n| n.path.clone())
+        else {
+            return;
+        };
+        let seq = self.tile_seq;
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.view(&path),
+            move |this, loaded, _| {
+                if this.tile_seq != seq {
+                    return;
+                }
+                match loaded {
+                    Ok(view) => this.tile_view = Some(view),
+                    Err(e) => tracing::warn!("could not load the selected folder: {e}"),
+                }
+            },
+        );
+    }
+
+    /// Arrow keys and h/j/k/l: selects the nearest tile in `dir`, or the first tile when
+    /// none is selected (PRD FR-KB-5).
+    pub fn move_selection(&mut self, dir: Dir, cx: &mut Context<Self>) {
+        let Some(view) = &self.view else {
+            return;
+        };
+        let current = self.tile.as_deref().and_then(|k| {
+            view.children
+                .iter()
+                .position(|c| explorer::tile_key(c) == k)
+        });
+        let next = match current {
+            None => Some(0),
+            Some(i) => {
+                let Some(rects) = self.explorer.rects(view) else {
+                    return;
+                };
+                treemap::neighbor(&rects, i, dir)
+            }
+        };
+        if let Some(key) = next
+            .and_then(|i| view.children.get(i))
+            .map(explorer::tile_key)
+        {
+            self.select_tile(Some(key), cx);
+        }
+    }
+
+    /// Double-click or Return: opens a folder, reveals a file (PRD FR-EXP-8, FR-EXP-9).
+    pub fn open_tile(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(node) = self.find_tile(key) else {
+            return;
+        };
+        let path = node.path.clone();
+        match node.kind {
+            ViewKind::Dir => {
+                self.navigate(path, cx);
+                if let Some(view) = &self.view {
+                    self.explorer.prepare_zoom_in(view, key);
+                }
+            }
+            ViewKind::File => self.reveal(path, cx),
+            ViewKind::Smaller => {}
+        }
+    }
+
+    /// Whether Space or Add to Queue has anything to stage for `node`.
+    pub fn can_stage(&self, node: &ViewNode) -> bool {
+        selection::stage_under(&self.recommendations, &self.selected, &stage_paths(node)).is_some()
+    }
+
+    /// Space on a tile: stages its ready items, or unstages them (PRD FR-Q-2).
+    pub fn stage_tile(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(node) = self.find_tile(key) else {
+            return;
+        };
+        let next =
+            selection::stage_under(&self.recommendations, &self.selected, &stage_paths(node));
+        match next {
+            Some(next) => {
+                self.selected = next;
+                cx.notify();
+            }
+            None => self.show_toast("Nothing here can be cleaned".into(), cx),
+        }
+    }
+
+    /// Toggles Quick Look for the selected tile (⌘Y).
+    pub fn quick_look(&mut self, _cx: &mut Context<Self>) {
+        let Some(path) = self
+            .tile_node()
+            .filter(|n| n.kind != ViewKind::Smaller)
+            .map(|n| n.path.clone())
+        else {
+            return;
+        };
+        let shown = self
+            .source
+            .quick_look(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|p| platform::quick_look(&p));
+        if let Err(e) = shown {
+            tracing::warn!("could not Quick Look {path}: {e}");
+        }
+    }
+
+    /// Dims tiles with nothing to clean (PRD FR-EXP-7).
+    pub fn toggle_highlight(&mut self, cx: &mut Context<Self>) {
+        self.highlight_cleanable = !self.highlight_cleanable;
+        cx.notify();
     }
 
     pub fn hover(&mut self, node_id: Option<String>, cx: &mut Context<Self>) {
@@ -1324,6 +1518,170 @@ mod tests {
     }
 
     #[gpui::test]
+    fn space_on_a_tile_with_nothing_to_clean_stages_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.stage_tile("~/Documents", cx));
+        model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn space_on_a_tile_with_nothing_to_clean_says_so(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.stage_tile("~/Documents", cx));
+        model.read_with(cx, |m, _| {
+            assert_eq!(m.toast.as_deref(), Some("Nothing here can be cleaned"))
+        });
+    }
+
+    #[gpui::test]
+    fn space_on_a_folder_stages_exactly_its_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.stage_tile("~/.gradle", cx));
+        model.read_with(cx, |m, _| {
+            let want: HashSet<String> =
+                ["gradle-caches:5".to_owned(), "gradle-caches:12".to_owned()].into();
+            assert_eq!(m.selected, want);
+        });
+    }
+
+    #[gpui::test]
+    fn space_again_unstages_the_folder(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.stage_tile("~/.gradle", cx);
+            m.stage_tile("~/.gradle", cx);
+        });
+        model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn space_on_the_smaller_tile_stages_only_what_it_merged(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        // Home's smaller tile merges folders with no items; its path is home itself.
+        model.update(cx, |m, cx| m.stage_tile("~#smaller", cx));
+        model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn an_arrow_with_nothing_selected_selects_the_largest_tile(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.move_selection(Dir::Right, cx));
+        model.read_with(cx, |m, _| assert_eq!(m.tile.as_deref(), Some("~/Desktop")));
+    }
+
+    #[gpui::test]
+    fn an_arrow_moves_the_selection_to_a_neighbour(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.select_tile(Some("~/Desktop".into()), cx);
+            m.move_selection(Dir::Right, cx);
+        });
+        model.update(cx, |m, _| {
+            let view = m.view.clone().unwrap();
+            let rects = m.explorer.rects(&view).unwrap();
+            let at = |key: &str| {
+                let i = view
+                    .children
+                    .iter()
+                    .position(|c| explorer::tile_key(c) == key);
+                rects[i.unwrap()].clone()
+            };
+            let (from, to) = (at("~/Desktop"), at(m.tile.as_deref().unwrap()));
+            assert!(to.x >= from.x + from.w, "{to:?} is not right of {from:?}");
+        });
+    }
+
+    #[gpui::test]
+    fn opening_a_folder_zooms_into_it(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.open_tile("~/Desktop", cx);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(m.explorer.zooming()));
+    }
+
+    #[gpui::test]
+    fn the_zoom_ends_after_it_has_played(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.open_tile("~/Desktop", cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(!m.explorer.zooming()));
+    }
+
+    #[gpui::test]
+    fn a_breadcrumb_jump_does_not_zoom(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.navigate("~/Desktop".into(), cx);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(!m.explorer.zooming()));
+    }
+
+    #[gpui::test]
+    fn backspace_at_the_root_does_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert_eq!(m.path, m.root_path));
+    }
+
+    #[gpui::test]
+    fn going_up_selects_the_folder_it_left(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.navigate("~/Desktop".into(), cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert_eq!(m.tile.as_deref(), Some("~/Desktop")));
+    }
+
+    #[gpui::test]
+    fn selecting_a_folder_loads_its_view_for_the_inspector(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.select_tile(Some("~/Desktop".into()), cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            assert_eq!(
+                m.tile_view.as_ref().map(|v| v.path.as_str()),
+                Some("~/Desktop")
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn the_selected_tile_survives_a_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.tile = Some("~/Desktop".into()));
+        rescan(&model, cx);
+        model.read_with(cx, |m, _| assert_eq!(m.tile.as_deref(), Some("~/Desktop")));
+    }
+
+    #[gpui::test]
+    fn a_vanished_tile_is_unselected_after_a_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, _| m.tile = Some("~/gone".into()));
+        rescan(&model, cx);
+        model.read_with(cx, |m, _| assert_eq!(m.tile, None));
+    }
+
+    #[gpui::test]
+    fn highlight_cleanable_toggles(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.toggle_highlight(cx));
+        model.read_with(cx, |m, _| assert!(m.highlight_cleanable));
+    }
+
+    #[gpui::test]
     fn the_sidebar_lists_every_category(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.read_with(cx, |m, _| assert_eq!(m.category_totals.len(), 6));
@@ -1360,17 +1718,6 @@ mod tests {
         model.read_with(cx, |m, _| {
             assert_eq!(m.path, root);
             assert_eq!(m.view.as_ref().unwrap().path, root);
-        });
-    }
-
-    #[gpui::test]
-    fn set_mode_reloads_the_same_folder(cx: &mut TestAppContext) {
-        let (model, cx) = setup(cx, false);
-        model.update(cx, |m, cx| m.set_mode(ViewMode::Cleanup, cx));
-        cx.run_until_parked();
-        model.read_with(cx, |m, _| {
-            assert_eq!(m.mode, ViewMode::Cleanup);
-            assert_eq!(m.path, m.root_path);
         });
     }
 
@@ -1680,6 +2027,9 @@ mod tests {
             tier: None,
             rule_id: None,
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children,
         }
     }
@@ -1710,6 +2060,14 @@ mod tests {
         );
         subtract(&mut root, "~/a/x", 3);
         assert_eq!((root.size, root.children[0].size), (7, 1));
+    }
+
+    #[test]
+    fn subtract_lowers_cleanable_on_the_way() {
+        let mut root = view_node("~", 10, vec![view_node("~/a", 4, vec![])]);
+        root.cleanable = 4;
+        subtract(&mut root, "~/a", 4);
+        assert_eq!(root.cleanable, 0);
     }
 
     #[test]

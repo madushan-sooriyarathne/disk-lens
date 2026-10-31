@@ -1,29 +1,35 @@
-//! Explorer card: header, treemap, legend, tooltip and context menu. The
-//! breadcrumb is drawn in the toolbar from `crumbs`.
+//! Explore page (PRD 13.4.5): one level of tiles with semantic textures, the
+//! texture key, tooltip and context menu. The breadcrumb is drawn in the
+//! toolbar from `crumbs`.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Role,
-    SharedString, Toggled, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, Font, FontWeight, Hsla, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, SharedString, TextRun, Window, anchored, canvas, deferred,
+    div, pattern_slash, prelude::*, px, relative, svg,
 };
 
 use super::format::{format_age, format_bytes, group_digits};
+use super::keymap;
 use super::model::{AppModel, ScanProgress};
-use super::selection::row_for_node;
-use super::theme::{self, Theme};
-use super::treemap::{self, LayoutOptions, Rect};
+use super::motion;
+use super::selection::{self, row_for_node};
+use super::theme::{self, Texture, Theme};
+use super::treemap::{self, Dir, Rect};
+use crate::recommend::model::{ItemStatus, Recommendation, Tier};
 use crate::rules::model::Rules;
-use crate::view::{ViewKind, ViewMode, ViewNode};
+use crate::view::{ViewKind, ViewNode};
+
+const MANAGED: &str = "Managed by macOS or an app";
 
 /// Context menu opened by a right click on a tile.
 struct Menu {
     /// Pointer position in window coordinates.
     pos: Point<Pixels>,
-    node_id: String,
+    key: String,
 }
 
 /// Layout result for one (view contents, container size) pair.
@@ -33,13 +39,35 @@ struct Cached {
     rects: Rc<Vec<Rect>>,
 }
 
-/// Explorer-only UI state: the layout cache, the measured treemap area and the open menu.
+/// How the treemap moves between levels (PRD 13.5, Motion).
+enum ZoomKind {
+    /// Into a folder: the new level grows out of the tile's frame.
+    In { from: [f64; 4] },
+    /// Up a level: the level left shrinks back into its tile, `child` in the new one.
+    Out {
+        child: String,
+        view: ViewNode,
+        rects: Rc<Vec<Rect>>,
+    },
+}
+
+struct Zoom {
+    id: u64,
+    kind: ZoomKind,
+}
+
+/// Explorer-only UI state: the layout cache, the measured treemap area, the open
+/// menu and the drill-down zoom.
 #[derive(Default)]
 pub struct ExplorerState {
     /// Treemap area in whole pixels, measured by a canvas during prepaint.
     size: Option<(u32, u32)>,
     cached: Option<Cached>,
     menu: Option<Menu>,
+    /// Prepared when a navigation starts; starts when its view arrives.
+    pending: Option<ZoomKind>,
+    zoom: Option<Zoom>,
+    zoom_seq: u64,
 }
 
 impl ExplorerState {
@@ -47,35 +75,73 @@ impl ExplorerState {
     pub fn close_menu(&mut self) -> bool {
         self.menu.take().is_some()
     }
-}
 
-/// Identity of a view's layout input: node ids and sizes. Tiers, categories and
-/// the mode do not move tiles, so they are not part of it.
-fn fingerprint(view: &ViewNode) -> u64 {
-    fn walk(n: &ViewNode, h: &mut DefaultHasher) {
-        n.id.hash(h);
-        n.size.hash(h);
-        n.children.len().hash(h);
-        for c in &n.children {
-            walk(c, h);
-        }
+    /// Readies the zoom into the tile `key` of `view`, which is about to be opened.
+    pub(super) fn prepare_zoom_in(&mut self, view: &ViewNode, key: &str) {
+        self.pending = view
+            .children
+            .iter()
+            .position(|c| tile_key(c) == key)
+            .zip(self.rects(view))
+            .and_then(|(i, rects)| rects.get(i).map(|r| [r.x, r.y, r.w, r.h]))
+            .map(|from| ZoomKind::In { from });
     }
-    let mut h = DefaultHasher::new();
-    walk(view, &mut h);
-    h.finish()
-}
 
-impl ExplorerState {
+    /// Readies the zoom out of `view`, which is about to be left for its parent.
+    pub(super) fn prepare_zoom_out(&mut self, view: &ViewNode) {
+        self.pending = self.rects(view).map(|rects| ZoomKind::Out {
+            child: view.path.clone(),
+            view: view.clone(),
+            rects,
+        });
+    }
+
+    /// Navigation without a zoom (breadcrumb, Forward, Overview links).
+    pub(super) fn clear_zoom(&mut self) {
+        self.pending = None;
+    }
+
+    /// Starts the prepared zoom, if any, and returns its id for ending it.
+    pub(super) fn start_zoom(&mut self) -> Option<u64> {
+        let kind = self.pending.take()?;
+        self.zoom_seq += 1;
+        self.zoom = Some(Zoom {
+            id: self.zoom_seq,
+            kind,
+        });
+        Some(self.zoom_seq)
+    }
+
+    #[cfg(test)]
+    pub(super) fn zooming(&self) -> bool {
+        self.zoom.is_some()
+    }
+
+    /// Ends zoom `id` unless a newer one replaced it; true when it ended.
+    pub(super) fn end_zoom(&mut self, id: u64) -> bool {
+        let current = self.zoom.as_ref().is_some_and(|z| z.id == id);
+        if current {
+            self.zoom = None;
+        }
+        current
+    }
+
+    /// The measured treemap area in points.
+    pub(super) fn area(&self) -> (f64, f64) {
+        self.size
+            .map_or((0., 0.), |(w, h)| (f64::from(w), f64::from(h)))
+    }
+
     /// Records the measured area; true when it changed.
-    fn set_size(&mut self, size: (u32, u32)) -> bool {
+    pub(super) fn set_size(&mut self, size: (u32, u32)) -> bool {
         let changed = self.size != Some(size);
         self.size = Some(size);
         changed
     }
 
-    /// Rects for `view` at the measured size. Runs the layout only when the view
-    /// contents or the size changed since the last call, never on hover.
-    fn rects(&mut self, view: &ViewNode) -> Option<Rc<Vec<Rect>>> {
+    /// Rects for `view` at the measured size, in the order of `view.children`. Runs
+    /// the layout only when the view contents or the size changed, never on hover.
+    pub(super) fn rects(&mut self, view: &ViewNode) -> Option<Rc<Vec<Rect>>> {
         let size = self.size.filter(|&(w, h)| w > 0 && h > 0)?;
         let fp = fingerprint(view);
         if let Some(c) = &self.cached
@@ -88,7 +154,6 @@ impl ExplorerState {
             view,
             f64::from(size.0),
             f64::from(size.1),
-            LayoutOptions::default(),
         ));
         self.cached = Some(Cached {
             fingerprint: fp,
@@ -99,7 +164,57 @@ impl ExplorerState {
     }
 }
 
-/// 45 degree stripes, 2 px lines every 7 px measured across the stripes (PRD 9).
+/// Identity of a view's layout input: node ids and sizes. Tiers and categories
+/// do not move tiles, so they are not part of it.
+fn fingerprint(view: &ViewNode) -> u64 {
+    let mut h = DefaultHasher::new();
+    view.id.hash(&mut h);
+    for c in &view.children {
+        c.id.hash(&mut h);
+        c.size.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// What identifies a tile across snapshots, whose node ids change: its path, and
+/// for the smaller-items tile, which shares its folder's path, a suffix.
+pub fn tile_key(node: &ViewNode) -> String {
+    match node.kind {
+        ViewKind::Smaller => format!("{}#smaller", node.path),
+        _ => node.path.clone(),
+    }
+}
+
+/// The kind of space a tile is (PRD 13.5, Texture). Children of a matched
+/// folder carry its tier, so a tile inside an item is textured like the item;
+/// a folder that only contains items keeps its own look.
+pub(super) fn texture(node: &ViewNode, recs: &[Recommendation]) -> Texture {
+    if node.kind == ViewKind::Smaller {
+        return Texture::Smaller;
+    }
+    if node.system_managed {
+        return Texture::System;
+    }
+    match node.tier {
+        Some(Tier::Review) => Texture::Restorable,
+        Some(Tier::Safe) => {
+            let mut covering = recs
+                .iter()
+                .flat_map(|r| &r.items)
+                .filter(|i| selection::within(&node.path, &i.path))
+                .peekable();
+            // Disposable only while the item can be cleaned now; a blocked one waits.
+            if covering.peek().is_none() || covering.any(|i| i.status == ItemStatus::Ready) {
+                Texture::Disposable
+            } else {
+                Texture::Restorable
+            }
+        }
+        None => Texture::Kept,
+    }
+}
+
+/// 45 degree stripes, 2 px lines every 7 px measured across the stripes (PRD 13.5).
 /// The shader lays lines `0.707 * width` thick on a `0.707 * (width + interval)`
 /// pitch and works in device pixels, so both are scaled by `sqrt 2` and the
 /// window scale factor.
@@ -108,8 +223,12 @@ fn hatch(color: Hsla, scale: f32) -> gpui::Background {
     pattern_slash(color.opacity(theme::STRIPE_ALPHA), 2.0 * s, 5.0 * s)
 }
 
-/// One line on what a tile is: its rule's description, else its category's.
+/// One line on what a tile is: managed by the system, its rule's description,
+/// else its category's.
 fn tile_description(node: &ViewNode) -> Option<&'static str> {
+    if node.system_managed {
+        return Some(MANAGED);
+    }
     let rules = Rules::embedded();
     node.rule_id
         .as_deref()
@@ -122,12 +241,11 @@ fn tile_description(node: &ViewNode) -> Option<&'static str> {
         })
 }
 
-/// What the tooltip shows for a tile (Tooltip.tsx).
+/// What the tooltip shows for a tile.
 struct TooltipView {
-    path: SharedString,
+    name: SharedString,
     size: String,
     category: &'static str,
-    /// The matching rule's description, else the category's (PRD goal G2).
     description: Option<&'static str>,
     theme: Theme,
 }
@@ -136,37 +254,30 @@ impl Render for TooltipView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.theme;
         div()
-            .max_w(px(420.))
-            .rounded_lg()
+            .max_w(px(320.))
+            .rounded(px(theme::R_CONTROL))
             .border_1()
             .border_color(t.separator)
-            .bg(t.widget)
+            .bg(t.popover)
             .text_color(t.label)
             .font_family(theme::SANS)
             .shadow_lg()
             .px_3()
             .py_2()
-            .text_xs()
+            .text_size(px(theme::T_SMALL))
             .child(
                 div()
-                    .font_family(theme::MONO)
-                    .text_size(px(11.))
-                    .text_color(t.secondary)
-                    .child(self.path.clone()),
+                    .text_size(px(theme::T_BODY))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.name.clone()),
             )
             .child(
                 div()
-                    .mt_1()
                     .flex()
-                    .items_baseline()
                     .gap_2()
-                    .child(
-                        div()
-                            .text_size(px(14.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(self.size.clone()),
-                    )
-                    .child(div().text_color(t.secondary).child(self.category)),
+                    .text_color(t.secondary)
+                    .child(self.size.clone())
+                    .child(self.category),
             )
             .children(self.description.map(|d| div().mt_1().child(d)))
     }
@@ -178,7 +289,6 @@ pub fn render(
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
-    let scale = window.scale_factor();
     let rects = model
         .view
         .as_ref()
@@ -186,57 +296,156 @@ pub fn render(
         .unwrap_or_default();
 
     let treemap = div()
+        .id("treemap")
+        .track_focus(&model.treemap_focus)
+        .key_context(keymap::CONTEXT)
         .relative()
         .flex_1()
         .min_h_0()
-        .mx_5()
+        .on_action(cx.listener(|m, _: &keymap::SelectLeft, _, cx| m.move_selection(Dir::Left, cx)))
+        .on_action(
+            cx.listener(|m, _: &keymap::SelectRight, _, cx| m.move_selection(Dir::Right, cx)),
+        )
+        .on_action(cx.listener(|m, _: &keymap::SelectUp, _, cx| m.move_selection(Dir::Up, cx)))
+        .on_action(cx.listener(|m, _: &keymap::SelectDown, _, cx| m.move_selection(Dir::Down, cx)))
+        .on_action(cx.listener(|m, _: &keymap::StageSelected, _, cx| {
+            if let Some(key) = m.tile.clone() {
+                m.stage_tile(&key, cx);
+            }
+        }))
+        .on_action(cx.listener(|m, _: &keymap::OpenSelected, _, cx| {
+            if let Some(key) = m.tile.clone() {
+                m.open_tile(&key, cx);
+            }
+        }))
+        .on_action(cx.listener(|m, _: &keymap::GoUp, _, cx| m.up(cx)))
         .child(measure(cx));
     let treemap = match &model.view {
         Some(v) if v.children.is_empty() => treemap.child(
             div()
                 .pt_10()
                 .text_center()
-                .text_size(px(13.))
+                .text_size(px(theme::T_BODY))
                 .text_color(t.secondary)
                 .child("Nothing to show here. Press Esc to go back."),
         ),
         Some(v) => {
-            let by_id: HashMap<&str, &ViewNode> = {
-                let mut m = HashMap::new();
-                index(v, &mut m);
-                m
-            };
             let menu_open = model.explorer.menu.is_some();
-            treemap.children(rects.iter().filter_map(|r| {
-                let node = by_id.get(r.node_id.as_str())?;
-                Some(tile(model, node, r, t, scale, menu_open, cx))
-            }))
+            let area = model.explorer.area();
+            let layer = div().absolute().top_0().left_0().size_full().children(
+                v.children
+                    .iter()
+                    .zip(rects.iter())
+                    .map(|(node, r)| tile(model, node, r, area, t, window, menu_open, cx)),
+            );
+            zoomed(treemap, layer, model, v, &rects, area, t, window)
         }
         None => treemap,
     };
 
     div()
-        .id("explorer")
         .flex_1()
         .min_w_0()
         .min_h_0()
         .flex()
         .flex_col()
-        .rounded(px(12.))
-        .border_1()
-        .border_color(t.separator)
-        .bg(t.widget)
-        .child(header(model.mode, t, cx))
+        .gap(px(theme::GAP_CONTENT))
         .child(treemap)
-        .child(legend(t))
+        .child(texture_key(t, model.highlight_cleanable))
         .children(context_menu(model, t, cx))
 }
 
-fn index<'a>(n: &'a ViewNode, out: &mut HashMap<&'a str, &'a ViewNode>) {
-    out.insert(n.id.as_str(), n);
-    for c in &n.children {
-        index(c, out);
+/// The tile layer, moving while a zoom runs (PRD FR-EXP-8, 13.5 Motion): into a
+/// folder the new level grows out of the tile's frame; going up, the level left
+/// shrinks back into its tile over the new one. Reduce Motion cross-fades instead.
+#[allow(clippy::too_many_arguments)]
+fn zoomed(
+    treemap: gpui::Stateful<gpui::Div>,
+    layer: gpui::Div,
+    model: &AppModel,
+    view: &ViewNode,
+    rects: &[Rect],
+    area: (f64, f64),
+    t: Theme,
+    window: &Window,
+) -> gpui::Stateful<gpui::Div> {
+    let Some(zoom) = &model.explorer.zoom else {
+        return treemap.child(layer);
+    };
+    let transition = motion::Transition::new(motion::NAV, model.reduce_motion);
+    let moves = matches!(transition, motion::Transition::Move { .. });
+    let animation = Animation::new(transition.duration()).with_easing(motion::ease);
+    let full = [0., 0., area.0, area.1];
+    let frame = |d: gpui::Div, [x, y, w, h]: [f64; 4]| {
+        d.left(px(x as f32))
+            .top(px(y as f32))
+            .w(px(w as f32))
+            .h(px(h as f32))
+    };
+    match &zoom.kind {
+        ZoomKind::In { from } => {
+            let from = *from;
+            treemap.child(
+                layer.with_animation(("zoom", zoom.id), animation, move |d, p| {
+                    if moves {
+                        frame(d, treemap::zoom_frame(from, full, f64::from(p)))
+                    } else {
+                        d.opacity(p)
+                    }
+                }),
+            )
+        }
+        ZoomKind::Out {
+            child,
+            view: left,
+            rects: left_rects,
+        } => {
+            let to = view
+                .children
+                .iter()
+                .position(|c| tile_key(c) == *child)
+                .and_then(|i| rects.get(i))
+                .map(|r| [r.x, r.y, r.w, r.h]);
+            let scale = window.scale_factor();
+            let ghost = div().absolute().top_0().left_0().size_full().children(
+                left.children
+                    .iter()
+                    .zip(left_rects.iter())
+                    .map(|(node, r)| {
+                        let texture = texture(node, &model.recommendations);
+                        let (fill, stripe) = theme::tile_fill(&t, &node.category, texture);
+                        place(div(), r, area)
+                            .rounded(px(theme::R_TILE))
+                            .overflow_hidden()
+                            .bg(fill)
+                            .children(
+                                stripe.map(|s| div().absolute().inset_0().bg(hatch(s, scale))),
+                            )
+                    }),
+            );
+            treemap.child(layer).child(ghost.with_animation(
+                ("zoom", zoom.id),
+                animation,
+                move |d, p| match to.filter(|_| moves) {
+                    Some(to) => {
+                        frame(d, treemap::zoom_frame(full, to, f64::from(p))).opacity(1. - p)
+                    }
+                    None => d.opacity(1. - p),
+                },
+            ))
+        }
     }
+}
+
+/// Positions `d` at `r` as fractions of the treemap area, so a moving layer
+/// carries its tiles with it.
+fn place<E: Styled>(d: E, r: &Rect, (w, h): (f64, f64)) -> E {
+    let frac = |v: f64, of: f64| relative((v / of.max(1.)) as f32);
+    d.absolute()
+        .left(frac(r.x, w))
+        .top(frac(r.y, h))
+        .w(frac(r.w, w))
+        .h(frac(r.h, h))
 }
 
 /// An empty canvas filling the treemap area. Its prepaint bounds are the
@@ -272,8 +481,8 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
     .size_full()
 }
 
-/// What the header says next to the scan button: progress, the last failure, or the snapshot
-/// age ("Scanned 2 h ago", US-13).
+/// What the toolbar says next to the scan button: progress, the last failure, or the
+/// snapshot age ("Scanned 2 h ago", US-13).
 pub(super) fn status_label(
     scan: Option<&ScanProgress>,
     error: Option<&str>,
@@ -287,69 +496,6 @@ pub(super) fn status_label(
         return Some(error.to_owned());
     }
     scanned_at.map(|at| format!("Scanned {}", format_age(now, at)))
-}
-
-/// Title and the view-mode toggle. The scan status lives in the toolbar.
-fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
-    let toggle = [
-        (ViewMode::Category, "Category"),
-        (ViewMode::Cleanup, "Cleanup"),
-    ]
-    .into_iter()
-    .map(|(m, label)| {
-        let active = mode == m;
-        theme::focusable(div().id(label), &t, Role::Button, format!("{label} view"))
-            .aria_toggled(if active {
-                Toggled::True
-            } else {
-                Toggled::False
-            })
-            .cursor_pointer()
-            .rounded_md()
-            .px_3()
-            .py_1()
-            .text_size(px(13.))
-            .border_1()
-            .border_color(if active { t.separator } else { t.content })
-            .when(active, |d| {
-                d.bg(t.widget).font_weight(FontWeight::MEDIUM).shadow_sm()
-            })
-            .when(!active, |d| d.text_color(t.secondary))
-            .child(label)
-            .on_click(cx.listener(move |model, _, _, cx| model.set_mode(m, cx)))
-    });
-    div()
-        .flex()
-        .items_start()
-        .justify_between()
-        .px_5()
-        .pt_5()
-        .child(
-            div()
-                .child(
-                    div()
-                        .text_size(px(15.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Explorer"),
-                )
-                .child(
-                    div()
-                        .mt(px(2.))
-                        .text_size(px(13.))
-                        .text_color(t.secondary)
-                        .child("Your home folder, sized by space used. Click a tile to open it."),
-                ),
-        )
-        .child(
-            div().flex().items_center().gap_2().child(
-                div()
-                    .flex()
-                    .rounded_lg()
-                    .bg(t.content)
-                    .p(px(2.))
-                    .children(toggle),
-            ),
-        )
 }
 
 /// The path from the scan root to the open folder; earlier parts are links.
@@ -389,171 +535,240 @@ pub(super) fn crumbs(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> 
         .children(items)
 }
 
-fn legend(t: Theme) -> impl IntoElement {
+/// One line under the treemap naming each surface (PRD 13.5, Texture).
+fn texture_key(t: Theme, highlight: bool) -> impl IntoElement {
+    let swatch = |category: &str, texture: Texture, label: &'static str| {
+        let (fill, stripe) = theme::tile_fill(&t, category, texture);
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(
+                div()
+                    .relative()
+                    .w(px(18.))
+                    .h(px(12.))
+                    .rounded(px(3.))
+                    .overflow_hidden()
+                    .bg(fill)
+                    .when(texture == Texture::Smaller, |d| {
+                        d.border_1().border_dashed().border_color(t.neutral_border)
+                    })
+                    .children(stripe.map(|s| div().absolute().inset_0().bg(hatch(s, 1.)))),
+            )
+            .child(label)
+    };
     div()
         .flex()
         .flex_wrap()
-        .gap_x_5()
+        .items_center()
+        .gap_x_4()
         .gap_y_1()
-        .px_5()
-        .pb_4()
-        .pt_3()
-        .text_size(px(13.))
+        .text_size(px(theme::T_SMALL))
         .text_color(t.secondary)
-        .children(theme::LEGEND_ORDER.into_iter().map(|id| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .child(
-                    div()
-                        .size(px(10.))
-                        .rounded(px(3.))
-                        .bg(theme::category_colors(&t, id).1),
-                )
-                .child(theme::category_label(id))
-        }))
+        .when(highlight, |d| {
+            d.child(
+                div()
+                    .text_color(t.label)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Highlight Cleanable is on"),
+            )
+        })
+        .child(swatch("package_caches", Texture::Disposable, "Disposable"))
+        .child(swatch("ai_models", Texture::Restorable, "Restorable"))
+        .child(swatch("code_projects", Texture::Kept, "Your data"))
+        .child(swatch("dev_tools", Texture::System, "Managed by macOS"))
+        .child(swatch("dev_tools", Texture::Smaller, "Smaller items"))
 }
 
-/// One absolutely positioned tile or group. Tiles occlude the mouse, so a
-/// group under a tile never sees its clicks, hover or right clicks.
+/// Width of `text` in the system font at `size` and `weight`.
+fn text_width(window: &Window, text: &str, size: f32, weight: FontWeight) -> f64 {
+    let font = Font {
+        weight,
+        features: theme::numeric(),
+        ..gpui::font(theme::SANS)
+    };
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window
+        .text_system()
+        .layout_line(text, px(size), &[run], None);
+    f64::from(f32::from(line.width))
+}
+
+/// One absolutely positioned tile.
+#[allow(clippy::too_many_arguments)]
 fn tile(
     model: &AppModel,
     node: &ViewNode,
     r: &Rect,
+    area: (f64, f64),
     t: Theme,
-    scale: f32,
+    window: &Window,
     menu_open: bool,
     cx: &mut Context<AppModel>,
 ) -> AnyElement {
-    let colors = theme::tile_colors(&t, node, model.mode);
-    let is_dir = node.kind == ViewKind::Dir;
+    let texture = texture(node, &model.recommendations);
+    let (fill, stripe) = theme::tile_fill(&t, &node.category, texture);
+    let key = tile_key(node);
+    let selected = model.tile.as_deref() == Some(key.as_str());
     let size = format_bytes(node.size);
-    let radius = px(if r.group { 10. } else { 8. });
-    let show = treemap::label_visibility(r.w, r.h);
+    let has_lock = texture == Texture::System;
+    // Only a tile that is not itself cleanable space points at what is inside it.
+    let cleanable = (matches!(texture, Texture::Kept | Texture::System) && node.cleanable > 0)
+        .then(|| format!("{} cleanable", format_bytes(node.cleanable)));
+    let label = treemap::tile_label(
+        &node.name,
+        &size,
+        cleanable.as_deref(),
+        has_lock,
+        r.w,
+        r.h,
+        |s| text_width(window, s, theme::T_BODY, FontWeight::SEMIBOLD),
+        |s| text_width(window, s, 12., FontWeight::NORMAL),
+    );
+    let dim = model.highlight_cleanable
+        && matches!(texture, Texture::Kept | Texture::System)
+        && node.cleanable == 0;
+    let aria = format!(
+        "{}, {size}, {}",
+        node.name,
+        if has_lock {
+            MANAGED
+        } else {
+            theme::category_label(&node.category)
+        }
+    );
 
-    let mut tile = div()
-        .id(SharedString::from(node.id.clone()))
-        .absolute()
-        .left(px(r.x as f32))
-        .top(px(r.y as f32))
-        .w(px(r.w as f32))
-        .h(px(r.h as f32))
-        .overflow_hidden()
-        .rounded(radius)
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.fill)
-        .occlude()
-        .map(|d| {
-            let label = format!(
-                "{}, {size}, {}",
-                node.name,
-                theme::category_label(&node.category)
-            );
-            if is_dir {
-                let path = node.path.clone();
-                theme::focusable(d, &t, Role::Button, label)
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |m, _, _, cx| m.navigate(path.clone(), cx)))
+    let mut tile = theme::focusable(
+        div().id(SharedString::from(key.clone())),
+        &t,
+        Role::Button,
+        aria,
+    )
+    .map(|d| place(d, r, area))
+    .overflow_hidden()
+    .rounded(px(theme::R_TILE))
+    .bg(fill)
+    .cursor_pointer()
+    .when(texture == Texture::Smaller, |d| {
+        d.border_1().border_dashed().border_color(t.neutral_border)
+    })
+    .when(dim, |d| d.opacity(theme::DIM))
+    .occlude()
+    .on_click({
+        let key = key.clone();
+        cx.listener(move |m, e: &gpui::ClickEvent, window, cx| {
+            // Clicking a tile hands the keyboard to the treemap.
+            window.focus(&m.treemap_focus, cx);
+            if e.click_count() >= 2 {
+                m.open_tile(&key, cx);
             } else {
-                d.role(Role::Label).aria_label(label)
+                m.select_tile(Some(key.clone()), cx);
             }
         })
-        .on_mouse_down(MouseButton::Right, {
-            let node_id = node.id.clone();
-            cx.listener(move |m, e: &MouseDownEvent, _, cx| {
-                m.explorer.menu = Some(Menu {
-                    pos: e.position,
-                    node_id: node_id.clone(),
-                });
-                cx.notify();
-            })
-        });
+    })
+    .on_mouse_down(MouseButton::Right, {
+        let key = key.clone();
+        cx.listener(move |m, e: &MouseDownEvent, _, cx| {
+            m.explorer.menu = Some(Menu {
+                pos: e.position,
+                key: key.clone(),
+            });
+            m.select_tile(Some(key.clone()), cx);
+        })
+    });
 
     // The tooltip must not show over the open menu: without a builder gpui drops it.
     if !menu_open {
-        let tip_path = SharedString::from(node.path.clone());
+        let name = SharedString::from(node.name.clone());
         let tip_size = size.clone();
-        let tip_category = theme::category_label(&node.category);
-        let tip_description = tile_description(node);
+        let category = theme::category_label(&node.category);
+        let description = tile_description(node);
         tile = tile.tooltip(move |_, cx| {
             cx.new(|_| TooltipView {
-                path: tip_path.clone(),
+                name: name.clone(),
                 size: tip_size.clone(),
-                category: tip_category,
-                description: tip_description,
+                category,
+                description,
                 theme: t,
             })
             .into()
         });
     }
 
-    if let Some(color) = colors.hatch {
+    if let Some(color) = stripe {
         tile = tile.child(
             div()
                 .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .rounded(radius - px(1.))
-                .bg(hatch(color, scale)),
+                .inset_0()
+                .bg(hatch(color, window.scale_factor())),
         );
     }
 
-    if r.group {
-        tile = tile.child(
+    if let Some(label) = label {
+        let line2 = if label.cleanable {
             div()
                 .flex()
-                .items_baseline()
-                .justify_between()
-                .gap_2()
-                .px_3()
-                .pt_2()
-                .text_size(px(13.))
+                .items_center()
+                .gap(px(5.))
+                .text_color(t.label)
+                .child(div().size(px(6.)).rounded_full().bg(t.safe))
+                .child(label.line2)
+        } else {
+            div().text_color(t.tile_secondary).child(label.line2)
+        };
+        tile = tile.child(
+            div()
+                .absolute()
+                .left(px(treemap::LABEL_PAD_X as f32))
+                .top(px(8.))
+                .flex()
+                .flex_col()
+                .text_color(t.label)
                 .child(
                     div()
-                        .min_w_0()
-                        .truncate()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .text_size(px(theme::T_BODY))
+                        .line_height(px(17.))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(node.name.clone()),
+                        .when(has_lock, |d| {
+                            d.child(
+                                svg()
+                                    .path("icons/ui/lock.svg")
+                                    .size(px(12.))
+                                    .flex_none()
+                                    .text_color(t.tile_secondary),
+                            )
+                        })
+                        .child(label.name),
                 )
-                .when(r.w >= 110., |d| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(12.))
-                            .text_color(t.secondary)
-                            .child(size),
-                    )
-                }),
+                .child(
+                    line2
+                        .text_size(px(12.))
+                        .line_height(px(16.))
+                        .font_features(theme::numeric()),
+                ),
         );
-    } else {
-        if show.name {
-            tile = tile.child(
-                div()
-                    .absolute()
-                    .left(px(10.))
-                    .top(px(8.))
-                    .right(px(8.))
-                    .truncate()
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(node.name.clone()),
-            );
-        }
-        if show.size {
-            tile = tile.child(
-                div()
-                    .absolute()
-                    .left(px(10.))
-                    .bottom(px(8.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_size(px(treemap::size_font_px(r.w * r.h) as f32))
-                    .child(size),
-            );
-        }
+    }
+    if selected {
+        // Drawn on top, so the ring stays above the stripes.
+        tile = tile.child(
+            div()
+                .absolute()
+                .inset_0()
+                .rounded(px(theme::R_TILE))
+                .border_2()
+                .border_color(t.accent),
+        );
     }
     tile.into_any_element()
 }
@@ -561,32 +776,31 @@ fn tile(
 /// The right-click menu, anchored at the pointer and closed by any outside press.
 fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Option<AnyElement> {
     let menu = model.explorer.menu.as_ref()?;
-    let node = model
-        .view
-        .as_ref()
-        .and_then(|v| treemap::find(v, &menu.node_id))?;
+    let node = model.tile_node()?;
     let row_id = row_for_node(&model.recommendations, node).map(|r| r.row_id.clone());
+    let key = menu.key.clone();
+    let can_stage = model.can_stage(node);
+    let is_item = node.kind != ViewKind::Smaller;
     let path = node.path.clone();
-    let can_reveal = node.kind != ViewKind::Other;
 
     let item = |id: &'static str, label: &'static str| {
         div()
             .id(id)
             .cursor_pointer()
-            .rounded_md()
-            .px_3()
-            .py(px(6.))
-            .text_size(px(13.))
-            .hover(move |s| s.bg(t.content))
+            .rounded(px(5.))
+            .px_2()
+            .py(px(3.))
+            .text_size(px(theme::T_BODY))
+            .hover(move |s| s.bg(t.accent).text_color(gpui::white()))
             .child(label)
     };
     let panel = div()
         .occlude()
         .min_w(px(192.))
-        .rounded_lg()
+        .rounded(px(theme::R_CONTROL))
         .border_1()
         .border_color(t.separator)
-        .bg(t.widget)
+        .bg(t.popover)
         .text_color(t.label)
         .font_family(theme::SANS)
         .shadow_lg()
@@ -595,7 +809,15 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
             m.explorer.menu = None;
             cx.notify();
         }))
-        .when(can_reveal, |d| {
+        .when(can_stage, |d| {
+            d.child(
+                item("menu-stage", "Add to Queue").on_click(cx.listener(move |m, _, _, cx| {
+                    m.explorer.menu = None;
+                    m.stage_tile(&key, cx);
+                })),
+            )
+        })
+        .when(is_item, |d| {
             d.child(
                 item("menu-reveal", "Reveal in Finder").on_click(cx.listener(
                     move |m, _, _, cx| {
@@ -605,18 +827,30 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
                     },
                 )),
             )
+            .child(
+                item("menu-quick-look", "Quick Look").on_click(cx.listener(|m, _, _, cx| {
+                    m.explorer.menu = None;
+                    m.quick_look(cx);
+                })),
+            )
         })
         .when_some(row_id, |d, row_id| {
             d.child(
-                item("menu-show", "Show recommendation").on_click(cx.listener(
+                item("menu-show", "Show Recommendation").on_click(cx.listener(
                     move |m, _, _, cx| {
                         m.explorer.menu = None;
                         m.focus_row(Some(row_id.clone()), cx);
-                        cx.notify();
                     },
                 )),
             )
-        });
+        })
+        .child(
+            item("menu-info", "Get Info").on_click(cx.listener(|m, _, _, cx| {
+                m.explorer.menu = None;
+                m.inspector_visible = true;
+                cx.notify();
+            })),
+        );
     Some(
         deferred(
             anchored()
@@ -632,6 +866,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recommend::model::{MethodView, RecItem};
 
     #[test]
     fn status_while_scanning_counts_files() {
@@ -671,6 +906,9 @@ mod tests {
             tier: None,
             rule_id: None,
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: vec![],
         }
     }
@@ -683,6 +921,90 @@ mod tests {
             .map(|(i, &s)| leaf(&format!("c{i}"), s))
             .collect();
         v
+    }
+
+    /// A safe row with one item at `path`.
+    fn row(path: &str, status: ItemStatus) -> Recommendation {
+        Recommendation {
+            row_id: "r".into(),
+            rule_id: "npm-cache".into(),
+            label: "npm cache".into(),
+            paths_hint: String::new(),
+            tier: Tier::Safe,
+            size: 1,
+            size_is_estimate: false,
+            items: vec![RecItem {
+                item_id: "i".into(),
+                path: path.into(),
+                name: "i".into(),
+                size: 1,
+                status,
+                method: MethodView::Delete,
+            }],
+        }
+    }
+
+    fn tiered(tier: Tier) -> ViewNode {
+        ViewNode {
+            tier: Some(tier),
+            ..leaf("cache", 1)
+        }
+    }
+
+    #[test]
+    fn a_ready_safe_item_is_disposable() {
+        let recs = [row("/r/cache", ItemStatus::Ready)];
+        assert_eq!(texture(&tiered(Tier::Safe), &recs), Texture::Disposable);
+    }
+
+    #[test]
+    fn a_blocked_safe_item_is_restorable() {
+        let blocked = ItemStatus::Blocked {
+            reason: "busy".into(),
+        };
+        let recs = [row("/r/cache", blocked)];
+        assert_eq!(texture(&tiered(Tier::Safe), &recs), Texture::Restorable);
+    }
+
+    #[test]
+    fn a_review_item_is_restorable() {
+        assert_eq!(texture(&tiered(Tier::Review), &[]), Texture::Restorable);
+    }
+
+    #[test]
+    fn a_folder_that_only_contains_items_is_kept() {
+        let folder = ViewNode {
+            cleanable: 5,
+            ..leaf("projects", 10)
+        };
+        assert_eq!(texture(&folder, &[]), Texture::Kept);
+    }
+
+    #[test]
+    fn a_system_managed_folder_is_system() {
+        let folder = ViewNode {
+            system_managed: true,
+            ..leaf("Containers", 10)
+        };
+        assert_eq!(texture(&folder, &[]), Texture::System);
+    }
+
+    #[test]
+    fn the_smaller_tile_is_smaller() {
+        let smaller = ViewNode {
+            kind: ViewKind::Smaller,
+            ..leaf("rest", 10)
+        };
+        assert_eq!(texture(&smaller, &[]), Texture::Smaller);
+    }
+
+    #[test]
+    fn the_smaller_tile_key_differs_from_its_folder() {
+        let smaller = ViewNode {
+            kind: ViewKind::Smaller,
+            ..leaf("rest", 10)
+        };
+        assert_ne!(tile_key(&smaller), smaller.path);
     }
 
     #[test]
@@ -704,6 +1026,15 @@ mod tests {
     }
 
     #[test]
+    fn a_managed_tile_says_so() {
+        let node = ViewNode {
+            system_managed: true,
+            ..leaf("Containers", 1)
+        };
+        assert_eq!(tile_description(&node), Some(MANAGED));
+    }
+
+    #[test]
     fn layout_waits_for_a_measured_size() {
         let mut st = ExplorerState::default();
         assert!(st.rects(&view(&[3, 2])).is_none());
@@ -718,10 +1049,9 @@ mod tests {
         st.set_size((400, 300));
         let v = view(&[5, 3, 2]);
         let first = st.rects(&v).unwrap();
-        // A hover or a mode switch re-renders with the same view: same Rc, no layout.
-        assert!(Rc::ptr_eq(&first, &st.rects(&v.clone()).unwrap()));
+        // A hover or a retier re-renders with the same layout input: same Rc, no layout.
         let mut retiered = v.clone();
-        retiered.children[0].tier = Some(crate::recommend::model::Tier::Safe);
+        retiered.children[0].tier = Some(Tier::Safe);
         assert!(Rc::ptr_eq(&first, &st.rects(&retiered).unwrap()));
 
         let resized = {

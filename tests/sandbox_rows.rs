@@ -18,7 +18,7 @@ use disklens_lib::rules::model::Rules;
 use disklens_lib::rules::tools::Tools;
 use disklens_lib::scanner::tree::Snapshot;
 use disklens_lib::scanner::{ScanOptions, scan};
-use disklens_lib::view::{ViewMode, ViewNode, build_view};
+use disklens_lib::view::{ViewNode, build_view};
 
 const FIXTURE_VERSION: &str = "3";
 const MB: u64 = 1_000_000;
@@ -211,13 +211,7 @@ fn view_tiles_carry_tier_and_category() {
         now: SystemTime::now(),
     };
     let a = analyze(rules, &snap, &env);
-    let v = build_view(
-        &snap,
-        &home.join(".npm"),
-        ViewMode::Cleanup,
-        Some((rules, &a)),
-    )
-    .unwrap();
+    let v = build_view(&snap, &home.join(".npm"), Some((rules, &a))).unwrap();
     let find =
         |v: &ViewNode, name: &str| v.children.iter().find(|c| c.name == name).cloned().unwrap();
     assert_eq!(v.category, "package_caches");
@@ -226,19 +220,15 @@ fn view_tiles_carry_tier_and_category() {
     assert_eq!(cacache.tier, Some(Tier::Safe));
     assert_eq!(cacache.rule_id.as_deref(), Some("npm-cache"));
     // Inside a matched folder, tiles inherit its tier.
-    let inner = find(&cacache, "content-v2");
+    let cacache_view = build_view(&snap, &home.join(".npm/_cacache"), Some((rules, &a))).unwrap();
+    let inner = find(&cacache_view, "content-v2");
     assert_eq!(inner.rule_id.as_deref(), Some("npm-cache"));
 
-    let desktop = build_view(
-        &snap,
-        &home.join("Desktop"),
-        ViewMode::Category,
-        Some((rules, &a)),
-    )
-    .unwrap();
+    let desktop = build_view(&snap, &home.join("Desktop"), Some((rules, &a))).unwrap();
     assert_eq!(find(&desktop, "atlas").category, "code_projects");
     assert_eq!(find(&desktop, "idle-proj").category, "code_projects");
-    let idle_nm = find(&find(&desktop, "idle-proj"), "node_modules");
+    let idle = build_view(&snap, &home.join("Desktop/idle-proj"), Some((rules, &a))).unwrap();
+    let idle_nm = find(&idle, "node_modules");
     assert_eq!(idle_nm.tier, Some(Tier::Review));
 }
 

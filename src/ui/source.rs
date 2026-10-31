@@ -18,7 +18,9 @@ use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::settings;
 use crate::state::AppState;
-use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
+use crate::view::{self, CategoryTotal, ViewKind, ViewNode};
+
+use super::selection::within;
 
 pub enum Source {
     Live(Arc<AppState>),
@@ -51,8 +53,6 @@ struct MockFile {
     preselected: Vec<String>,
 }
 
-/// Levels of children kept below the requested folder, like the backend's view.
-const LEVELS: usize = 2;
 const SCAN_STEPS: u64 = 12;
 
 impl MockData {
@@ -118,7 +118,35 @@ impl MockData {
             path
         };
         let hit = find(&self.file.view, path).ok_or_else(|| Error::NotInSnapshot(path.into()))?;
-        Ok(truncate(hit, LEVELS))
+        // One level, merged like the backend's view.
+        let children = hit
+            .children
+            .iter()
+            .map(|c| ViewNode {
+                // Mock item sizes are illustrative and can exceed their folder.
+                cleanable: self.cleanable(&c.path).min(c.size),
+                children: Vec::new(),
+                ..c.clone()
+            })
+            .collect();
+        let mut view = ViewNode {
+            cleanable: self.cleanable(&hit.path),
+            children: Vec::new(),
+            ..hit.clone()
+        };
+        view.children = view::merge_smaller(&view, children);
+        Ok(view)
+    }
+
+    /// Bytes of mock items at or below `path`.
+    fn cleanable(&self, path: &str) -> u64 {
+        self.file
+            .recommendations
+            .iter()
+            .flat_map(|r| &r.items)
+            .filter(|i| within(&i.path, path))
+            .map(|i| i.size)
+            .sum()
     }
 
     /// Level-1 folders by their own category, or their children's when they have any.
@@ -281,21 +309,6 @@ fn find<'a>(node: &'a ViewNode, path: &str) -> Option<&'a ViewNode> {
         .find_map(|c| find(c, path))
 }
 
-/// Keeps `levels` levels of children below `node`.
-fn truncate(node: &ViewNode, levels: usize) -> ViewNode {
-    ViewNode {
-        children: if levels == 0 {
-            Vec::new()
-        } else {
-            node.children
-                .iter()
-                .map(|c| truncate(c, levels - 1))
-                .collect()
-        },
-        ..node.clone()
-    }
-}
-
 impl Source {
     /// `DISKLENS_MOCK=1` serves the mock, `DISKLENS_MOCK=preselect` also selects
     /// the mockup's rows; otherwise the live backend.
@@ -332,10 +345,9 @@ impl Source {
         }
     }
 
-    pub fn view(&self, path: &str, mode: ViewMode) -> Result<ViewNode> {
+    pub fn view(&self, path: &str) -> Result<ViewNode> {
         match self {
-            Self::Live(state) => backend::get_view(state, path.to_owned(), mode),
-            // The mock has one tree for both modes.
+            Self::Live(state) => backend::get_view(state, path.to_owned()),
             Self::Mock(m) => m.view(path),
         }
     }
@@ -358,6 +370,14 @@ impl Source {
         match self {
             Self::Live(state) => backend::get_item_details(state, row_id.to_owned()),
             Self::Mock(m) => m.details(row_id),
+        }
+    }
+
+    /// The validated path to preview. Mock paths are not on disk, so the mock has none.
+    pub fn quick_look(&self, path: &str) -> Result<std::path::PathBuf> {
+        match self {
+            Self::Live(state) => backend::quick_look(state, path.to_owned()),
+            Self::Mock(_) => Err(Error::NotInSnapshot(path.into())),
         }
     }
 
@@ -531,38 +551,13 @@ mod tests {
         n.children.iter().map(|c| 1 + depth(c)).max().unwrap_or(0)
     }
 
-    fn node(path: &str, children: Vec<ViewNode>) -> ViewNode {
-        ViewNode {
-            id: path.into(),
-            name: path.into(),
-            path: path.into(),
-            size: 1,
-            category: "dev_tools".into(),
-            tier: None,
-            rule_id: None,
-            kind: ViewKind::Dir,
-            children,
-        }
-    }
-
-    #[test]
-    fn truncate_keeps_two_levels() {
-        let tree = node(
-            "a",
-            vec![node(
-                "a/b",
-                vec![node("a/b/c", vec![node("a/b/c/d", vec![])])],
-            )],
-        );
-        let cut = truncate(&tree, LEVELS);
-        assert_eq!(depth(&cut), 2);
-        assert!(cut.children[0].children[0].children.is_empty());
-    }
-
     #[test]
     fn view_returns_the_requested_folder() {
         let m = MockData::new(false);
-        assert!(depth(&m.view(&m.file.view.path).unwrap()) <= LEVELS);
+        assert!(
+            depth(&m.view(&m.file.view.path).unwrap()) <= 2,
+            "Smaller lists its items"
+        );
         let child = m
             .file
             .view
@@ -571,6 +566,43 @@ mod tests {
             .find(|c| c.kind == ViewKind::Dir)
             .unwrap();
         assert_eq!(m.view(&child.path).unwrap().path, child.path);
+    }
+
+    #[test]
+    fn mock_home_shows_the_mockup_tiles() {
+        let m = MockData::new(false);
+        let names: Vec<String> = m
+            .view("")
+            .unwrap()
+            .children
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Desktop",
+                "Library",
+                ".ollama",
+                ".npm",
+                ".android",
+                ".gradle",
+                "Documents",
+                "Pictures",
+                "Music",
+                ".cache",
+                ".vscode",
+                "Downloads",
+                "3 smaller items"
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_smaller_tile_holds_the_rest_of_home() {
+        let m = MockData::new(false);
+        let smaller = m.view("").unwrap().children.pop().unwrap();
+        assert_eq!(smaller.size, 9_800_000_000);
     }
 
     #[test]
@@ -589,10 +621,7 @@ mod tests {
     #[test]
     fn unknown_path_and_row_are_errors() {
         let s = Source::Mock(MockData::new(false));
-        assert!(matches!(
-            s.view("/nowhere", ViewMode::Category),
-            Err(Error::NotInSnapshot(_))
-        ));
+        assert!(matches!(s.view("/nowhere"), Err(Error::NotInSnapshot(_))));
         assert!(matches!(s.details("nope"), Err(Error::UnknownRow(_))));
     }
 

@@ -131,7 +131,39 @@ pub fn blocked_reason(row: &Recommendation) -> Option<&str> {
     }
 }
 
-fn within(path: &str, dir: &str) -> bool {
+/// Stages every ready item at, inside or around `paths` (PRD FR-Q-2), or unstages
+/// them all when all are staged already. `None` when there is nothing to stage.
+pub fn stage_under(
+    recs: &[Recommendation],
+    selected: &HashSet<String>,
+    paths: &[&str],
+) -> Option<HashSet<String>> {
+    let ids: Vec<&str> = recs
+        .iter()
+        .flat_map(|r| &r.items)
+        .filter(|i| i.status == ItemStatus::Ready)
+        .filter(|i| {
+            paths
+                .iter()
+                .any(|p| within(&i.path, p) || within(p, &i.path))
+        })
+        .map(|i| i.item_id.as_str())
+        .collect();
+    if ids.is_empty() {
+        return None;
+    }
+    let mut next = selected.clone();
+    if ids.iter().all(|id| selected.contains(*id)) {
+        for id in ids {
+            next.remove(id);
+        }
+    } else {
+        next.extend(ids.into_iter().map(String::from));
+    }
+    Some(next)
+}
+
+pub(super) fn within(path: &str, dir: &str) -> bool {
     path.strip_prefix(dir)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
@@ -318,6 +350,9 @@ mod tests {
             tier: rule.map(|_| Tier::Review),
             rule_id: rule.map(String::from),
             kind: ViewKind::Dir,
+            file_count: 0,
+            cleanable: 0,
+            system_managed: false,
             children: vec![],
         }
     }
@@ -349,5 +384,43 @@ mod tests {
             &tile("/home/pebble/.claude/worktrees/bb", Some("wt")),
         );
         assert_eq!(found, Some(&atlas));
+    }
+
+    /// Item ids double as paths: `rec` puts item `r/x/a` at `/r/x/a`.
+    fn staged(recs: &[Recommendation], paths: &[&str]) -> Option<HashSet<String>> {
+        stage_under(recs, &HashSet::new(), paths)
+    }
+
+    #[test]
+    fn stage_under_stages_the_ready_items_inside() {
+        let recs = [rec("a", Tier::Safe, &[("r/x/a1", None), ("r/y/a2", None)])];
+        assert_eq!(staged(&recs, &["/r/x"]), Some(set(&["r/x/a1"])));
+    }
+
+    #[test]
+    fn stage_under_skips_blocked_items() {
+        let recs = [rec("a", Tier::Safe, &[("r/x/a1", Some("busy"))])];
+        assert_eq!(staged(&recs, &["/r/x"]), None);
+    }
+
+    #[test]
+    fn stage_under_stages_the_item_around_a_tile() {
+        let recs = [rec("a", Tier::Safe, &[("r/x", None)])];
+        assert_eq!(staged(&recs, &["/r/x/inner"]), Some(set(&["r/x"])));
+    }
+
+    #[test]
+    fn stage_under_unstages_when_all_are_staged() {
+        let recs = [rec("a", Tier::Safe, &[("r/x/a1", None)])];
+        assert_eq!(
+            stage_under(&recs, &set(&["r/x/a1"]), &["/r/x"]),
+            Some(HashSet::new())
+        );
+    }
+
+    #[test]
+    fn stage_under_ignores_a_look_alike_sibling() {
+        let recs = [rec("a", Tier::Safe, &[("r/xy/a1", None)])];
+        assert_eq!(staged(&recs, &["/r/x"]), None);
     }
 }

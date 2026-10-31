@@ -8,9 +8,7 @@ use gpui::{
     WindowAppearance, px, rgb, rgba,
 };
 
-use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
-use crate::view::{ViewMode, ViewNode};
 
 pub const SANS: &str = ".SystemUIFont";
 /// SF Mono on macOS; GPUI resolves CoreText's hidden system name (checked in Phase 8).
@@ -290,64 +288,52 @@ pub fn category_label(id: &str) -> &'static str {
     category(id).0
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TileColors {
-    pub fill: Hsla,
-    pub border: Hsla,
-    /// Tier color for the hatch overlay, when a recommendation matches.
-    pub hatch: Option<Hsla>,
+/// What kind of space a treemap tile is (PRD 13.5, Texture).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Texture {
+    /// A ready safe-tier item: caches and build output.
+    Disposable,
+    /// A review-tier item, or a safe one that is blocked right now.
+    Restorable,
+    /// User data and projects.
+    Kept,
+    /// FR-EXP-6: protected, or managed by an app.
+    System,
+    /// FR-EXP-2: the smaller-items tile.
+    Smaller,
 }
 
-pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors {
-    let hatch = node.tier.map(|t| match t {
-        Tier::Safe => theme.safe,
-        Tier::Review => theme.review,
-    });
-    match mode {
-        ViewMode::Cleanup => {
-            let (fill, border) = category_colors(theme, FALLBACK_CATEGORY);
-            let tint = node.tier.map(|t| match t {
-                Tier::Safe => theme.safe_tint,
-                Tier::Review => theme.review_tint,
-            });
-            TileColors {
-                fill: tint.unwrap_or(fill),
-                border: hatch.unwrap_or(border),
-                hatch,
-            }
-        }
-        ViewMode::Category => {
-            let (fill, border) = category_colors(theme, &node.category);
-            TileColors {
-                fill,
-                border: hatch.unwrap_or(border),
-                hatch,
-            }
-        }
+/// `over` laid on `under` at `alpha`, as one opaque color.
+pub fn mix(under: Hsla, over: Hsla, alpha: f32) -> Hsla {
+    let (u, o) = (under.to_rgb(), over.to_rgb());
+    let m = |u: f32, o: f32| u + (o - u) * alpha;
+    gpui::Rgba {
+        r: m(u.r, o.r),
+        g: m(u.g, o.g),
+        b: m(u.b, o.b),
+        a: 1.,
+    }
+    .into()
+}
+
+/// A tile's fill and, for disposable space, its stripe color. Textured fills are
+/// opaque mixes, so Reduce Transparency leaves them as they are.
+pub fn tile_fill(t: &Theme, category: &str, texture: Texture) -> (Hsla, Option<Hsla>) {
+    let (fill, border) = category_colors(t, category);
+    match texture {
+        Texture::Kept => (fill, None),
+        Texture::Restorable => (mix(t.content, fill, TEX_MIX), None),
+        Texture::Disposable => (mix(t.content, fill, TEX_MIX), Some(border)),
+        Texture::System | Texture::Smaller => (t.neutral, None),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::ViewKind;
 
     fn hex(v: u32) -> Hsla {
         rgb(v).into()
-    }
-
-    fn node(category: &str, tier: Option<Tier>) -> ViewNode {
-        ViewNode {
-            id: "n".into(),
-            name: "n".into(),
-            path: "/n".into(),
-            size: 1,
-            category: category.into(),
-            tier,
-            rule_id: None,
-            kind: ViewKind::Dir,
-            children: vec![],
-        }
     }
 
     #[test]
@@ -386,29 +372,20 @@ mod tests {
     }
 
     /// `over` painted at `alpha` on `under`, in sRGB like the GPU blends.
-    fn mix(under: Hsla, over: Hsla, alpha: f32) -> Hsla {
-        let (u, o) = (under.to_rgb(), over.to_rgb());
-        let m = |u: f32, o: f32| u + (o - u) * alpha;
-        gpui::Rgba {
-            r: m(u.r, o.r),
-            g: m(u.g, o.g),
-            b: m(u.b, o.b),
-            a: 1.,
-        }
-        .into()
-    }
-
-    /// Every surface a tile label sits on: the solid fill, the reduced
-    /// (disposable, restorable) fill, and its darkest stripe pixel.
+    /// Every surface a tile label sits on, as the treemap draws it: each
+    /// texture's fill and, under stripes, the darkest stripe pixel.
     fn tile_surfaces(t: &Theme) -> Vec<Hsla> {
+        use Texture::*;
         LEGEND_ORDER
             .iter()
             .flat_map(|id| {
-                let (fill, border) = category_colors(t, id);
-                let reduced = mix(t.content, fill, TEX_MIX);
-                [fill, reduced, mix(reduced, border, STRIPE_ALPHA)]
+                [Disposable, Restorable, Kept, System, Smaller]
+                    .into_iter()
+                    .flat_map(move |tex| {
+                        let (fill, stripe) = tile_fill(t, id, tex);
+                        std::iter::once(fill).chain(stripe.map(|s| mix(fill, s, STRIPE_ALPHA)))
+                    })
             })
-            .chain([t.neutral])
             .collect()
     }
 
@@ -499,33 +476,5 @@ mod tests {
         legend.sort();
         ids.sort();
         assert_eq!(legend, ids);
-    }
-
-    #[test]
-    fn tile_colors_by_mode_and_tier() {
-        let t = Theme::light();
-        let (dev_fill, dev_border) = category_colors(&t, "dev_tools");
-        let (ai_fill, ai_border) = category_colors(&t, "ai_models");
-        let parts = |c: TileColors| (c.fill, c.border, c.hatch);
-
-        let c = tile_colors(&t, &node("ai_models", None), ViewMode::Cleanup);
-        assert_eq!(parts(c), (dev_fill, dev_border, None));
-        let c = tile_colors(&t, &node("ai_models", Some(Tier::Safe)), ViewMode::Cleanup);
-        assert_eq!(parts(c), (t.safe_tint, t.safe, Some(t.safe)));
-        let c = tile_colors(
-            &t,
-            &node("ai_models", Some(Tier::Review)),
-            ViewMode::Cleanup,
-        );
-        assert_eq!(parts(c), (t.review_tint, t.review, Some(t.review)));
-
-        let c = tile_colors(&t, &node("ai_models", None), ViewMode::Category);
-        assert_eq!(parts(c), (ai_fill, ai_border, None));
-        let c = tile_colors(
-            &t,
-            &node("ai_models", Some(Tier::Review)),
-            ViewMode::Category,
-        );
-        assert_eq!(parts(c), (ai_fill, t.review, Some(t.review)));
     }
 }

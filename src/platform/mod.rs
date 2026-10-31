@@ -11,6 +11,9 @@ use std::time::Duration;
 
 use wait_timeout::ChildExt;
 
+mod quick_look;
+pub use quick_look::quick_look;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Proc {
     pub name: String,

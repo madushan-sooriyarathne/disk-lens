@@ -5,8 +5,8 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, screens, shell, theme};
-use crate::view::ViewMode;
+use super::{cleanup, inspector, keymap, screens, shell, theme};
+use crate::view::ViewKind;
 
 actions!(
     disklens,
@@ -39,6 +39,7 @@ actions!(
 const CONTEXT: &str = "DiskLens";
 
 pub fn bind_keys(cx: &mut App) {
+    keymap::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("escape", Back, Some(CONTEXT)),
         KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
@@ -97,7 +98,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Show Inspector", ToggleInspector),
             later("Show Queue", Box::new(ShowQueue)),
             MenuItem::action("Highlight Cleanable", HighlightCleanable),
-            later("Quick Look", Box::new(QuickLook)),
+            MenuItem::action("Quick Look", QuickLook),
             MenuItem::separator(),
             MenuItem::action("Show Sidebar", ToggleSidebar),
         ]),
@@ -157,7 +158,9 @@ impl Render for AppModel {
                                         .children(screens::update_banner(self, window, cx))
                                         .child(shell::page(self, window, cx)),
                                 )
-                                .when(self.inspector_visible, |d| d.child(shell::inspector(t))),
+                                .when(self.inspector_visible && self.page == Page::Explore, |d| {
+                                    d.child(inspector::render(self, t, cx))
+                                }),
                         ),
                 ),
         };
@@ -178,12 +181,24 @@ impl Render for AppModel {
             }))
             .on_action(cx.listener(|this, _: &RevealInFinder, _, cx| {
                 if this.phase == Phase::Ready {
-                    this.reveal(this.path.clone(), cx);
+                    // The selected tile on Explore, else the open folder.
+                    let path = this
+                        .tile_node()
+                        .filter(|n| this.page == Page::Explore && n.kind != ViewKind::Smaller)
+                        .map_or_else(|| this.path.clone(), |n| n.path.clone());
+                    this.reveal(path, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &AddToQueue, _, cx| {
-                if let Some(row) = this.focused_row.clone() {
+                if let Some(key) = this.tile.clone().filter(|_| this.page == Page::Explore) {
+                    this.stage_tile(&key, cx);
+                } else if let Some(row) = this.focused_row.clone() {
                     this.add_row(&row, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &QuickLook, _, cx| {
+                if this.page == Page::Explore {
+                    this.quick_look(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &SelectSafe, _, cx| this.select_safe(cx)))
@@ -199,14 +214,7 @@ impl Render for AppModel {
             )
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| this.toggle_inspector(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
-            .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| {
-                // The v1 cleanup view stands in until Phase 10 replaces ViewMode with dimming.
-                let mode = match this.mode {
-                    ViewMode::Category => ViewMode::Cleanup,
-                    ViewMode::Cleanup => ViewMode::Category,
-                };
-                this.set_mode(mode, cx);
-            }))
+            .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
             // Esc closes the cleanup dialog (not while it runs), then the context
             // menu, then the detail drawer, otherwise goes up one folder.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
