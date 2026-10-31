@@ -15,7 +15,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 5 Permissions, persistence, polish | Done, awaiting review | Built on branch `feat/phase-5-polish`; PRD section 10 targets measured and met. Manual checks in `docs/QA.md` (Phase 5) still to run, including the fresh-account onboarding |
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
-| 8 Design foundation and window shell | 8a merged; 8b built, awaiting the visual check | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) on branch `feat/phase-8b-window-shell` |
+| 8 Design foundation and window shell | 8a merged; 8b built, visual check approved, awaiting review | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) on branch `feat/phase-8b-window-shell` |
 | 9 Overview | Not started | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
@@ -139,7 +139,8 @@ Last full gate run on macOS (Phase 8b, 2026-10-31): `cargo fmt --check`, `cargo 
   - The update banner stays above the page content.
   - The filter token slot is not drawn yet (Phase 13).
 - Open:
-  - The side-by-side comparison with the mockup and the VoiceOver check are the user's (`docs/QA.md`, Phase 8).
+  - Approved (2026-10-31): the user compared the running app with the mockup and reported no differences.
+  - The VoiceOver check is still the user's (`docs/QA.md`, Phase 8).
   - One gate run had four `tests/scanner.rs` failures (sizes read as 0 right after the fixture files were written) that did not reproduce alone or in a second full run. Likely delayed block allocation under load; fix the test if it recurs.
   - Category folder counts and sizes in the sidebar depend on the depth bound; projects deeper than 4 levels fall back to `dev_tools` or `documents_media`.
 
