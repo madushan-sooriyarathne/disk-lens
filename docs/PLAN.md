@@ -139,8 +139,8 @@ Last full gate run on macOS (Phase 8b, 2026-10-31): `cargo fmt --check`, `cargo 
   - The update banner stays above the page content.
   - The filter token slot is not drawn yet (Phase 13).
 - Open:
-  - Approved (2026-10-31): the user compared the running app with the mockup and reported no differences.
-  - The VoiceOver check is still the user's (`docs/QA.md`, Phase 8).
+  - Approved (2026-10-31): the user compared the running app with the mockup and reported no differences, and the sandbox run (sidebar footer, category totals, dry-run Clean up) passed.
+  - VoiceOver: the user confirmed it reads the Overview button; the remaining sidebar and toolbar buttons are not confirmed yet (`docs/QA.md`, Phase 8).
   - One gate run had four `tests/scanner.rs` failures (sizes read as 0 right after the fixture files were written) that did not reproduce alone or in a second full run. Likely delayed block allocation under load; fix the test if it recurs.
   - Category folder counts and sizes in the sidebar depend on the depth bound; projects deeper than 4 levels fall back to `dev_tools` or `documents_media`.
 
