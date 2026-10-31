@@ -18,8 +18,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Merged | v2, PRD sections 13.4.5 and 13.4.7 |
-| 11 Recommended and cleanup sheet | Built, QA passed, awaiting review | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10. Branch `feat/phase-11-recommended` |
-| 12 Onboarding | Not started | v2, PRD section 13.4.1 |
+| 11 Recommended and cleanup sheet | Merged | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10 |
+| 12 Onboarding | Built, awaiting QA and the spike | v2, PRD section 13.4.1. Branch `feat/phase-12-onboarding` |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Not started | v2, PRD section 13.4.11 (free) |
 | 15 Pro licensing and gating | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (458 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (481 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -202,6 +202,25 @@ Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo 
   - QA (2026-10-31): the user ran every Phase 11 check in `docs/QA.md` (frames 3, 4 and 6 in light and dark, the row keys, the queue, export, the row menu with Reveal on the sandbox, Show Recommendation, the Enter rule, the sandbox dry run, VoiceOver) and reported them passing. One finding, fixed: the sheet stopped halfway on its way up and vanished (it slid a fixed 480 pt); it now slides its measured height.
   - The held line needs a machine with local snapshots and a real cleanup.
   - Switching to Recommended does not move keyboard focus into the list; click a row or Tab to it first.
+
+**Phase 12: Onboarding**
+- Built:
+  - `onboarding.rs`: Welcome, Full Disk Access and First scan in one card with a page indicator (`Phase::Onboarding(Step)`). It shows when no last snapshot loads and `onboarding_done` is false.
+  - The access step checks the probe at once and every 500 ms (`ACCESS_POLL`) while it is on screen, and on window activation; a grant shows a check mark and moves on after 400 ms. Leaving the step drops the poll.
+  - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. During onboarding the window moves to the right half of its screen and returns when the step ends (`chrome::dock_right`, `platform/window.rs`, through the NSWindow behind GPUI's AppKit handle).
+  - Drag card: a looping toggle (still with Reduce Motion) and, when running from a bundle, the app icon as an AppKit drag source carrying the bundle URL (`platform/drag.rs`). Show DiskLens in Finder is always there as the fallback.
+  - First scan: `category::Live` tallies bytes per category during the walk (path, marker in the folder, media extension); `ScanEvent::Progress` carries the totals, and the first-scan views list the six categories filling in. The exact totals replace them at finish.
+  - Full Disk Access checks go through the `platform::Access` trait; `FakeAccess` records paths, and a test proves the onboarding probes never touch Desktop, Documents or Downloads.
+  - `DISKLENS_MOCK=onboarding` starts the mock as a first launch; access is granted 6 s after Open System Settings.
+- Decisions (2026-10-31):
+  - Live category totals are rough while scanning (hard links count per link, loose media files count as media instead of the folder share); exact at finish.
+  - Native drag plus the Finder fallback; the spike decides whether the native drag stays.
+  - The spike runs on this Mac (macOS 26.6) with a fresh account; macOS 13, 14 and 15 are recorded as untested.
+  - Onboarding shows only without a last snapshot, so an upgraded v1 user with a snapshot skips it. Continue Without no longer marks it done; the first finished scan does, from onboarding or the idle screen.
+  - Cancel during the first scan goes to the idle screen; the next launch starts again at Welcome.
+- Open:
+  - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
+  - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.

@@ -146,6 +146,29 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance, t
 - [ ] Held line (needs a machine with local Time Machine snapshots: `tmutil listlocalsnapshots /`): after a real cleanup that frees at least 1 GB, the results say "X is still held by N local Time Machine snapshots." when free space grew by less than was freed. Only with the user present.
 - [x] VoiceOver (⌘F5): rows read "label, size", the queue's remove buttons read "Remove … from the queue", and the sheet's Clean button is not a Tab stop. (2026-10-31: confirmed by the user.)
 
+## Phase 12: Onboarding
+
+Run with `DISKLENS_MOCK=onboarding cargo run` (access is granted 6 s after Open System Settings), in light and dark appearance.
+
+- [ ] Welcome: app icon, "Welcome to DiskLens", the three points, Continue; the page indicator shows step 1. VoiceOver reads "Step 1 of 3".
+- [ ] Full Disk Access: Open System Settings moves the window to the right half of its screen; within about a second of the simulated grant the check mark shows and the first scan starts without clicking DiskLens; the window returns to its frame. With Reduce Motion on, the toggle in the card is still.
+- [ ] Continue Without goes straight to the first scan.
+- [ ] First scan: files and bytes grow, and the six category rows fill in. Cancel goes to the idle screen. Quit and relaunch with the same mode: Welcome again.
+- [ ] Let a first scan finish: the Overview appears. With the live app, relaunch: no onboarding (`settings.json` has `"onboarding_done": true`).
+- [ ] Keyboard: Tab reaches every button; Return on a focused button activates it.
+
+### Spike (fresh macOS user account, packaged app from `scripts/package.sh`)
+
+Each run starts with DiskLens not in the Full Disk Access list (`tccutil reset SystemPolicyAllFiles` for the bundle id, or a new account).
+
+| Check | macOS 26.6 | macOS 13 | macOS 14 | macOS 15 |
+|-------|-----------|----------|----------|----------|
+| No TCC prompt from launch to the end of onboarding | | untested | untested | untested |
+| DiskLens is in the list after Open System Settings (`~/.Trash` pre-seed) | | untested | untested | untested |
+| Dragging the icon from the card into the list adds DiskLens | | untested | untested | untested |
+| After the drag, DiskLens still responds to clicks | | untested | untested | untested |
+| Turning DiskLens on advances the step within a second, System Settings in front | | untested | untested | untested |
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
