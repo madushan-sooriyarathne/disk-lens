@@ -113,6 +113,8 @@ pub struct AppModel {
     pub page: Page,
     pub sidebar_visible: bool,
     pub inspector_visible: bool,
+    /// The staging queue fills the inspector, on any page (PRD FR-Q-3).
+    pub queue_open: bool,
     /// Highlight Cleanable (PRD FR-EXP-7): tiles with nothing to clean are dimmed.
     pub highlight_cleanable: bool,
     /// Accessibility display settings, reread whenever the window becomes active.
@@ -344,6 +346,7 @@ impl AppModel {
             page: Page::Overview,
             sidebar_visible: true,
             inspector_visible: true,
+            queue_open: false,
             highlight_cleanable: false,
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
@@ -793,6 +796,16 @@ impl AppModel {
 
     pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
         self.inspector_visible = !self.inspector_visible;
+        cx.notify();
+    }
+
+    /// The toolbar queue button and View › Show Queue: shows the queue in the inspector,
+    /// or closes it when it is already showing.
+    pub fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+        self.queue_open = !(self.queue_open && self.inspector_visible);
+        if self.queue_open {
+            self.inspector_visible = true;
+        }
         cx.notify();
     }
 
@@ -1929,6 +1942,40 @@ mod tests {
             model.read_with(cx, |m, _| (m.page, m.focused_row.clone())),
             (Page::Recommended, Some("npm-cache".into()))
         );
+    }
+
+    #[gpui::test]
+    fn the_queue_button_opens_the_inspector_on_the_overview(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.inspector_visible = false;
+            m.toggle_queue(cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| (m.page, m.queue_open, m.inspector_visible)),
+            (Page::Overview, true, true)
+        );
+    }
+
+    #[gpui::test]
+    fn the_queue_button_closes_an_open_queue(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.toggle_queue(cx);
+            m.toggle_queue(cx);
+        });
+        assert!(!model.read_with(cx, |m, _| m.queue_open));
+    }
+
+    #[gpui::test]
+    fn removing_a_queue_item_unstages_it(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        let id = model.update(cx, |m, cx| {
+            let id = m.selected_ids()[0].clone();
+            m.toggle_item(&id, cx);
+            id
+        });
+        assert!(!model.read_with(cx, |m, _| m.selected.contains(&id)));
     }
 
     #[gpui::test]

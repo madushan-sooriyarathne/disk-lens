@@ -96,7 +96,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Recommended", ShowRecommended),
             MenuItem::separator(),
             MenuItem::action("Show Inspector", ToggleInspector),
-            later("Show Queue", Box::new(ShowQueue)),
+            MenuItem::action("Show Queue", ShowQueue),
             MenuItem::action("Highlight Cleanable", HighlightCleanable),
             MenuItem::action("Quick Look", QuickLook),
             MenuItem::separator(),
@@ -158,9 +158,11 @@ impl Render for AppModel {
                                         .children(screens::update_banner(self, window, cx))
                                         .child(shell::page(self, window, cx)),
                                 )
-                                .when(self.inspector_visible && self.page != Page::Overview, |d| {
-                                    d.child(inspector::render(self, t, cx))
-                                }),
+                                .when(
+                                    self.inspector_visible
+                                        && (self.page != Page::Overview || self.queue_open),
+                                    |d| d.child(inspector::render(self, t, cx)),
+                                ),
                         ),
                 ),
         };
@@ -213,16 +215,21 @@ impl Render for AppModel {
                 }),
             )
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| this.toggle_inspector(cx)))
+            .on_action(cx.listener(|this, _: &ShowQueue, _, cx| this.toggle_queue(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
             // Esc closes the cleanup dialog (not while it runs), then the context
-            // menu, then clears the inspected row on Recommended, otherwise goes up.
+            // menu, then the queue, then clears the inspected row on Recommended,
+            // otherwise goes up.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
                 if let Some(stage) = &this.cleanup {
                     if !matches!(stage, Cleanup::Running { .. }) {
                         this.close_cleanup(cx);
                     }
                 } else if this.explorer.close_menu() {
+                    cx.notify();
+                } else if this.queue_open {
+                    this.queue_open = false;
                     cx.notify();
                 } else if this.page == Page::Recommended && this.focused_row.is_some() {
                     this.focus_row(None, cx);

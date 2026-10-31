@@ -252,23 +252,7 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
     } else {
         format!("{} · {}", model.selected.len(), format_bytes(staged))
     };
-    let clean_label = if staged == 0 {
-        "Clean up".to_owned()
-    } else {
-        format!("Clean up {}", format_bytes(staged))
-    };
-    let clean = Button::new("clean-up")
-        .primary()
-        .with_size(Size::Size(px(CONTROL_HEIGHT)))
-        .label(clean_label)
-        .disabled(model.selected.is_empty() || scanning)
-        .on_click(cx.listener(|m, _, _, cx| m.open_cleanup(cx)));
-    // FR-BG-5: a plan built now would belong to the snapshot about to be replaced.
-    let clean = if scanning {
-        clean.tooltip("Available when the update finishes")
-    } else {
-        clean
-    };
+    let clean = clean_button("clean-up", model, staged, cx);
 
     div()
         .h(px(TOOLBAR_HEIGHT))
@@ -316,10 +300,37 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .label(queue_label)
                 .accessibility_label("Queue")
                 .tooltip("Queue")
-                // The queue panel arrives with the inspector content in Phase 11.
-                .on_click(cx.listener(|m, _, _, cx| m.toggle_inspector(cx))),
+                .selected(model.queue_open && model.inspector_visible)
+                .on_click(cx.listener(|m, _, _, cx| m.toggle_queue(cx))),
         )
         .child(clean)
+}
+
+/// `Clean up 52.5 GB`, the one accent control (FR-WIN-3): in the toolbar and the queue.
+pub(super) fn clean_button(
+    id: &'static str,
+    model: &AppModel,
+    staged: u64,
+    cx: &mut Context<AppModel>,
+) -> Button {
+    let scanning = model.scan.is_some();
+    let label = if staged == 0 {
+        "Clean up".to_owned()
+    } else {
+        format!("Clean up {}", format_bytes(staged))
+    };
+    let clean = Button::new(id)
+        .primary()
+        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+        .label(label)
+        .disabled(model.selected.is_empty() || scanning)
+        .on_click(cx.listener(|m, _, _, cx| m.open_cleanup(cx)));
+    // FR-BG-5: a plan built now would belong to the snapshot about to be replaced.
+    if scanning {
+        clean.tooltip("Available when the update finishes")
+    } else {
+        clean
+    }
 }
 
 /// The page under the toolbar.

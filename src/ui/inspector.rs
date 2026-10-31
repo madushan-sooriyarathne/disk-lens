@@ -4,16 +4,16 @@
 use gpui::{
     AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, div, prelude::*, px, svg,
 };
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Disableable, Sizable, Size};
 
 use super::chrome::INSPECTOR_WIDTH;
 use super::format::{format_bytes, format_size, group_digits};
 use super::model::{AppModel, Page};
 use super::recommendations::{checkbox, tier_pill, tilde, tip, toggled};
-use super::selection::{RowState, within};
-use super::shell::CONTROL_HEIGHT;
-use super::stats::largest_folders;
+use super::selection::{self, RowState, within};
+use super::shell::{self, CONTROL_HEIGHT};
+use super::stats::{compute_stats, largest_folders};
 use super::theme::{self, Theme};
 use crate::recommend::model::{ItemStatus, MethodView, RecItem, Recommendation};
 use crate::rules::model::Rules;
@@ -29,6 +29,7 @@ pub fn render(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
         .text_size(px(theme::T_BODY))
         .text_color(t.label);
     let body = match model.page {
+        _ if model.queue_open => Some(queue(model, t, cx)),
         Page::Recommended => model
             .focused_row
             .as_deref()
@@ -399,6 +400,145 @@ fn smaller(node: &ViewNode, t: Theme, cx: &mut Context<AppModel>) -> AnyElement 
         )
         .child(section("Items", t).children(rows))
         .into_any_element()
+}
+
+/// The staging queue (PRD FR-Q-3): staged items grouped by row, each removable,
+/// then the actions on the whole queue.
+fn queue(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> AnyElement {
+    let groups = selection::queue_groups(&model.recommendations, &model.selected);
+    let staged = model.meta.as_ref().map_or(0, |meta| {
+        compute_stats(meta, &model.recommendations, &model.selected).selected
+    });
+    let noun = if groups.len() == 1 { "row" } else { "rows" };
+    let empty = groups.is_empty();
+
+    let mut list = Vec::with_capacity(groups.len());
+    for (r, items) in &groups {
+        let method = items
+            .first()
+            .map(|i| method_words(&i.method))
+            .unwrap_or_default();
+        let mut group = section_with(r.label.clone(), method, t);
+        for i in items {
+            let id = i.item_id.clone();
+            group = group.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(26.))
+                    .text_size(px(12.))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("queued-{}", i.item_id)))
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(theme::MONO)
+                            .tooltip(tip(i.path.clone()))
+                            .child(tilde(&i.path, &model.root_path)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_features(theme::numeric())
+                            .child(format_size(i.size, r.size_is_estimate)),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("unqueue-{}", i.item_id)))
+                            .ghost()
+                            .with_size(Size::Size(px(20.)))
+                            .icon(gpui_component::Icon::default().path("icons/ui/x.svg"))
+                            .accessibility_label(format!("Remove {} from the queue", i.name))
+                            .on_click(cx.listener(move |m, _, _, cx| m.toggle_item(&id, cx))),
+                    ),
+            );
+        }
+        list.push(group);
+    }
+
+    let actions = div()
+        .mt_auto()
+        .pt_2()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            Button::new("queue-copy")
+                .label("Copy as Shell Script")
+                .w_full()
+                .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                .disabled(empty)
+                .on_click(cx.listener(|m, _, _, cx| m.copy_script(cx))),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    Button::new("queue-clear")
+                        .ghost()
+                        .label("Clear Queue")
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.clear_selection(cx))),
+                )
+                .child(div().flex_1())
+                .child(shell::clean_button("queue-clean", model, staged, cx)),
+        );
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .min_h_full()
+        .child(
+            div()
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .child(
+                    div()
+                        .text_size(px(17.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Queue"),
+                )
+                .child(
+                    div()
+                        .text_color(t.secondary)
+                        .font_features(theme::numeric())
+                        .child(format!(
+                            "{} {noun} · {}",
+                            groups.len(),
+                            format_bytes(staged)
+                        )),
+                ),
+        )
+        .when(empty, |d| {
+            d.child(text(
+                "Nothing staged. Check a row or press Space on a tile.",
+                t,
+            ))
+        })
+        .children(list)
+        .child(actions)
+        .into_any_element()
+}
+
+/// A section label with a second label on the right.
+fn section_with(label: String, right: String, t: Theme) -> gpui::Div {
+    div().flex().flex_col().gap(px(2.)).child(
+        div()
+            .flex()
+            .justify_between()
+            .gap_2()
+            .text_size(px(theme::T_SMALL))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(t.secondary)
+            .child(div().min_w_0().truncate().child(label))
+            .child(div().flex_none().child(right)),
+    )
 }
 
 /// Plain-words removal method (PRD 7.5).

@@ -163,6 +163,25 @@ pub fn stage_under(
     Some(next)
 }
 
+/// The staging queue grouped by row (PRD FR-Q-3): rows with staged items, in `recs`
+/// order, each with its staged items in row order.
+pub fn queue_groups<'a>(
+    recs: &'a [Recommendation],
+    selected: &HashSet<String>,
+) -> Vec<(&'a Recommendation, Vec<&'a RecItem>)> {
+    recs.iter()
+        .map(|r| {
+            let staged = r
+                .items
+                .iter()
+                .filter(|i| selected.contains(&i.item_id))
+                .collect::<Vec<_>>();
+            (r, staged)
+        })
+        .filter(|(_, staged)| !staged.is_empty())
+        .collect()
+}
+
 pub(super) fn within(path: &str, dir: &str) -> bool {
     path.strip_prefix(dir)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
@@ -221,6 +240,31 @@ mod tests {
 
     fn set(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn queue_groups_leave_out_rows_with_nothing_staged() {
+        let recs = [
+            rec("a", Tier::Safe, &[("a1", None)]),
+            rec("b", Tier::Safe, &[("b1", None)]),
+        ];
+        let rows: Vec<&str> = queue_groups(&recs, &set(&["b1"]))
+            .iter()
+            .map(|(r, _)| r.row_id.as_str())
+            .collect();
+        assert_eq!(rows, ["b"]);
+    }
+
+    #[test]
+    fn queue_groups_keep_item_order() {
+        let recs = [rec(
+            "a",
+            Tier::Safe,
+            &[("a1", None), ("a2", None), ("a3", None)],
+        )];
+        let groups = queue_groups(&recs, &set(&["a3", "a1"]));
+        let items: Vec<&str> = groups[0].1.iter().map(|i| i.item_id.as_str()).collect();
+        assert_eq!(items, ["a1", "a3"]);
     }
 
     fn sorted(s: &HashSet<String>) -> Vec<&str> {
