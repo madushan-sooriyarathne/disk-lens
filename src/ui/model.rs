@@ -14,6 +14,7 @@ use super::selection;
 use super::source::Source;
 use super::stats;
 use super::theme;
+use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::platform;
@@ -142,6 +143,8 @@ pub struct AppModel {
     pub toast: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
     pub focus_handle: FocusHandle,
+    /// The treemap, where the Explore keymap applies.
+    pub treemap_focus: FocusHandle,
     pub explorer: ExplorerState,
     pub panel: PanelState,
     pub update_state: UpdateState,
@@ -355,6 +358,7 @@ impl AppModel {
             cleanup: None,
             toast: None,
             focus_handle,
+            treemap_focus: cx.focus_handle(),
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
             update_state: UpdateState::Idle,
@@ -802,6 +806,34 @@ impl AppModel {
                 }
             },
         );
+    }
+
+    /// Arrow keys and h/j/k/l: selects the nearest tile in `dir`, or the first tile when
+    /// none is selected (PRD FR-KB-5).
+    pub fn move_selection(&mut self, dir: Dir, cx: &mut Context<Self>) {
+        let Some(view) = &self.view else {
+            return;
+        };
+        let current = self.tile.as_deref().and_then(|k| {
+            view.children
+                .iter()
+                .position(|c| explorer::tile_key(c) == k)
+        });
+        let next = match current {
+            None => Some(0),
+            Some(i) => {
+                let Some(rects) = self.explorer.rects(view) else {
+                    return;
+                };
+                treemap::neighbor(&rects, i, dir)
+            }
+        };
+        if let Some(key) = next
+            .and_then(|i| view.children.get(i))
+            .map(explorer::tile_key)
+        {
+            self.select_tile(Some(key), cx);
+        }
     }
 
     /// Double-click or Return: opens a folder, reveals a file (PRD FR-EXP-8, FR-EXP-9).
@@ -1495,6 +1527,36 @@ mod tests {
         // Home's smaller tile merges folders with no items; its path is home itself.
         model.update(cx, |m, cx| m.stage_tile("~#smaller", cx));
         model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn an_arrow_with_nothing_selected_selects_the_largest_tile(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.move_selection(Dir::Right, cx));
+        model.read_with(cx, |m, _| assert_eq!(m.tile.as_deref(), Some("~/Desktop")));
+    }
+
+    #[gpui::test]
+    fn an_arrow_moves_the_selection_to_a_neighbour(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.select_tile(Some("~/Desktop".into()), cx);
+            m.move_selection(Dir::Right, cx);
+        });
+        model.update(cx, |m, _| {
+            let view = m.view.clone().unwrap();
+            let rects = m.explorer.rects(&view).unwrap();
+            let at = |key: &str| {
+                let i = view
+                    .children
+                    .iter()
+                    .position(|c| explorer::tile_key(c) == key);
+                rects[i.unwrap()].clone()
+            };
+            let (from, to) = (at("~/Desktop"), at(m.tile.as_deref().unwrap()));
+            assert!(to.x >= from.x + from.w, "{to:?} is not right of {from:?}");
+        });
     }
 
     #[gpui::test]

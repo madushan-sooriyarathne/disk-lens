@@ -13,10 +13,11 @@ use gpui::{
 };
 
 use super::format::{format_age, format_bytes, group_digits};
+use super::keymap;
 use super::model::{AppModel, ScanProgress};
 use super::selection::{self, row_for_node};
 use super::theme::{self, Texture, Theme};
-use super::treemap::{self, Rect};
+use super::treemap::{self, Dir, Rect};
 use crate::recommend::model::{ItemStatus, Recommendation, Tier};
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewNode};
@@ -53,7 +54,7 @@ impl ExplorerState {
     }
 
     /// Records the measured area; true when it changed.
-    fn set_size(&mut self, size: (u32, u32)) -> bool {
+    pub(super) fn set_size(&mut self, size: (u32, u32)) -> bool {
         let changed = self.size != Some(size);
         self.size = Some(size);
         changed
@@ -217,9 +218,28 @@ pub fn render(
 
     let treemap = div()
         .id("treemap")
+        .track_focus(&model.treemap_focus)
+        .key_context(keymap::CONTEXT)
         .relative()
         .flex_1()
         .min_h_0()
+        .on_action(cx.listener(|m, _: &keymap::SelectLeft, _, cx| m.move_selection(Dir::Left, cx)))
+        .on_action(
+            cx.listener(|m, _: &keymap::SelectRight, _, cx| m.move_selection(Dir::Right, cx)),
+        )
+        .on_action(cx.listener(|m, _: &keymap::SelectUp, _, cx| m.move_selection(Dir::Up, cx)))
+        .on_action(cx.listener(|m, _: &keymap::SelectDown, _, cx| m.move_selection(Dir::Down, cx)))
+        .on_action(cx.listener(|m, _: &keymap::StageSelected, _, cx| {
+            if let Some(key) = m.tile.clone() {
+                m.stage_tile(&key, cx);
+            }
+        }))
+        .on_action(cx.listener(|m, _: &keymap::OpenSelected, _, cx| {
+            if let Some(key) = m.tile.clone() {
+                m.open_tile(&key, cx);
+            }
+        }))
+        .on_action(cx.listener(|m, _: &keymap::GoUp, _, cx| m.up(cx)))
         .child(measure(cx));
     let treemap = match &model.view {
         Some(v) if v.children.is_empty() => treemap.child(
@@ -472,7 +492,9 @@ fn tile(
     .occlude()
     .on_click({
         let key = key.clone();
-        cx.listener(move |m, e: &gpui::ClickEvent, _, cx| {
+        cx.listener(move |m, e: &gpui::ClickEvent, window, cx| {
+            // Clicking a tile hands the keyboard to the treemap.
+            window.focus(&m.treemap_focus, cx);
             if e.click_count() >= 2 {
                 m.open_tile(&key, cx);
             } else {
