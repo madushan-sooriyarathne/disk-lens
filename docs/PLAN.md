@@ -199,7 +199,7 @@ Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo 
   - The confirm view lists one line per row with its methods (a command shows its program); paths are in the queue panel and the script.
   - The mock's script uses the mock's scan time, so two exports of one plan are equal.
 - Open:
-  - `docs/QA.md`, Phase 11: every check, including the mockup comparisons of frames 3, 4 and 6 in light and dark. Screen capture was not available to the agent, so nothing in this phase was checked in the native window yet.
+  - `docs/QA.md`, Phase 11 (2026-10-31): the user checked frames 3, 4 and 6 in light, the row keys, the queue, export and the Enter rule. One finding, fixed: the sheet stopped halfway on its way up and vanished (it slid a fixed 480 pt); it now slides its measured height. Still to run: Reveal in Finder from the row menu on the sandbox (the mock never reveals), Show Recommendation from Explore, dark appearance, the sandbox dry run ("Updating results…"), VoiceOver.
   - The held line needs a machine with local snapshots and a real cleanup.
   - Switching to Recommended does not move keyboard focus into the list; click a row or Tab to it first.
 
