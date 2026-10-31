@@ -18,7 +18,7 @@ use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::settings;
 use crate::state::AppState;
-use crate::view::{ViewKind, ViewMode, ViewNode};
+use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
 
 pub enum Source {
     Live(Arc<AppState>),
@@ -119,6 +119,32 @@ impl MockData {
         };
         let hit = find(&self.file.view, path).ok_or_else(|| Error::NotInSnapshot(path.into()))?;
         Ok(truncate(hit, LEVELS))
+    }
+
+    /// Level-1 folders by their own category, or their children's when they have any.
+    fn category_totals(&self) -> Vec<CategoryTotal> {
+        let mut totals: Vec<CategoryTotal> = Vec::new();
+        let tiles = self.file.view.children.iter().flat_map(|c| {
+            if c.children.is_empty() {
+                std::slice::from_ref(c).iter()
+            } else {
+                c.children.iter()
+            }
+        });
+        for t in tiles {
+            match totals.iter_mut().find(|e| e.category == t.category) {
+                Some(e) => {
+                    e.size += t.size;
+                    e.folders += 1;
+                }
+                None => totals.push(CategoryTotal {
+                    category: t.category.clone(),
+                    size: t.size,
+                    folders: 1,
+                }),
+            }
+        }
+        totals
     }
 
     fn details(&self, row_id: &str) -> Result<ItemDetails> {
@@ -311,6 +337,13 @@ impl Source {
             Self::Live(state) => backend::get_view(state, path.to_owned(), mode),
             // The mock has one tree for both modes.
             Self::Mock(m) => m.view(path),
+        }
+    }
+
+    pub fn category_totals(&self) -> Result<Vec<CategoryTotal>> {
+        match self {
+            Self::Live(state) => backend::get_category_totals(state),
+            Self::Mock(m) => Ok(m.category_totals()),
         }
     }
 
@@ -538,6 +571,13 @@ mod tests {
             .find(|c| c.kind == ViewKind::Dir)
             .unwrap();
         assert_eq!(m.view(&child.path).unwrap().path, child.path);
+    }
+
+    #[test]
+    fn category_totals_sum_to_the_root_size() {
+        let m = MockData::new(false);
+        let sum: u64 = m.category_totals().iter().map(|t| t.size).sum();
+        assert_eq!(sum, m.file.view.size);
     }
 
     #[test]

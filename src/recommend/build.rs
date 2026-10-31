@@ -113,6 +113,11 @@ impl Analysis {
         None
     }
 
+    /// The rule whose item is rooted exactly at node `id`.
+    pub fn mark_rule(&self, id: u32) -> Option<usize> {
+        self.marks.get(&id).copied()
+    }
+
     /// Rows grouped per rule (or per project), sorted by size within each tier.
     pub fn recommendations(&self, rules: &Rules, env: &Env) -> Vec<Recommendation> {
         let mut rows: Vec<Recommendation> = Vec::new();

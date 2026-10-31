@@ -93,6 +93,19 @@ Build with `scripts/package.sh` (add the minisign key variables for the update a
 
 Results (2026-10-31, macOS, sandbox): all seven checks passed, run by the user in the native window.
 
+## Phase 8: design foundation and window shell
+
+Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
+
+- [ ] Side by side with `docs/mockup-v2.png` (light) and `docs/mockup-v2-dark.png` (dark): sidebar (blurred, traffic lights inside it, pages, six categories by size with folder counts), toolbar order (sidebar toggle, back and forward on Explore, title or breadcrumb, status with Rescan, inspector, queue, Clean up), fonts and colors. List the differences in PLAN.md (Phase 8b).
+- [ ] Window opens at 1280x820 and cannot shrink below 960x640; the window drags by the toolbar.
+- [ ] Clean up reads "Clean up 52.5 GB" in white on green; Clear Queue (Edit menu) turns it into a disabled "Clean up". During Rescan it is disabled with the tooltip "Available when the update finishes".
+- [ ] Keyboard: Tab reaches the sidebar pages, the toolbar buttons and the page content. ⌘1, ⌘2, ⌘3 switch pages; ⌥⌘I toggles the inspector; ⌃⌘S the sidebar; ⌘R rescans; ⌘⇧R reveals the open folder; ⌘⇧H switches the Explore view mode. Command Palette, Show Queue, Quick Look, Export Cleanup Script and Keyboard Shortcuts are greyed out in the menus.
+- [ ] Explore: open a folder, Back goes up, Forward reopens it; opening another folder disables Forward.
+- [ ] VoiceOver (⌘F5): toolbar buttons read "Toggle Sidebar", "Back", "Forward", "Rescan", "Inspector", "Queue" and "Clean up …"; sidebar pages read their names.
+- [ ] Reduce Transparency on (System Settings > Accessibility > Display), then focus the window: the sidebar turns opaque.
+- [ ] Sandbox run (`DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`) without Full Disk Access: the sidebar footer shows "Full Disk Access is off" with Grant Access…, and no banner sits above the page.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

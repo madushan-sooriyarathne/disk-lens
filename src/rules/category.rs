@@ -16,7 +16,7 @@ use crate::view::{dir_id, dir_path};
 pub const MEDIA: &str = "documents_media";
 pub const OTHER: &str = "dev_tools";
 /// Media fallback threshold: at least 6/10 of the node's bytes.
-const MEDIA_SHARE: (u64, u64) = (6, 10);
+pub(crate) const MEDIA_SHARE: (u64, u64) = (6, 10);
 
 pub struct Categories {
     ids: Vec<String>,
@@ -80,6 +80,11 @@ impl Categories {
         } else {
             &self.ids[self.other]
         }
+    }
+
+    /// Category id when directory `id` itself decides (marker or category path).
+    pub fn own(&self, snap: &Snapshot, id: u32) -> Option<&str> {
+        self.own_hit(snap, id).map(|c| self.ids[c].as_str())
     }
 
     fn own_hit(&self, snap: &Snapshot, id: u32) -> Option<usize> {

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::recommend::build::Analysis;
 use crate::recommend::model::Tier;
+use crate::rules::category::{self, MEDIA_SHARE};
 use crate::rules::model::Rules;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +32,14 @@ pub struct ViewNode {
     pub rule_id: Option<String>,
     pub kind: ViewKind,
     pub children: Vec<ViewNode>,
+}
+
+/// What a category owns, for the sidebar (PRD FR-WIN-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategoryTotal {
+    pub category: String,
+    pub size: u64,
+    pub folders: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +170,91 @@ pub fn build_view(
     match resolve(snap, path) {
         Some(Target::Dir(id)) => Ok(dir_view(snap, id, 2, ann)),
         _ => Err(Error::NotInSnapshot(path.display().to_string())),
+    }
+}
+
+/// Levels below the root searched for claimed folders.
+// ponytail: projects nested deeper than this fall back to dev_tools/documents_media;
+// raise it, or memoise marker stats across calls, if real trees need more.
+const MAX_DEPTH: u32 = 4;
+
+/// Bytes per category, every folder counted once. A folder is claimed by the
+/// rule that matched it or by its own marker or category path; what no folder
+/// claims is assigned per top-level folder by its media share. One entry per
+/// rules category, in rules order.
+pub fn category_totals(snap: &Snapshot, rules: &Rules, analysis: &Analysis) -> Vec<CategoryTotal> {
+    let mut totals: Vec<CategoryTotal> = rules
+        .categories
+        .iter()
+        .map(|c| CategoryTotal {
+            category: c.id.clone(),
+            size: 0,
+            folders: 0,
+        })
+        .collect();
+    let root = &snap.nodes[0];
+    let (mut children_size, mut children_media) = (0u64, 0u64);
+    for &child in &root.children {
+        let node = &snap.nodes[child as usize];
+        let (claimed, claimed_media) = claim(snap, rules, analysis, &mut totals, child, 1);
+        let rest = node.size.saturating_sub(claimed);
+        if rest > 0 {
+            let media = node.media_bytes.saturating_sub(claimed_media);
+            add(&mut totals, fallback(rest, media), rest, 1);
+        }
+        children_size = children_size.saturating_add(node.size);
+        children_media = children_media.saturating_add(node.media_bytes);
+    }
+    let files = root.size.saturating_sub(children_size);
+    if files > 0 {
+        let media = root.media_bytes.saturating_sub(children_media);
+        add(&mut totals, fallback(files, media), files, 0);
+    }
+    totals
+}
+
+/// Adds the claimed folders at or below `id` to `totals` and returns their
+/// size and media bytes.
+fn claim(
+    snap: &Snapshot,
+    rules: &Rules,
+    analysis: &Analysis,
+    totals: &mut [CategoryTotal],
+    id: u32,
+    depth: u32,
+) -> (u64, u64) {
+    let node = &snap.nodes[id as usize];
+    let category = match analysis.mark_rule(id) {
+        Some(r) => Some(rules.rules[r].category.as_str()),
+        None => analysis.categories.own(snap, id),
+    };
+    if let Some(category) = category {
+        add(totals, category, node.size, 1);
+        return (node.size, node.media_bytes);
+    }
+    if depth >= MAX_DEPTH {
+        return (0, 0);
+    }
+    node.children.iter().fold((0, 0), |(size, media), &c| {
+        let (s, m) = claim(snap, rules, analysis, totals, c, depth + 1);
+        (size.saturating_add(s), media.saturating_add(m))
+    })
+}
+
+fn fallback(size: u64, media: u64) -> &'static str {
+    let (num, den) = MEDIA_SHARE;
+    if media.saturating_mul(den) >= size.saturating_mul(num) {
+        category::MEDIA
+    } else {
+        category::OTHER
+    }
+}
+
+fn add(totals: &mut [CategoryTotal], category: &str, size: u64, folders: u32) {
+    // Validated rules only name declared categories, so the lookup always hits.
+    if let Some(t) = totals.iter_mut().find(|t| t.category == category) {
+        t.size = t.size.saturating_add(size);
+        t.folders += folders;
     }
 }
 

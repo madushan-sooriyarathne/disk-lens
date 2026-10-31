@@ -24,14 +24,13 @@ fn card(
         .items_center()
         .gap(px(6.))
         .text_size(px(13.))
-        .text_color(t.muted);
+        .text_color(t.secondary);
     if let Some(color) = dot {
         head = head.child(div().size(px(6.)).rounded_full().bg(color));
     }
     head = head.child(label);
     let mut row = div().mt(px(6.)).flex().items_baseline().gap_2p5().child(
         div()
-            .font_family(theme::MONO)
             .text_size(px(30.))
             .line_height(px(36.))
             .font_weight(FontWeight::SEMIBOLD)
@@ -40,9 +39,8 @@ fn card(
     if let Some((text, green)) = secondary {
         row = row.child(
             div()
-                .font_family(theme::MONO)
                 .text_size(px(13.))
-                .text_color(if green { t.safe } else { t.muted })
+                .text_color(if green { t.safe_text } else { t.secondary })
                 .child(text),
         );
     }
@@ -93,12 +91,12 @@ pub fn render(
         .flex()
         .rounded(px(12.))
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card);
+        .border_color(t.separator)
+        .bg(t.widget);
     for (i, c) in cards.into_iter().enumerate() {
         // `divide-x`: a 1 px divider on the left of every card but the first.
         row = row.child(if i > 0 {
-            c.border_l_1().border_color(t.divider)
+            c.border_l_1().border_color(t.separator)
         } else {
             c
         });

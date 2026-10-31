@@ -12,12 +12,14 @@ use super::explorer::ExplorerState;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
+use super::theme;
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
+use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
-use crate::view::{ViewKind, ViewMode, ViewNode};
+use crate::view::{CategoryTotal, ViewKind, ViewMode, ViewNode};
 
 /// How often the UI drains scan events from the scanner thread.
 const SCAN_POLL: Duration = Duration::from_millis(100);
@@ -25,6 +27,14 @@ const SCAN_POLL: Duration = Duration::from_millis(100);
 const STALE_AFTER: i64 = 24 * 3_600;
 /// How long a toast stays up.
 const TOAST: Duration = Duration::from_secs(3);
+
+/// Sidebar pages (PRD FR-WIN-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Overview,
+    Explore,
+    Recommended,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -96,6 +106,16 @@ pub struct AppModel {
     pub root_path: String,
     /// Folder the explorer shows.
     pub path: String,
+    /// Folders left by Back, nearest last; Forward reopens them.
+    pub forward: Vec<String>,
+    pub page: Page,
+    pub sidebar_visible: bool,
+    pub inspector_visible: bool,
+    /// Accessibility display settings, reread whenever the window becomes active.
+    pub reduce_motion: bool,
+    pub reduce_transparency: bool,
+    /// Per-category bytes of the current snapshot, for the sidebar.
+    pub category_totals: Vec<CategoryTotal>,
     pub view: Option<ViewNode>,
     /// `ViewNode::id` under the pointer.
     pub hovered: Option<String>,
@@ -241,13 +261,19 @@ impl AppModel {
             if !window.is_window_active() {
                 return;
             }
-            // The user may have just granted access in System Settings.
+            // The user may have just granted access or changed a display setting.
+            this.reduce_motion = platform::reduce_motion();
+            this.reduce_transparency = platform::reduce_transparency();
             this.recheck_access(cx);
             if this.phase == Phase::Ready {
                 this.refresh(cx);
             }
         });
-        let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
+        theme::sync_components(window, cx);
+        let appearance = cx.observe_window_appearance(window, |_, window, cx| {
+            theme::sync_components(window, cx);
+            cx.notify();
+        });
         // A focused tile or row vanishes on drill-down or rescan. Window-wide keys
         // (Esc, Tab) dispatch from the focused element, so focus must go back to the root.
         let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
@@ -285,6 +311,13 @@ impl AppModel {
             mode: ViewMode::Category,
             root_path: String::new(),
             path: String::new(),
+            forward: Vec::new(),
+            page: Page::Overview,
+            sidebar_visible: true,
+            inspector_visible: false,
+            reduce_motion: platform::reduce_motion(),
+            reduce_transparency: platform::reduce_transparency(),
+            category_totals: Vec::new(),
             view: None,
             hovered: None,
             recommendations: Vec::new(),
@@ -433,7 +466,12 @@ impl AppModel {
                         break;
                     }
                 }
-                Ok::<_, Error>((view?, s.recommendations()?, s.preselected_rows()))
+                Ok::<_, Error>((
+                    view?,
+                    s.recommendations()?,
+                    s.category_totals()?,
+                    s.preselected_rows(),
+                ))
             },
             move |this, loaded, cx| {
                 // The user navigated while this loaded. That newer view request already reads
@@ -441,7 +479,7 @@ impl AppModel {
                 let navigated = this.view_seq != seq;
                 let mut stale = false;
                 match loaded {
-                    Ok((view, recommendations, preselected)) => {
+                    Ok((view, recommendations, totals, preselected)) => {
                         let selected = if first {
                             let mut selected = HashSet::new();
                             for row in &recommendations {
@@ -484,6 +522,9 @@ impl AppModel {
                         }
                         this.meta = Some(meta);
                         this.recommendations = recommendations;
+                        this.category_totals = totals;
+                        // Folders left behind may be gone from the new snapshot.
+                        this.forward.clear();
                         this.selected = selected;
                         // The details belong to the old snapshot; reload them for a surviving row.
                         this.focused_row = None;
@@ -641,14 +682,38 @@ impl AppModel {
 
     /// Shows the folder at `path` in the explorer.
     pub fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
+        self.forward.clear();
         self.load_view(path, self.mode, cx);
     }
 
-    /// Goes up one folder; does nothing at the scan root.
+    /// Goes up one folder, remembered for Forward; does nothing at the scan root.
     pub fn up(&mut self, cx: &mut Context<Self>) {
         if self.path != self.root_path {
-            self.navigate(parent_of(&self.path).to_owned(), cx);
+            self.forward.push(self.path.clone());
+            self.load_view(parent_of(&self.path).to_owned(), self.mode, cx);
         }
+    }
+
+    /// Reopens the folder the last Back left.
+    pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self.forward.pop() {
+            self.load_view(path, self.mode, cx);
+        }
+    }
+
+    pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        cx.notify();
+    }
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_visible = !self.sidebar_visible;
+        cx.notify();
+    }
+
+    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
+        self.inspector_visible = !self.inspector_visible;
+        cx.notify();
     }
 
     pub fn set_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
@@ -682,6 +747,20 @@ impl AppModel {
             self.selected = selection::toggle_row(row, &self.selected);
             cx.notify();
         }
+    }
+
+    /// Selects every ready item of `row_id`; already selected items stay.
+    pub fn add_row(&mut self, row_id: &str, cx: &mut Context<Self>) {
+        if let Some(row) = self.recommendations.iter().find(|r| r.row_id == row_id) {
+            self.selected
+                .extend(selection::ready_ids(row).into_iter().map(String::from));
+            cx.notify();
+        }
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.selected.clear();
+        cx.notify();
     }
 
     pub fn select_safe(&mut self, cx: &mut Context<Self>) {
@@ -968,6 +1047,7 @@ mod tests {
         cx: &mut TestAppContext,
         preselect: bool,
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(preselect).with_step(Duration::ZERO));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
@@ -1037,6 +1117,7 @@ mod tests {
 
     /// A model over the mock, started without Full Disk Access.
     fn setup_without_access(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let mock = MockData::new(false).with_step(Duration::ZERO);
         mock.full_disk_access.store(false, Ordering::Relaxed);
@@ -1138,6 +1219,73 @@ mod tests {
             assert!(!want.is_empty());
             assert_eq!(m.selected, want);
         });
+    }
+
+    /// The first folder tile under the root, opened.
+    fn open_first_folder(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        let child = model.read_with(cx, |m, _| {
+            m.view
+                .as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.kind == crate::view::ViewKind::Dir)
+                .unwrap()
+                .path
+                .clone()
+        });
+        model.update(cx, |m, cx| m.navigate(child.clone(), cx));
+        cx.run_until_parked();
+        child
+    }
+
+    #[gpui::test]
+    fn add_to_queue_selects_the_rows_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let (row_id, ready) = model.read_with(cx, |m, _| {
+            let row = &m.recommendations[0];
+            let ready: HashSet<String> = selection::ready_ids(row)
+                .into_iter()
+                .map(String::from)
+                .collect();
+            (row.row_id.clone(), ready)
+        });
+        model.update(cx, |m, cx| m.add_row(&row_id, cx));
+        model.read_with(cx, |m, _| assert_eq!(m.selected, ready));
+    }
+
+    #[gpui::test]
+    fn clear_queue_empties_the_selection(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.clear_selection(cx));
+        model.read_with(cx, |m, _| assert!(m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn forward_reopens_the_folder_back_left(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let child = open_first_folder(&model, cx);
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.go_forward(cx));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert_eq!(m.path, child));
+    }
+
+    #[gpui::test]
+    fn opening_a_folder_clears_forward(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        open_first_folder(&model, cx);
+        model.update(cx, |m, cx| m.up(cx));
+        cx.run_until_parked();
+        open_first_folder(&model, cx);
+        model.read_with(cx, |m, _| assert!(m.forward.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_sidebar_lists_every_category(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.read_with(cx, |m, _| assert_eq!(m.category_totals.len(), 6));
     }
 
     #[gpui::test]
@@ -1332,6 +1480,7 @@ mod tests {
 
     #[gpui::test]
     fn a_cancelled_scan_reports_the_notice(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         // Slow enough that the cancel lands before the first step ends.
         let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
@@ -1428,6 +1577,7 @@ mod tests {
 
     #[gpui::test]
     fn cleanup_is_refused_while_scanning(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(true).with_step(Duration::from_millis(30)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
@@ -1445,6 +1595,7 @@ mod tests {
         cx: &mut TestAppContext,
         age_secs: i64,
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let now = crate::cleanup::audit::now_ms() as i64 / 1000;
         let mock = MockData::new(false)
@@ -1606,6 +1757,7 @@ mod tests {
 
     #[gpui::test]
     fn a_cancelled_rescan_keeps_the_view(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));

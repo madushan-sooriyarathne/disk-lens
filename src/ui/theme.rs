@@ -1,22 +1,43 @@
 //! Colors, fonts and tile colors. Category colors and labels come from `rules.toml`.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    App, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window, WindowAppearance,
-    rgb,
+    App, FontFeatures, Hsla, Role, SharedString, StatefulInteractiveElement, Styled, Window,
+    WindowAppearance, px, rgb, rgba,
 };
 
 use crate::recommend::model::Tier;
 use crate::rules::model::Rules;
 use crate::view::{ViewMode, ViewNode};
 
-pub const SANS: &str = "Geist";
-pub const MONO: &str = "Geist Mono";
-/// Hatch overlay opacity on matched tiles (PRD section 9).
-pub const HATCH_OPACITY: f32 = 0.35;
+pub const SANS: &str = ".SystemUIFont";
+/// SF Mono on macOS; GPUI resolves CoreText's hidden system name (checked in Phase 8).
+pub const MONO: &str = ".AppleSystemUIFontMonospaced";
+/// Stripe opacity on disposable tiles; PRD 13.5 caps it at 20%.
+pub const STRIPE_ALPHA: f32 = 0.2;
+/// How much of the category fill a disposable or restorable tile keeps.
+pub const TEX_MIX: f32 = 0.65;
+/// Opacity of Kept and System-managed tiles under Highlight cleanable.
+pub const DIM: f32 = 0.45;
+
+// Type scale (pt): large number and page title semibold, the rest regular
+// except the headline.
+pub const T_LARGE: f32 = 28.;
+pub const T_TITLE: f32 = 20.;
+pub const T_HEAD: f32 = 13.;
+pub const T_BODY: f32 = 13.;
+pub const T_SMALL: f32 = 11.;
+
+pub const R_WIDGET: f32 = 14.;
+pub const R_TILE: f32 = 10.;
+pub const R_CONTROL: f32 = 8.;
+
+/// 4 pt grid: around the content and between widgets, inside widgets, between tiles.
+pub const GAP_CONTENT: f32 = 16.;
+pub const GAP_WIDGET: f32 = 12.;
+pub const GAP_TILE: f32 = 4.;
 /// Legend order follows the mockup.
 pub const LEGEND_ORDER: [&str; 6] = [
     "documents_media",
@@ -27,19 +48,45 @@ pub const LEGEND_ORDER: [&str; 6] = [
     "package_caches",
 ];
 
+/// v2 tokens (PRD 13.5), named after `docs/mockup-v2/mockup.html`. Text shades
+/// carry their WCAG ratio in the tests; `*_tint` are the tinted fills under them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
-    pub bg: Hsla,
-    pub card: Hsla,
-    pub card_border: Hsla,
-    pub text: Hsla,
-    pub muted: Hsla,
-    pub divider: Hsla,
+    /// Translucent over the blurred window background.
+    pub sidebar: Hsla,
+    /// The sidebar under Reduce Transparency.
+    pub sidebar_solid: Hsla,
+    pub content: Hsla,
+    pub widget: Hsla,
+    pub hover: Hsla,
+    pub selected: Hsla,
+    pub separator: Hsla,
+    pub scrim: Hsla,
+    pub popover: Hsla,
+    pub label: Hsla,
+    pub secondary: Hsla,
+    /// Secondary text on the sidebar: the mockup's shade measures 4.2:1 there in light mode.
+    pub sidebar_secondary: Hsla,
+    /// Size lines on tiles: passes AA on every category fill and stripe pixel.
+    pub tile_secondary: Hsla,
+    /// Icons and placeholders only, never body text.
+    pub tertiary: Hsla,
+    pub accent: Hsla,
+    pub accent_text: Hsla,
+    /// Fills, dots and stripes.
     pub safe: Hsla,
+    pub safe_text: Hsla,
+    pub safe_tint: Hsla,
     pub review: Hsla,
-    pub safe_fill: Hsla,
-    pub review_fill: Hsla,
-    pub error: Hsla,
+    pub review_text: Hsla,
+    pub review_tint: Hsla,
+    /// Clean up button: the system green fails AA under white text, so a darker one.
+    pub clean: Hsla,
+    pub clean_text: Hsla,
+    pub danger: Hsla,
+    pub neutral: Hsla,
+    pub neutral_border: Hsla,
+    pub free: Hsla,
     /// Picks the `*_dark` category colors from rules.toml.
     pub dark: bool,
 }
@@ -47,39 +94,80 @@ pub struct Theme {
 impl Theme {
     pub fn light() -> Self {
         let c = |hex: u32| Hsla::from(rgb(hex));
+        let a = |hex: u32| Hsla::from(rgba(hex));
         Self {
-            bg: c(0xf7f7f8),
-            card: c(0xffffff),
-            card_border: c(0xe6e6e9),
-            text: c(0x18181b),
-            muted: c(0x6b6b73),
-            divider: c(0xececef),
-            safe: c(0x22a06b),
-            review: c(0xe2a03f),
-            safe_fill: c(0xdff3ea),
-            review_fill: c(0xfbefd9),
-            error: c(0xdc2626),
+            sidebar: a(0xeaeaeed1),
+            sidebar_solid: c(0xeaeaee),
+            content: c(0xffffff),
+            widget: c(0xf5f5f7),
+            hover: a(0x0000000d),
+            selected: a(0x00000014),
+            separator: a(0x0000001a),
+            scrim: a(0x0000002e),
+            popover: c(0xffffff),
+            label: c(0x1d1d1f),
+            secondary: c(0x6e6e73),
+            sidebar_secondary: c(0x636366),
+            tile_secondary: c(0x55555a),
+            tertiary: c(0x8e8e93),
+            accent: c(0x007aff),
+            accent_text: c(0x0062cc),
+            safe: c(0x34c759),
+            safe_text: c(0x1d7a35),
+            safe_tint: c(0xe5f6e9),
+            review: c(0xff9500),
+            review_text: c(0xa34f00),
+            review_tint: c(0xfff1de),
+            clean: c(0x1e7a34),
+            clean_text: c(0xffffff),
+            danger: c(0xd70015),
+            neutral: c(0xececef),
+            neutral_border: c(0xb4b4ba),
+            free: c(0xe8e8ed),
             dark: false,
         }
     }
 
     pub fn dark() -> Self {
         let c = |hex: u32| Hsla::from(rgb(hex));
+        let a = |hex: u32| Hsla::from(rgba(hex));
         Self {
-            bg: c(0x111113),
-            card: c(0x1c1c1f),
-            card_border: c(0x2e2e33),
-            text: c(0xededef),
-            muted: c(0xa1a1aa),
-            divider: c(0x27272a),
-            safe: c(0x3fbf86),
-            review: c(0xe8b04f),
-            safe_fill: c(0x173226),
-            review_fill: c(0x3a2d14),
-            error: c(0xf87171),
+            sidebar: a(0x2c2c30cc),
+            sidebar_solid: c(0x2c2c30),
+            content: c(0x1e1e1e),
+            widget: c(0x2a2a2c),
+            hover: a(0xffffff0f),
+            selected: a(0xffffff1a),
+            separator: a(0xffffff1a),
+            scrim: a(0x00000066),
+            popover: c(0x2c2c2e),
+            label: c(0xf5f5f7),
+            secondary: c(0xa1a1a6),
+            sidebar_secondary: c(0xa1a1a6),
+            tile_secondary: c(0xc2c2c7),
+            tertiary: c(0x7c7c80),
+            accent: c(0x0a84ff),
+            accent_text: c(0x409cff),
+            safe: c(0x30d158),
+            safe_text: c(0x30d158),
+            safe_tint: c(0x1c3323),
+            review: c(0xff9f0a),
+            review_text: c(0xff9f0a),
+            review_tint: c(0x3a2a12),
+            clean: c(0x1e7a34),
+            clean_text: c(0xffffff),
+            danger: c(0xff453a),
+            neutral: c(0x2e2e32),
+            neutral_border: c(0x5a5a60),
+            free: c(0x3a3a3e),
             dark: true,
         }
     }
+}
+
+/// Tabular figures, set once on the window so every number lines up in columns.
+pub fn numeric() -> FontFeatures {
+    FontFeatures(Arc::new(vec![("tnum".into(), 1)]))
 }
 
 /// The theme for the window's appearance (PRD section 9: dark mode).
@@ -90,6 +178,62 @@ pub fn current(window: &Window) -> Theme {
     }
 }
 
+/// Drives gpui-component's theme from these tokens, so its controls match the
+/// hand-built views. Called at startup and on every appearance change: `change`
+/// reloads the component defaults for the mode, then ours overwrite them.
+pub fn sync_components(window: &mut Window, cx: &mut App) {
+    use gpui_component::{Theme as Kit, ThemeMode};
+    let t = current(window);
+    let mode = if t.dark {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
+    Kit::change(mode, Some(window), cx);
+    Kit::update(cx, |k| {
+        let c = &mut k.colors;
+        c.background = t.content;
+        c.foreground = t.label;
+        c.muted = t.widget;
+        c.muted_foreground = t.secondary;
+        c.border = t.separator;
+        c.input = t.separator;
+        c.ring = t.accent;
+        c.caret = t.accent;
+        c.selection = t.accent.opacity(0.25);
+        c.accent = t.hover;
+        c.accent_foreground = t.label;
+        c.secondary = t.widget;
+        c.secondary_hover = t.hover;
+        c.secondary_active = t.selected;
+        c.secondary_foreground = t.label;
+        c.primary = t.clean;
+        c.primary_hover = t.clean;
+        c.primary_active = t.clean;
+        c.primary_foreground = t.clean_text;
+        c.button_primary = t.clean;
+        c.button_primary_hover = t.clean;
+        c.button_primary_active = t.clean;
+        c.button_primary_foreground = t.clean_text;
+        c.button = t.selected;
+        c.button_hover = t.hover;
+        c.button_active = t.selected;
+        c.button_foreground = t.label;
+        c.danger = t.danger;
+        c.popover = t.popover;
+        c.popover_foreground = t.label;
+        c.list_hover = t.hover;
+        c.list_active = t.selected;
+        c.sidebar = t.sidebar;
+        c.title_bar = t.content;
+        k.font_family = SANS.into();
+        k.font_size = px(T_BODY);
+        k.mono_font_family = MONO.into();
+        k.radius = px(R_CONTROL);
+        k.radius_lg = px(R_WIDGET);
+    });
+}
+
 /// Makes a clickable element a Tab stop that VoiceOver names (PRD 10). Enter
 /// and Space click a focused element; the ring shows only for keyboard focus.
 pub fn focusable<E: StatefulInteractiveElement>(
@@ -98,7 +242,7 @@ pub fn focusable<E: StatefulInteractiveElement>(
     role: Role,
     label: impl Into<SharedString>,
 ) -> E {
-    let ring = t.text;
+    let ring = t.accent;
     el.tab_index(0)
         .role(role)
         .aria_label(label)
@@ -163,8 +307,8 @@ pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors
         ViewMode::Cleanup => {
             let (fill, border) = category_colors(theme, FALLBACK_CATEGORY);
             let tint = node.tier.map(|t| match t {
-                Tier::Safe => theme.safe_fill,
-                Tier::Review => theme.review_fill,
+                Tier::Safe => theme.safe_tint,
+                Tier::Review => theme.review_tint,
             });
             TileColors {
                 fill: tint.unwrap_or(fill),
@@ -180,24 +324,6 @@ pub fn tile_colors(theme: &Theme, node: &ViewNode, mode: ViewMode) -> TileColors
                 hatch,
             }
         }
-    }
-}
-
-/// Registers the embedded Geist and Geist Mono fonts.
-pub fn load_fonts(cx: &App) {
-    let fonts = [
-        &include_bytes!("../../assets/fonts/Geist-Regular.ttf")[..],
-        &include_bytes!("../../assets/fonts/Geist-Medium.ttf")[..],
-        &include_bytes!("../../assets/fonts/Geist-SemiBold.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-Regular.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-Medium.ttf")[..],
-        &include_bytes!("../../assets/fonts/GeistMono-SemiBold.ttf")[..],
-    ];
-    if let Err(e) = cx
-        .text_system()
-        .add_fonts(fonts.into_iter().map(Cow::Borrowed).collect())
-    {
-        tracing::warn!("failed to load Geist fonts: {e:#}");
     }
 }
 
@@ -227,20 +353,19 @@ mod tests {
     #[test]
     fn category_colors_match_prd() {
         let table = [
-            ("code_projects", 0xE6E4FB, 0x8E84E8),
-            ("ai_models", 0xFBDDE6, 0xE58AA7),
-            ("mobile_sdks", 0xD9EEF4, 0x6FB7CC),
-            ("package_caches", 0xDCE5F7, 0x7C9BD8),
-            ("documents_media", 0xFCE6D8, 0xEFA57A),
-            ("dev_tools", 0xEEEEF0, 0xC4C4C9),
+            ("code_projects", 0xE3E0F7, 0x7B6FE0),
+            ("ai_models", 0xF6DDE5, 0xD75F86),
+            ("mobile_sdks", 0xD5EBF2, 0x3A9BBA),
+            ("package_caches", 0xDBE4F5, 0x5A82D1),
+            ("documents_media", 0xF7E3D4, 0xDD8A4F),
+            ("dev_tools", 0xEBE5D7, 0xA6926A),
         ];
-        for (id, fill, border) in table {
-            assert_eq!(
-                category_colors(&Theme::light(), id),
-                (hex(fill), hex(border)),
-                "{id}"
-            );
-        }
+        let got: Vec<_> = table
+            .iter()
+            .map(|(id, ..)| category_colors(&Theme::light(), id))
+            .collect();
+        let want: Vec<_> = table.iter().map(|&(_, f, b)| (hex(f), hex(b))).collect();
+        assert_eq!(got, want);
     }
 
     /// WCAG 2 contrast ratio between two opaque colors.
@@ -260,75 +385,95 @@ mod tests {
         (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
     }
 
-    /// The lowest contrast of `fg` against every category fill in `t`.
-    fn worst_on_category_fills(t: &Theme, fg: Hsla) -> f32 {
+    /// `over` painted at `alpha` on `under`, in sRGB like the GPU blends.
+    fn mix(under: Hsla, over: Hsla, alpha: f32) -> Hsla {
+        let (u, o) = (under.to_rgb(), over.to_rgb());
+        let m = |u: f32, o: f32| u + (o - u) * alpha;
+        gpui::Rgba {
+            r: m(u.r, o.r),
+            g: m(u.g, o.g),
+            b: m(u.b, o.b),
+            a: 1.,
+        }
+        .into()
+    }
+
+    /// Every surface a tile label sits on: the solid fill, the reduced
+    /// (disposable, restorable) fill, and its darkest stripe pixel.
+    fn tile_surfaces(t: &Theme) -> Vec<Hsla> {
         LEGEND_ORDER
             .iter()
-            .map(|id| contrast(fg, category_colors(t, id).0))
-            .fold(f32::MAX, f32::min)
+            .flat_map(|id| {
+                let (fill, border) = category_colors(t, id);
+                let reduced = mix(t.content, fill, TEX_MIX);
+                [fill, reduced, mix(reduced, border, STRIPE_ALPHA)]
+            })
+            .chain([t.neutral])
+            .collect()
+    }
+
+    /// Every text-on-fill pair the v2 screens use, with a name for the failure message.
+    fn pairs(t: &Theme) -> Vec<(String, Hsla, Hsla)> {
+        let mut p: Vec<(String, Hsla, Hsla)> = [
+            ("label/content", t.label, t.content),
+            ("label/widget", t.label, t.widget),
+            ("label/popover", t.label, t.popover),
+            ("secondary/content", t.secondary, t.content),
+            ("secondary/widget", t.secondary, t.widget),
+            ("accent_text/content", t.accent_text, t.content),
+            ("accent_text/review_tint", t.accent_text, t.review_tint),
+            ("label/sidebar_solid", t.label, t.sidebar_solid),
+            (
+                "sidebar_secondary/sidebar_solid",
+                t.sidebar_secondary,
+                t.sidebar_solid,
+            ),
+            ("safe_text/content", t.safe_text, t.content),
+            ("safe_text/safe_tint", t.safe_text, t.safe_tint),
+            ("review_text/content", t.review_text, t.content),
+            ("review_text/review_tint", t.review_text, t.review_tint),
+            ("clean_text/clean", t.clean_text, t.clean),
+            ("danger/content", t.danger, t.content),
+        ]
+        .into_iter()
+        .map(|(n, a, b)| (n.to_owned(), a, b))
+        .collect();
+        for (i, s) in tile_surfaces(t).into_iter().enumerate() {
+            p.push((format!("label/tile surface {i}"), t.label, s));
+            p.push((
+                format!("tile_secondary/tile surface {i}"),
+                t.tile_secondary,
+                s,
+            ));
+        }
+        p
     }
 
     const AA: f32 = 4.5;
 
-    #[test]
-    fn light_text_is_aa_on_bg() {
-        let t = Theme::light();
-        assert!(contrast(t.text, t.bg) >= AA);
+    fn failing(t: &Theme) -> Vec<String> {
+        pairs(t)
+            .into_iter()
+            .filter(|(_, fg, bg)| contrast(*fg, *bg) < AA)
+            .map(|(n, fg, bg)| format!("{n}: {:.2}", contrast(fg, bg)))
+            .collect()
     }
 
     #[test]
-    fn light_muted_is_aa_on_card() {
-        let t = Theme::light();
-        assert!(contrast(t.muted, t.card) >= AA);
+    fn light_text_pairs_pass_aa() {
+        assert_eq!(failing(&Theme::light()), Vec::<String>::new());
     }
 
     #[test]
-    fn light_muted_is_aa_on_bg() {
-        let t = Theme::light();
-        assert!(contrast(t.muted, t.bg) >= AA);
-    }
-
-    #[test]
-    fn dark_text_is_aa_on_bg() {
-        let t = Theme::dark();
-        assert!(contrast(t.text, t.bg) >= AA);
-    }
-
-    #[test]
-    fn dark_muted_is_aa_on_card() {
-        let t = Theme::dark();
-        assert!(contrast(t.muted, t.card) >= AA);
-    }
-
-    #[test]
-    fn dark_muted_is_aa_on_bg() {
-        let t = Theme::dark();
-        assert!(contrast(t.muted, t.bg) >= AA);
-    }
-
-    #[test]
-    fn light_text_is_aa_on_every_category_fill() {
-        let t = Theme::light();
-        assert!(worst_on_category_fills(&t, t.text) >= AA);
-    }
-
-    #[test]
-    fn dark_text_is_aa_on_every_category_fill() {
-        let t = Theme::dark();
-        assert!(worst_on_category_fills(&t, t.text) >= AA);
-    }
-
-    #[test]
-    fn dark_error_is_aa_on_card() {
-        let t = Theme::dark();
-        assert!(contrast(t.error, t.card) >= AA);
+    fn dark_text_pairs_pass_aa() {
+        assert_eq!(failing(&Theme::dark()), Vec::<String>::new());
     }
 
     #[test]
     fn dark_mode_uses_the_dark_category_colors() {
         assert_eq!(
             category_colors(&Theme::dark(), "ai_models"),
-            (hex(0x45232F), hex(0xE58AA7))
+            (hex(0x4A2C38), hex(0xEE8AAE))
         );
     }
 
@@ -366,13 +511,13 @@ mod tests {
         let c = tile_colors(&t, &node("ai_models", None), ViewMode::Cleanup);
         assert_eq!(parts(c), (dev_fill, dev_border, None));
         let c = tile_colors(&t, &node("ai_models", Some(Tier::Safe)), ViewMode::Cleanup);
-        assert_eq!(parts(c), (t.safe_fill, t.safe, Some(t.safe)));
+        assert_eq!(parts(c), (t.safe_tint, t.safe, Some(t.safe)));
         let c = tile_colors(
             &t,
             &node("ai_models", Some(Tier::Review)),
             ViewMode::Cleanup,
         );
-        assert_eq!(parts(c), (t.review_fill, t.review, Some(t.review)));
+        assert_eq!(parts(c), (t.review_tint, t.review, Some(t.review)));
 
         let c = tile_colors(&t, &node("ai_models", None), ViewMode::Category);
         assert_eq!(parts(c), (ai_fill, ai_border, None));

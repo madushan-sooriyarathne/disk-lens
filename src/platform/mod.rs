@@ -116,6 +116,16 @@ impl System for MacSystem {
     }
 }
 
+/// System Settings > Accessibility > Display > Reduce motion (PRD 13.5, Motion).
+pub fn reduce_motion() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
+/// System Settings > Accessibility > Display > Reduce transparency.
+pub fn reduce_transparency() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
+}
+
 fn running_apps() -> Vec<App> {
     use objc2_app_kit::NSWorkspace;
     let apps = NSWorkspace::sharedWorkspace().runningApplications();

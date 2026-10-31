@@ -1,4 +1,4 @@
-//! Full-window states (onboarding, idle, scanning, error) and the notice banner.
+//! Full-window states (onboarding, idle, scanning, error) and the update banner.
 
 use std::time::Duration;
 
@@ -27,8 +27,8 @@ fn centered(t: &Theme, content: Div) -> Div {
                 .p_6()
                 .rounded(px(12.))
                 .border_1()
-                .border_color(t.card_border)
-                .bg(t.card),
+                .border_color(t.separator)
+                .bg(t.widget),
         )
 }
 
@@ -61,8 +61,8 @@ fn message(
     cx: &mut Context<AppModel>,
 ) -> Div {
     let go = button(&t, "scan", action)
-        .bg(t.text)
-        .text_color(t.card)
+        .bg(t.label)
+        .text_color(t.widget)
         .on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)));
     let body = div()
         .mt(px(6.))
@@ -85,20 +85,20 @@ pub fn onboarding(
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
-    let bg = t.bg;
+    let bg = t.content;
     let open = button(&t, "open-fda", "Open System Settings")
-        .bg(t.text)
-        .text_color(t.card)
+        .bg(t.label)
+        .text_color(t.widget)
         .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx)));
     let skip = button(&t, "skip-fda", "Continue without access")
         .border_1()
-        .border_color(t.card_border)
+        .border_color(t.separator)
         .hover(move |s| s.bg(bg))
         .on_click(cx.listener(|this, _, _, cx| this.continue_without_access(cx)));
     let body = div()
         .mt(px(6.))
         .text_size(px(13.))
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .child(
             "macOS hides folders such as Mail, Safari and other apps' data until you grant Full Disk Access. \
              Without it, those folders count as unreadable and their sizes are missing. \
@@ -133,7 +133,7 @@ pub fn idle(
         t,
         "Scan your home folder",
         body,
-        t.muted,
+        t.secondary,
         "Scan home folder",
         cx,
     )
@@ -150,10 +150,14 @@ pub fn scanning(
     let stat = |label: &'static str, value: String| {
         div()
             .flex_1()
-            .child(div().text_size(px(13.)).text_color(t.muted).child(label))
             .child(
                 div()
-                    .font_family(theme::MONO)
+                    .text_size(px(13.))
+                    .text_color(t.secondary)
+                    .child(label),
+            )
+            .child(
+                div()
                     .text_size(px(22.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(value),
@@ -179,8 +183,8 @@ pub fn scanning(
         );
     let cancel = button(&t, "cancel", "Cancel")
         .border_1()
-        .border_color(t.card_border)
-        .hover(|s| s.bg(t.bg))
+        .border_color(t.separator)
+        .hover(|s| s.bg(t.content))
         .on_click(cx.listener(|this, _, _, cx| this.cancel_scan(cx)));
     centered(
         &t,
@@ -192,7 +196,7 @@ pub fn scanning(
                     .h(px(4.))
                     .overflow_hidden()
                     .rounded_full()
-                    .bg(t.bg)
+                    .bg(t.content)
                     .child(slider),
             )
             .child(
@@ -209,7 +213,7 @@ pub fn scanning(
                     .truncate()
                     .font_family(theme::MONO)
                     .text_xs()
-                    .text_color(t.muted)
+                    .text_color(t.secondary)
                     .child(current),
             )
             .child(div().flex().child(cancel)),
@@ -226,56 +230,10 @@ pub fn error(
         .error
         .clone()
         .unwrap_or_else(|| "Something went wrong.".into());
-    message(t, "Scan failed", body, t.error, "Try again", cx)
+    message(t, "Scan failed", body, t.danger, "Try again", cx)
 }
 
 /// Notice above the stat cards about unreadable folders, with the way to grant access. Empty otherwise.
-pub fn banner(
-    model: &mut AppModel,
-    window: &mut Window,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let t = theme::current(window);
-    let unreadable = model.meta.as_ref().map_or(0, |m| m.inaccessible_count);
-    let Some(text) = unreadable_notice(unreadable) else {
-        return div();
-    };
-    let banner = div()
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_2()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.review)
-        .bg(t.review_fill)
-        .text_size(px(13.))
-        .child(div().flex_1().child(text));
-    if model.full_disk_access {
-        return banner;
-    }
-    banner.child(
-        theme::focusable(
-            div().id("grant-fda"),
-            &t,
-            Role::Button,
-            "Grant Full Disk Access",
-        )
-        .flex_none()
-        .px_3()
-        .py_1()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.review)
-        .bg(t.card)
-        .font_weight(FontWeight::MEDIUM)
-        .cursor_pointer()
-        .child("Grant Full Disk Access")
-        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx))),
-    )
-}
-
 /// Button label and what a click does.
 type UpdateAction = (&'static str, fn(&mut AppModel, &mut Context<AppModel>));
 
@@ -323,7 +281,7 @@ pub fn update_banner(
         .rounded_lg()
         .border_1()
         .border_color(t.review)
-        .bg(t.review_fill)
+        .bg(t.review_tint)
         .text_size(px(13.))
         .child(div().flex_1().child(text));
     let Some((label, action)) = button else {
@@ -338,7 +296,7 @@ pub fn update_banner(
                 .rounded_lg()
                 .border_1()
                 .border_color(t.review)
-                .bg(t.card)
+                .bg(t.widget)
                 .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
                 .child(label)
@@ -347,7 +305,7 @@ pub fn update_banner(
     )
 }
 
-fn unreadable_notice(n: u32) -> Option<String> {
+pub(super) fn unreadable_notice(n: u32) -> Option<String> {
     (n > 0).then(|| {
         let noun = if n == 1 { "folder" } else { "folders" };
         format!("{n} {noun} couldn't be read. Granting Full Disk Access lets DiskLens see them.")

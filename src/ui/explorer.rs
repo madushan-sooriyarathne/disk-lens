@@ -1,5 +1,5 @@
-//! Explorer card: header, breadcrumb, treemap, legend, tooltip and context
-//! menu.
+//! Explorer card: header, treemap, legend, tooltip and context menu. The
+//! breadcrumb is drawn in the toolbar from `crumbs`.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -16,7 +16,6 @@ use super::model::{AppModel, ScanProgress};
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
 use super::treemap::{self, LayoutOptions, Rect};
-use crate::cleanup::audit::now_ms;
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewMode, ViewNode};
 
@@ -106,7 +105,7 @@ impl ExplorerState {
 /// window scale factor.
 fn hatch(color: Hsla, scale: f32) -> gpui::Background {
     let s = scale * std::f32::consts::SQRT_2;
-    pattern_slash(color.opacity(theme::HATCH_OPACITY), 2.0 * s, 5.0 * s)
+    pattern_slash(color.opacity(theme::STRIPE_ALPHA), 2.0 * s, 5.0 * s)
 }
 
 /// One line on what a tile is: its rule's description, else its category's.
@@ -140,9 +139,9 @@ impl Render for TooltipView {
             .max_w(px(420.))
             .rounded_lg()
             .border_1()
-            .border_color(t.card_border)
-            .bg(t.card)
-            .text_color(t.text)
+            .border_color(t.separator)
+            .bg(t.widget)
+            .text_color(t.label)
             .font_family(theme::SANS)
             .shadow_lg()
             .px_3()
@@ -152,7 +151,7 @@ impl Render for TooltipView {
                 div()
                     .font_family(theme::MONO)
                     .text_size(px(11.))
-                    .text_color(t.muted)
+                    .text_color(t.secondary)
                     .child(self.path.clone()),
             )
             .child(
@@ -163,12 +162,11 @@ impl Render for TooltipView {
                     .gap_2()
                     .child(
                         div()
-                            .font_family(theme::MONO)
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.size.clone()),
                     )
-                    .child(div().text_color(t.muted).child(self.category)),
+                    .child(div().text_color(t.secondary).child(self.category)),
             )
             .children(self.description.map(|d| div().mt_1().child(d)))
     }
@@ -199,7 +197,7 @@ pub fn render(
                 .pt_10()
                 .text_center()
                 .text_size(px(13.))
-                .text_color(t.muted)
+                .text_color(t.secondary)
                 .child("Nothing to show here. Press Esc to go back."),
         ),
         Some(v) => {
@@ -226,17 +224,9 @@ pub fn render(
         .flex_col()
         .rounded(px(12.))
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card)
-        .child(header(
-            model.mode,
-            model.scan.as_ref(),
-            model.error.as_deref(),
-            model.meta.as_ref().map(|m| m.scanned_at),
-            t,
-            cx,
-        ))
-        .child(breadcrumb(model, t, cx))
+        .border_color(t.separator)
+        .bg(t.widget)
+        .child(header(model.mode, t, cx))
         .child(treemap)
         .child(legend(t))
         .children(context_menu(model, t, cx))
@@ -284,7 +274,7 @@ fn measure(cx: &mut Context<AppModel>) -> impl IntoElement {
 
 /// What the header says next to the scan button: progress, the last failure, or the snapshot
 /// age ("Scanned 2 h ago", US-13).
-fn status_label(
+pub(super) fn status_label(
     scan: Option<&ScanProgress>,
     error: Option<&str>,
     scanned_at: Option<i64>,
@@ -299,28 +289,8 @@ fn status_label(
     scanned_at.map(|at| format!("Scanned {}", format_age(now, at)))
 }
 
-/// The status and the scan button: Cancel while updating, Retry after a failure, else Rescan.
-fn header(
-    mode: ViewMode,
-    scan: Option<&ScanProgress>,
-    error: Option<&str>,
-    scanned_at: Option<i64>,
-    t: Theme,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    // Re-rendered on window focus and every interaction, so the age stays current enough.
-    let status = status_label(scan, error, scanned_at, now_ms() as i64 / 1000);
-    let status_color = if scan.is_none() && error.is_some() {
-        t.review
-    } else {
-        t.muted
-    };
-    let scanning = scan.is_some();
-    let (button_id, button_label) = match (scanning, error.is_some()) {
-        (true, _) => ("cancel-rescan", "Cancel"),
-        (false, true) => ("retry-scan", "Retry"),
-        (false, false) => ("rescan", "Rescan"),
-    };
+/// Title and the view-mode toggle. The scan status lives in the toolbar.
+fn header(mode: ViewMode, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
     let toggle = [
         (ViewMode::Category, "Category"),
         (ViewMode::Cleanup, "Cleanup"),
@@ -340,11 +310,11 @@ fn header(
             .py_1()
             .text_size(px(13.))
             .border_1()
-            .border_color(if active { t.card_border } else { t.bg })
+            .border_color(if active { t.separator } else { t.content })
             .when(active, |d| {
-                d.bg(t.card).font_weight(FontWeight::MEDIUM).shadow_sm()
+                d.bg(t.widget).font_weight(FontWeight::MEDIUM).shadow_sm()
             })
-            .when(!active, |d| d.text_color(t.muted))
+            .when(!active, |d| d.text_color(t.secondary))
             .child(label)
             .on_click(cx.listener(move |model, _, _, cx| model.set_mode(m, cx)))
     });
@@ -366,54 +336,34 @@ fn header(
                     div()
                         .mt(px(2.))
                         .text_size(px(13.))
-                        .text_color(t.muted)
+                        .text_color(t.secondary)
                         .child("Your home folder, sized by space used. Click a tile to open it."),
                 ),
         )
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .children(
-                    status.map(|a| div().text_size(px(12.)).text_color(status_color).child(a)),
-                )
-                .child(
-                    theme::focusable(div().id(button_id), &t, Role::Button, button_label)
-                        .cursor_pointer()
-                        .rounded_lg()
-                        .px_3()
-                        .py_1()
-                        .text_size(px(13.))
-                        .text_color(t.muted)
-                        .hover(move |s| s.bg(t.bg).text_color(t.text))
-                        .child(button_label)
-                        .on_click(cx.listener(move |model, _, _, cx| {
-                            if scanning {
-                                model.cancel_scan(cx);
-                            } else {
-                                model.start_scan(cx);
-                            }
-                        })),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .rounded_lg()
-                        .bg(t.bg)
-                        .p(px(2.))
-                        .children(toggle),
-                ),
+            div().flex().items_center().gap_2().child(
+                div()
+                    .flex()
+                    .rounded_lg()
+                    .bg(t.content)
+                    .p(px(2.))
+                    .children(toggle),
+            ),
         )
 }
 
-fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
+/// The path from the scan root to the open folder; earlier parts are links.
+pub(super) fn crumbs(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl IntoElement {
     let trail = treemap::crumbs(&model.root_path, &model.path);
     let last = trail.len() - 1;
     let items = trail.into_iter().enumerate().flat_map(|(i, c)| {
-        let sep = (i > 0).then(|| div().child("/").into_any_element());
+        let sep = (i > 0).then(|| div().text_color(t.tertiary).child("/").into_any_element());
         let label = if i == last {
-            div().text_color(t.text).child(c.label).into_any_element()
+            div()
+                .text_color(t.label)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(c.label)
+                .into_any_element()
         } else {
             let path = c.path;
             theme::focusable(
@@ -423,7 +373,7 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
                 format!("Go to {}", c.label),
             )
             .cursor_pointer()
-            .hover(move |s| s.text_color(t.text).underline())
+            .hover(move |s| s.text_color(t.label).underline())
             .child(c.label)
             .on_click(cx.listener(move |model, _, _, cx| model.navigate(path.clone(), cx)))
             .into_any_element()
@@ -431,23 +381,12 @@ fn breadcrumb(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
         sep.into_iter().chain(Some(label))
     });
     div()
-        .mt_3()
-        .border_t_1()
-        .border_color(t.divider)
         .flex()
         .items_center()
-        .justify_between()
-        .px_5()
-        .py(px(10.))
-        .text_size(px(13.))
-        .text_color(t.muted)
-        .child(div().flex().items_center().gap(px(6.)).children(items))
-        .children(
-            model
-                .view
-                .as_ref()
-                .map(|v| div().font_family(theme::MONO).child(format_bytes(v.size))),
-        )
+        .gap(px(4.))
+        .text_size(px(theme::T_BODY))
+        .text_color(t.secondary)
+        .children(items)
 }
 
 fn legend(t: Theme) -> impl IntoElement {
@@ -460,7 +399,7 @@ fn legend(t: Theme) -> impl IntoElement {
         .pb_4()
         .pt_3()
         .text_size(px(13.))
-        .text_color(t.muted)
+        .text_color(t.secondary)
         .children(theme::LEGEND_ORDER.into_iter().map(|id| {
             div()
                 .flex()
@@ -584,9 +523,8 @@ fn tile(
                     d.child(
                         div()
                             .flex_none()
-                            .font_family(theme::MONO)
                             .text_size(px(12.))
-                            .text_color(t.muted)
+                            .text_color(t.secondary)
                             .child(size),
                     )
                 }),
@@ -611,7 +549,6 @@ fn tile(
                     .absolute()
                     .left(px(10.))
                     .bottom(px(8.))
-                    .font_family(theme::MONO)
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(px(treemap::size_font_px(r.w * r.h) as f32))
                     .child(size),
@@ -640,7 +577,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
             .px_3()
             .py(px(6.))
             .text_size(px(13.))
-            .hover(move |s| s.bg(t.bg))
+            .hover(move |s| s.bg(t.content))
             .child(label)
     };
     let panel = div()
@@ -648,9 +585,9 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
         .min_w(px(192.))
         .rounded_lg()
         .border_1()
-        .border_color(t.card_border)
-        .bg(t.card)
-        .text_color(t.text)
+        .border_color(t.separator)
+        .bg(t.widget)
+        .text_color(t.label)
         .font_family(theme::SANS)
         .shadow_lg()
         .p_1()
