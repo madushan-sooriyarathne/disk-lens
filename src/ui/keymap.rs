@@ -1,5 +1,6 @@
-//! Explore keymap (PRD FR-KB-5), active while the treemap has focus. Esc stays
-//! the window-wide Back and ⌘Y the window-wide Quick Look (root.rs).
+//! Explore keymap (PRD FR-KB-5), active while the treemap has focus, and the
+//! Recommended list keys on the same actions. Esc stays the window-wide Back and
+//! ⌘Y the window-wide Quick Look (root.rs).
 
 use gpui::{App, KeyBinding, actions};
 
@@ -17,6 +18,8 @@ actions!(
 );
 
 pub const CONTEXT: &str = "Treemap";
+/// The Recommended list: j/k and the arrows move between rows (FR-REC-5).
+pub const LIST: &str = "Recommended";
 
 /// `/` is left unbound: Phase 13 opens the palette with it.
 pub fn bind_keys(cx: &mut App) {
@@ -34,5 +37,14 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenSelected, ctx),
         KeyBinding::new("backspace", GoUp, ctx),
         KeyBinding::new("cmd-up", GoUp, ctx),
+    ]);
+    let list = Some(LIST);
+    cx.bind_keys([
+        KeyBinding::new("j", SelectDown, list),
+        KeyBinding::new("down", SelectDown, list),
+        KeyBinding::new("k", SelectUp, list),
+        KeyBinding::new("up", SelectUp, list),
+        KeyBinding::new("space", StageSelected, list),
+        KeyBinding::new("enter", OpenSelected, list),
     ]);
 }

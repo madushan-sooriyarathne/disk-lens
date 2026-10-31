@@ -1,18 +1,21 @@
-//! Inspector (PRD 13.4.7): the trailing panel that describes the selected tile,
-//! a folder, a file or the smaller-items list. Phase 11 adds recommendation rows.
+//! Inspector (PRD 13.4.7): the trailing panel that describes what is selected:
+//! on Explore a folder, a file or the smaller-items list, on Recommended a row.
 
-use gpui::{AnyElement, Context, FontWeight, Hsla, Role, SharedString, div, prelude::*, px, svg};
-use gpui_component::button::Button;
+use gpui::{
+    AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, div, prelude::*, px, svg,
+};
+use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Disableable, Sizable, Size};
 
 use super::chrome::INSPECTOR_WIDTH;
 use super::format::{format_bytes, format_size, group_digits};
-use super::model::AppModel;
-use super::selection::within;
-use super::shell::CONTROL_HEIGHT;
-use super::stats::largest_folders;
+use super::model::{AppModel, Page};
+use super::recommendations::{checkbox, tier_pill, tilde, tip, toggled};
+use super::selection::{self, RowState, within};
+use super::shell::{self, CONTROL_HEIGHT};
+use super::stats::{compute_stats, largest_folders};
 use super::theme::{self, Theme};
-use crate::recommend::model::ItemStatus;
+use crate::recommend::model::{ItemStatus, MethodView, RecItem, Recommendation};
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewNode};
 
@@ -25,7 +28,19 @@ pub fn render(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
         .border_color(t.separator)
         .text_size(px(theme::T_BODY))
         .text_color(t.label);
-    let Some(node) = model.tile_node() else {
+    let body = match model.page {
+        _ if model.queue_open => Some(queue(model, t, cx)),
+        Page::Recommended => model
+            .focused_row
+            .as_deref()
+            .and_then(|id| model.recommendations.iter().find(|r| r.row_id == id))
+            .map(|r| recommendation(model, r, t, cx)),
+        _ => model.tile_node().map(|node| match node.kind {
+            ViewKind::Smaller => smaller(node, t, cx),
+            _ => item(model, node, t, cx),
+        }),
+    };
+    let Some(body) = body else {
         return panel
             .flex()
             .items_center()
@@ -33,10 +48,6 @@ pub fn render(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl In
             .text_color(t.secondary)
             .child("Nothing selected")
             .into_any_element();
-    };
-    let body = match node.kind {
-        ViewKind::Smaller => smaller(node, t, cx),
-        _ => item(model, node, t, cx),
     };
     panel
         .flex()
@@ -281,7 +292,7 @@ fn item(model: &AppModel, node: &ViewNode, t: Theme, cx: &mut Context<AppModel>)
                         .font_features(theme::numeric())
                         .child(format_size(bytes, estimate)),
                 )
-                .on_click(cx.listener(move |m, _, _, cx| m.focus_row(Some(row_id.clone()), cx)))
+                .on_click(cx.listener(move |m, _, _, cx| m.show_row(row_id.clone(), cx)))
             },
         ))
     });
@@ -391,9 +402,368 @@ fn smaller(node: &ViewNode, t: Theme, cx: &mut Context<AppModel>) -> AnyElement 
         .into_any_element()
 }
 
+/// The staging queue (PRD FR-Q-3): staged items grouped by row, each removable,
+/// then the actions on the whole queue.
+fn queue(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> AnyElement {
+    let groups = selection::queue_groups(&model.recommendations, &model.selected);
+    let staged = model.meta.as_ref().map_or(0, |meta| {
+        compute_stats(meta, &model.recommendations, &model.selected).selected
+    });
+    let noun = if groups.len() == 1 { "row" } else { "rows" };
+    let empty = groups.is_empty();
+
+    let mut list = Vec::with_capacity(groups.len());
+    for (r, items) in &groups {
+        let method = items
+            .first()
+            .map(|i| method_words(&i.method))
+            .unwrap_or_default();
+        let mut group = section_with(r.label.clone(), method, t);
+        for i in items {
+            let id = i.item_id.clone();
+            group = group.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(26.))
+                    .text_size(px(12.))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("queued-{}", i.item_id)))
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(theme::MONO)
+                            .tooltip(tip(i.path.clone()))
+                            .child(tilde(&i.path, &model.root_path)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_features(theme::numeric())
+                            .child(format_size(i.size, r.size_is_estimate)),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("unqueue-{}", i.item_id)))
+                            .ghost()
+                            .with_size(Size::Size(px(20.)))
+                            .icon(gpui_component::Icon::default().path("icons/ui/x.svg"))
+                            .accessibility_label(format!("Remove {} from the queue", i.name))
+                            .on_click(cx.listener(move |m, _, _, cx| m.toggle_item(&id, cx))),
+                    ),
+            );
+        }
+        list.push(group);
+    }
+
+    let actions = div()
+        .mt_auto()
+        .pt_2()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("queue-copy")
+                        .label("Copy as Shell Script")
+                        .flex_1()
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.copy_script(cx))),
+                )
+                .child(
+                    Button::new("queue-export")
+                        .label("Export…")
+                        .flex_1()
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.export_script(cx))),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    Button::new("queue-clear")
+                        .ghost()
+                        .label("Clear Queue")
+                        .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                        .disabled(empty)
+                        .on_click(cx.listener(|m, _, _, cx| m.clear_selection(cx))),
+                )
+                .child(div().flex_1())
+                .child(shell::clean_button("queue-clean", model, staged, cx)),
+        );
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .min_h_full()
+        .child(
+            div()
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .child(
+                    div()
+                        .text_size(px(17.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Queue"),
+                )
+                .child(
+                    div()
+                        .text_color(t.secondary)
+                        .font_features(theme::numeric())
+                        .child(format!(
+                            "{} {noun} · {}",
+                            groups.len(),
+                            format_bytes(staged)
+                        )),
+                ),
+        )
+        .when(empty, |d| {
+            d.child(text(
+                "Nothing staged. Check a row or press Space on a tile.",
+                t,
+            ))
+        })
+        .children(list)
+        .child(actions)
+        .into_any_element()
+}
+
+/// A section label with a second label on the right.
+fn section_with(label: String, right: String, t: Theme) -> gpui::Div {
+    div().flex().flex_col().gap(px(2.)).child(
+        div()
+            .flex()
+            .justify_between()
+            .gap_2()
+            .text_size(px(theme::T_SMALL))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(t.secondary)
+            .child(div().min_w_0().truncate().child(label))
+            .child(div().flex_none().child(right)),
+    )
+}
+
+/// Plain-words removal method (PRD 7.5).
+fn method_words(m: &MethodView) -> String {
+    match m {
+        MethodView::Delete => "Deleted permanently".into(),
+        MethodView::Trash => "Moved to Trash".into(),
+        MethodView::Command { display } => format!("Runs `{display}`"),
+    }
+}
+
+/// A recommendation row: the v1 drawer content (PRD FR-INS-3, section 7.5).
+fn recommendation(
+    model: &AppModel,
+    r: &Recommendation,
+    t: Theme,
+    cx: &mut Context<AppModel>,
+) -> AnyElement {
+    let root = model.root_path.as_str();
+    let details = model.details.as_ref().filter(|d| d.row_id == r.row_id);
+    let mut methods: Vec<String> = Vec::new();
+    for i in &r.items {
+        let m = method_words(&i.method);
+        if !methods.contains(&m) {
+            methods.push(m);
+        }
+    }
+    // One item gets the full-width button; several get one Reveal each.
+    let single = r.items.len() == 1;
+
+    let about = match details {
+        Some(d) => vec![
+            section("What it is", t).child(text(d.description.clone(), t)),
+            section("What happens if removed", t).child(text(d.regenerates.clone(), t)),
+        ],
+        None => vec![div().child(text(
+            match model.details_error.as_deref() {
+                Some(e) => format!("Could not load details: {e}"),
+                None => "Loading details…".into(),
+            },
+            t,
+        ))],
+    };
+    let largest = details
+        .filter(|d| !d.largest_subfolders.is_empty())
+        .map(|d| {
+            section("Largest subfolders", t).children(d.largest_subfolders.iter().map(|f| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .text_size(px(12.))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("sub-{}", f.path)))
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(theme::MONO)
+                            .text_color(t.secondary)
+                            .tooltip(tip(f.path.clone()))
+                            .child(tilde(&f.path, root)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_features(theme::numeric())
+                            .child(format_bytes(f.size)),
+                    )
+            }))
+        });
+    let mut items = Vec::with_capacity(r.items.len());
+    for i in &r.items {
+        items.push(rec_item(model, r, i, single, t, cx));
+    }
+    let reveal = r.items.first().filter(|_| single).map(|i| {
+        let path = i.path.clone();
+        div().pt_2().child(
+            Button::new("inspector-reveal")
+                .label("Reveal in Finder")
+                .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                .on_click(cx.listener(move |m, _, _, cx| m.reveal(path.clone(), cx))),
+        )
+    });
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(14.))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(tier_pill(&t, r.tier))
+                .child(
+                    div()
+                        .text_size(px(17.))
+                        .line_height(px(21.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(r.label.clone()),
+                )
+                .child(
+                    div()
+                        .text_color(t.secondary)
+                        .font_features(theme::numeric())
+                        .child(format_size(r.size, r.size_is_estimate)),
+                ),
+        )
+        .children(about)
+        .child(section("Method", t).children(methods.into_iter().map(|m| text(m, t))))
+        .child(section("Items", t).children(items))
+        .children(largest)
+        .children(reveal)
+        .into_any_element()
+}
+
+/// One item of a row, with its checkbox and blocked reason.
+fn rec_item(
+    model: &AppModel,
+    r: &Recommendation,
+    i: &RecItem,
+    single: bool,
+    t: Theme,
+    cx: &mut Context<AppModel>,
+) -> AnyElement {
+    let blocked = match &i.status {
+        ItemStatus::Blocked { reason } => Some(reason.as_str()),
+        ItemStatus::Ready => None,
+    };
+    let state = if model.selected.contains(&i.item_id) {
+        RowState::All
+    } else {
+        RowState::None
+    };
+    let mut check = checkbox(
+        &t,
+        SharedString::from(format!("item-{}", i.item_id)),
+        state,
+        blocked.is_some(),
+        16.,
+    );
+    if blocked.is_none() {
+        let id = i.item_id.clone();
+        check = theme::focusable(check, &t, Role::CheckBox, format!("Select {}", i.name))
+            .aria_toggled(toggled(state))
+            .on_click(cx.listener(move |m, _: &ClickEvent, _, cx| m.toggle_item(&id, cx)));
+    }
+    let sub = div()
+        .id(SharedString::from(format!("item-path-{}", i.item_id)))
+        .truncate()
+        .text_size(px(theme::T_SMALL))
+        .tooltip(tip(i.path.clone()));
+    let sub = match blocked {
+        Some(reason) => sub.text_color(t.review_text).child(reason.to_owned()),
+        None => sub
+            .font_family(theme::MONO)
+            .text_color(t.secondary)
+            .child(tilde(&i.path, &model.root_path)),
+    };
+    let path = i.path.clone();
+    let reveal = (!single).then(|| {
+        theme::focusable(
+            div().id(SharedString::from(format!("reveal-{}", i.item_id))),
+            &t,
+            Role::Button,
+            format!("Reveal {} in Finder", i.name),
+        )
+        .flex_none()
+        .text_size(px(theme::T_SMALL))
+        .text_color(t.accent_text)
+        .cursor_pointer()
+        .child("Reveal")
+        .on_click(cx.listener(move |m, _: &ClickEvent, _, cx| m.reveal(path.clone(), cx)))
+    });
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .py_1()
+        .text_size(px(12.))
+        .child(check)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(div().truncate().child(i.name.clone()))
+                .child(sub),
+        )
+        .child(
+            div()
+                .flex_none()
+                .font_features(theme::numeric())
+                .child(format_size(i.size, r.size_is_estimate)),
+        )
+        .children(reveal)
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn method_words_read_plainly() {
+        assert_eq!(
+            method_words(&MethodView::Command {
+                display: "brew cleanup".into()
+            }),
+            "Runs `brew cleanup`"
+        );
+    }
 
     #[test]
     fn the_root_reads_as_a_tilde() {

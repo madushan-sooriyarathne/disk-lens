@@ -1,16 +1,19 @@
 //! App state and actions: scan phase, explorer path and mode, recommendations,
-//! selection and the open drawer. Views read the public fields and call the methods.
+//! selection and the row in the inspector. Views read the public fields and call the methods.
 
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
+use super::cleanup;
 use super::explorer::{self, ExplorerState};
 use super::motion;
-use super::recommendations::PanelState;
+use super::recommendations::{self, PanelState};
 use super::selection;
 use super::source::Source;
 use super::stats;
@@ -69,6 +72,8 @@ pub enum Cleanup {
     },
     Results {
         summary: CleanupSummary,
+        /// Freed bytes local snapshots still hold, and how many snapshots (PRD 13.4.8).
+        held: Option<(u64, usize)>,
     },
 }
 
@@ -113,6 +118,8 @@ pub struct AppModel {
     pub page: Page,
     pub sidebar_visible: bool,
     pub inspector_visible: bool,
+    /// The staging queue fills the inspector, on any page (PRD FR-Q-3).
+    pub queue_open: bool,
     /// Highlight Cleanable (PRD FR-EXP-7): tiles with nothing to clean are dimmed.
     pub highlight_cleanable: bool,
     /// Accessibility display settings, reread whenever the window becomes active.
@@ -132,20 +139,30 @@ pub struct AppModel {
     pub recommendations: Vec<Recommendation>,
     /// Selected item IDs. Empty by default (S-09); only ready items.
     pub selected: HashSet<String>,
-    /// Row whose detail drawer is open.
+    /// Row shown in the inspector on Recommended.
     pub focused_row: Option<String>,
     /// Details of `focused_row`, once loaded.
     pub details: Option<ItemDetails>,
     /// Why the details of `focused_row` could not be loaded.
     pub details_error: Option<String>,
-    /// Open cleanup dialog, if any.
+    /// Open cleanup sheet, if any.
     pub cleanup: Option<Cleanup>,
+    /// The sheet as it was when closed, drawn while it slides back up.
+    pub sheet_exit: Option<Cleanup>,
+    /// Bumped per sheet open and close, so each one plays its animation.
+    pub sheet_seq: u64,
+    /// The sheet's last painted height: how far it slides (0 until first painted).
+    pub sheet_height: Rc<Cell<f32>>,
+    /// Free space right before the running cleanup, to tell what it freed.
+    free_before: Option<u64>,
     /// Short notice at the bottom of the window ("Script copied").
     pub toast: Option<String>,
     /// Focused at startup so window-wide keys (root.rs) dispatch.
     pub focus_handle: FocusHandle,
     /// The treemap, where the Explore keymap applies.
     pub treemap_focus: FocusHandle,
+    /// The Recommended list, where j/k/Space/Return apply.
+    pub list_focus: FocusHandle,
     pub explorer: ExplorerState,
     pub panel: PanelState,
     pub update_state: UpdateState,
@@ -342,6 +359,7 @@ impl AppModel {
             page: Page::Overview,
             sidebar_visible: true,
             inspector_visible: true,
+            queue_open: false,
             highlight_cleanable: false,
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
@@ -357,9 +375,14 @@ impl AppModel {
             details: None,
             details_error: None,
             cleanup: None,
+            sheet_exit: None,
+            sheet_seq: 0,
+            sheet_height: Rc::default(),
+            free_before: None,
             toast: None,
             focus_handle,
             treemap_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle(),
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
             update_state: UpdateState::Idle,
@@ -540,7 +563,7 @@ impl AppModel {
                             }
                             kept
                         };
-                        let drawer = this
+                        let inspected = this
                             .focused_row
                             .clone()
                             .filter(|id| recommendations.iter().any(|r| &r.row_id == id));
@@ -571,8 +594,8 @@ impl AppModel {
                         this.focused_row = None;
                         this.details = None;
                         this.details_error = None;
-                        if drawer.is_some() {
-                            this.focus_row(drawer, cx);
+                        if inspected.is_some() {
+                            this.focus_row(inspected, cx);
                         }
                         this.error = None;
                         this.phase = Phase::Ready;
@@ -793,6 +816,16 @@ impl AppModel {
         cx.notify();
     }
 
+    /// The toolbar queue button and View › Show Queue: shows the queue in the inspector,
+    /// or closes it when it is already showing.
+    pub fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+        self.queue_open = !(self.queue_open && self.inspector_visible);
+        if self.queue_open {
+            self.inspector_visible = true;
+        }
+        cx.notify();
+    }
+
     /// The selected tile's node in the current view.
     pub fn tile_node(&self) -> Option<&ViewNode> {
         self.find_tile(self.tile.as_deref()?)
@@ -889,6 +922,10 @@ impl AppModel {
 
     /// Space on a tile: stages its ready items, or unstages them (PRD FR-Q-2).
     pub fn stage_tile(&mut self, key: &str, cx: &mut Context<Self>) {
+        // The queue is the open plan's input while the sheet is up.
+        if self.cleanup.is_some() {
+            return;
+        }
         let Some(node) = self.find_tile(key) else {
             return;
         };
@@ -976,7 +1013,69 @@ impl AppModel {
         cx.notify();
     }
 
-    /// Opens the detail drawer for `row_id` and loads its details; `None` closes it.
+    /// j/k and the arrows on Recommended: focuses the next or previous row in list order, or
+    /// the first row when none is focused, and scrolls it into view (PRD FR-REC-5).
+    pub fn move_row(&mut self, down: bool, cx: &mut Context<Self>) {
+        let order = recommendations::ordered(&self.recommendations);
+        let current = self
+            .focused_row
+            .as_deref()
+            .and_then(|id| order.iter().position(|r| r.row_id == id));
+        let next = match current {
+            None => 0,
+            Some(i) if down => (i + 1).min(order.len().saturating_sub(1)),
+            Some(i) => i.saturating_sub(1),
+        };
+        let Some(id) = order.get(next).map(|r| r.row_id.clone()) else {
+            return;
+        };
+        if let Some(ix) = recommendations::list_index(&self.recommendations, &id) {
+            self.panel.scroll.scroll_to_item(ix);
+        }
+        if self.focused_row.as_deref() != Some(id.as_str()) {
+            self.focus_row(Some(id), cx);
+        }
+    }
+
+    /// Space on Recommended: stages or unstages the focused row's ready items.
+    pub fn stage_row(&mut self, cx: &mut Context<Self>) {
+        if self.cleanup.is_some() {
+            return;
+        }
+        let Some(row) = self
+            .focused_row
+            .as_deref()
+            .and_then(|id| self.recommendations.iter().find(|r| r.row_id == id))
+        else {
+            return;
+        };
+        if selection::ready_ids(row).is_empty() {
+            self.show_toast("Nothing here can be cleaned".into(), cx);
+        } else {
+            let id = row.row_id.clone();
+            self.toggle_row(&id, cx);
+        }
+    }
+
+    /// Return on Recommended: shows the focused row in the inspector.
+    pub fn open_row(&mut self, cx: &mut Context<Self>) {
+        if self.focused_row.is_some() {
+            self.inspector_visible = true;
+            cx.notify();
+        }
+    }
+
+    /// "Show Recommendation": opens Recommended with `row_id` in the inspector.
+    pub fn show_row(&mut self, row_id: String, cx: &mut Context<Self>) {
+        self.page = Page::Recommended;
+        self.inspector_visible = true;
+        self.focus_row(Some(row_id.clone()), cx);
+        if let Some(ix) = recommendations::list_index(&self.recommendations, &row_id) {
+            self.panel.scroll.scroll_to_item(ix);
+        }
+    }
+
+    /// Shows `row_id` in the inspector and loads its details; `None` clears it.
     pub fn focus_row(&mut self, row_id: Option<String>, cx: &mut Context<Self>) {
         self.focused_row = row_id.clone();
         self.details = None;
@@ -1063,6 +1162,10 @@ impl AppModel {
     }
 
     fn request_plan(&mut self, permanent: bool, cx: &mut Context<Self>) {
+        if self.cleanup.is_none() {
+            self.sheet_exit = None;
+            self.sheet_seq += 1;
+        }
         self.cleanup = Some(Cleanup::Planning);
         cx.notify();
         let (snapshot, ids) = (self.snapshot_id(), self.selected_ids());
@@ -1103,6 +1206,7 @@ impl AppModel {
             self.show_toast(format!("Could not start the cleanup: {e}"), cx);
             return;
         }
+        self.free_before = self.source.free_space();
         self.cleanup = Some(Cleanup::Running {
             plan,
             done: 0,
@@ -1132,9 +1236,13 @@ impl AppModel {
                     if gone && !done {
                         model.cleanup = Some(Cleanup::Results {
                             summary: CleanupSummary::default(),
+                            held: None,
                         });
                         model.show_toast("The cleanup stopped unexpectedly".into(), cx);
                         done = true;
+                    }
+                    if done {
+                        model.finish_cleanup(cx);
                     }
                     cx.notify();
                     done
@@ -1174,32 +1282,81 @@ impl AppModel {
                 false
             }
             CleanupEvent::Finished { summary } => {
-                self.cleanup = Some(Cleanup::Results { summary });
+                self.cleanup = Some(Cleanup::Results {
+                    summary,
+                    held: None,
+                });
                 true
             }
         }
     }
 
-    /// Cancel in the confirm dialog, or Done in the results. After a cleanup
-    /// the selection is cleared and the scan root is rescanned, so sizes and
-    /// recommendations reflect the disk (PRD section 7.6, step 8).
-    pub fn close_cleanup(&mut self, cx: &mut Context<Self>) {
-        match self.cleanup {
-            Some(Cleanup::Running { .. }) | None => {}
-            Some(Cleanup::Results { .. }) => {
-                self.cleanup = None;
-                self.selected.clear();
-                self.start_scan(cx);
-            }
-            Some(Cleanup::Planning | Cleanup::Confirm { .. }) => {
-                self.cleanup = None;
-                cx.notify();
-            }
+    /// After the last item the follow-up rescan starts at once, so the results can say
+    /// "Updating results…" (FR-BG-6), and they learn whether local snapshots still hold
+    /// some of the freed space (PRD 13.4.8).
+    fn finish_cleanup(&mut self, cx: &mut Context<Self>) {
+        self.start_scan(cx);
+        let before = self.free_before.take();
+        let Some(Cleanup::Results { summary, .. }) = &self.cleanup else {
+            return;
+        };
+        // A dry run frees nothing, so there is nothing to explain.
+        if summary.dry_run {
+            return;
         }
+        let freed = summary.freed;
+        off_thread(
+            &self.source,
+            cx,
+            |s| (s.free_space(), s.local_snapshot_count()),
+            move |this, (after, snapshots), _| {
+                let snapshots = match snapshots {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::warn!("could not list local snapshots: {e}");
+                        return;
+                    }
+                };
+                if let Some(Cleanup::Results { held, .. }) = &mut this.cleanup {
+                    *held = cleanup::held_by_snapshots(before, after, freed, snapshots);
+                }
+            },
+        );
     }
 
-    /// "Copy script": the selection's plan as a bash script on the clipboard.
-    pub fn copy_script(&mut self, cx: &mut Context<Self>) {
+    /// Cancel in the confirm view, or Done in the results, which also clears the queue (the
+    /// rescan already started when the cleanup finished). The sheet slides back up.
+    pub fn close_cleanup(&mut self, cx: &mut Context<Self>) {
+        match self.cleanup {
+            Some(Cleanup::Running { .. }) | None => return,
+            Some(Cleanup::Results { .. }) => self.selected.clear(),
+            Some(Cleanup::Planning | Cleanup::Confirm { .. }) => {}
+        }
+        self.sheet_exit = self.cleanup.take();
+        self.sheet_seq += 1;
+        cx.notify();
+        let seq = self.sheet_seq;
+        let exit = motion::Transition::new(motion::NAV, self.reduce_motion).duration();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(exit).await;
+            this.update(cx, |m, cx| {
+                if m.sheet_seq == seq {
+                    m.sheet_exit = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Builds the queue's plan and its script off the UI thread, then hands the script
+    /// to `then`. Copy and Export share it, so both match `export_script` (FR-Q-4).
+    fn queue_script(
+        &mut self,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, String, &mut Context<Self>) + 'static,
+    ) {
         if self.selected.is_empty() {
             return;
         }
@@ -1212,13 +1369,47 @@ impl AppModel {
                 s.export_script(&plan.plan_id)
             },
             |this, script, cx| match script {
-                Ok(script) => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(script));
-                    this.show_toast("Cleanup script copied to the clipboard".into(), cx);
-                }
+                Ok(script) => then(this, script, cx),
                 Err(e) => this.show_toast(format!("Could not export the script: {e}"), cx),
             },
         );
+    }
+
+    /// Copy as Shell Script: the queue's script on the clipboard.
+    pub fn copy_script(&mut self, cx: &mut Context<Self>) {
+        self.queue_script(cx, |this, script, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(script));
+            this.show_toast("Cleanup script copied to the clipboard".into(), cx);
+        });
+    }
+
+    /// Export Cleanup Script…: the queue's script, saved where the save panel says.
+    pub fn export_script(&mut self, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let dir = home
+            .map(|h| h.join("Downloads"))
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(|| std::path::PathBuf::from(&self.root_path));
+        self.queue_script(cx, move |_, script, cx| {
+            let picked = cx.prompt_for_new_path(&dir, Some("disklens-cleanup.sh"));
+            cx.spawn(async move |this, cx| {
+                let saved = match picked.await {
+                    Ok(Ok(Some(path))) => std::fs::write(&path, script)
+                        .map_err(|e| format!("{}: {e}", path.display())),
+                    Ok(Ok(None)) | Err(_) => return,
+                    Ok(Err(e)) => Err(e.to_string()),
+                };
+                let text = match saved {
+                    Ok(()) => "Cleanup script saved".to_owned(),
+                    Err(e) => {
+                        tracing::warn!("could not save the cleanup script: {e}");
+                        "Could not save the script".to_owned()
+                    }
+                };
+                this.update(cx, |m, cx| m.show_toast(text, cx)).ok();
+            })
+            .detach();
+        });
     }
 
     fn show_toast(&mut self, text: String, cx: &mut Context<Self>) {
@@ -1791,6 +1982,111 @@ mod tests {
         });
     }
 
+    /// The first row the Recommended list shows.
+    fn first_listed_row(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        model.read_with(cx, |m, _| {
+            recommendations::ordered(&m.recommendations)[0]
+                .row_id
+                .clone()
+        })
+    }
+
+    #[gpui::test]
+    fn j_with_nothing_focused_focuses_the_first_listed_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let first = first_listed_row(&model, cx);
+        model.update(cx, |m, cx| m.move_row(true, cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.focused_row.clone()),
+            Some(first)
+        );
+    }
+
+    #[gpui::test]
+    fn k_moves_to_the_previous_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let first = first_listed_row(&model, cx);
+        model.update(cx, |m, cx| {
+            m.move_row(true, cx);
+            m.move_row(true, cx);
+            m.move_row(false, cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| m.focused_row.clone()),
+            Some(first)
+        );
+    }
+
+    #[gpui::test]
+    fn space_on_a_row_stages_its_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let expected: HashSet<String> = model.update(cx, |m, cx| {
+            m.focus_row(Some("npm-cache".into()), cx);
+            m.stage_row(cx);
+            let row = m.recommendations.iter().find(|r| r.row_id == "npm-cache");
+            selection::ready_ids(row.unwrap())
+                .into_iter()
+                .map(String::from)
+                .collect()
+        });
+        assert_eq!(model.read_with(cx, |m, _| m.selected.clone()), expected);
+    }
+
+    #[gpui::test]
+    fn return_on_a_row_opens_the_inspector(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.inspector_visible = false;
+            m.focus_row(Some("npm-cache".into()), cx);
+            m.open_row(cx);
+        });
+        assert!(model.read_with(cx, |m, _| m.inspector_visible));
+    }
+
+    #[gpui::test]
+    fn show_recommendation_opens_recommended_with_the_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.show_row("npm-cache".into(), cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| (m.page, m.focused_row.clone())),
+            (Page::Recommended, Some("npm-cache".into()))
+        );
+    }
+
+    #[gpui::test]
+    fn the_queue_button_opens_the_inspector_on_the_overview(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.inspector_visible = false;
+            m.toggle_queue(cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| (m.page, m.queue_open, m.inspector_visible)),
+            (Page::Overview, true, true)
+        );
+    }
+
+    #[gpui::test]
+    fn the_queue_button_closes_an_open_queue(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.toggle_queue(cx);
+            m.toggle_queue(cx);
+        });
+        assert!(!model.read_with(cx, |m, _| m.queue_open));
+    }
+
+    #[gpui::test]
+    fn removing_a_queue_item_unstages_it(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        let id = model.update(cx, |m, cx| {
+            let id = m.selected_ids()[0].clone();
+            m.toggle_item(&id, cx);
+            id
+        });
+        assert!(!model.read_with(cx, |m, _| m.selected.contains(&id)));
+    }
+
     #[gpui::test]
     fn toggle_row_selects_then_clears(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
@@ -1904,7 +2200,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn selection_survives_a_swap_by_path(cx: &mut TestAppContext) {
+    fn the_queue_survives_a_snapshot_swap_by_path(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         let real_id = model.update(cx, |m, _| {
             let item = &mut m.recommendations[0].items[0];
@@ -1914,6 +2210,16 @@ mod tests {
         });
         rescan(&model, cx);
         assert!(model.read_with(cx, |m, _| m.selected.contains(&real_id)));
+    }
+
+    #[gpui::test]
+    fn the_queue_is_empty_after_a_relaunch(cx: &mut TestAppContext) {
+        let (staged, cx) = setup(cx, false);
+        staged.update(cx, |m, cx| m.select_safe(cx));
+        let source = Source::Mock(MockData::new(false).with_step(Duration::ZERO));
+        let relaunched = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        assert!(relaunched.read_with(cx, |m, _| m.selected.is_empty()));
     }
 
     #[gpui::test]
@@ -1956,7 +2262,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn drawer_closes_when_its_row_is_gone(cx: &mut TestAppContext) {
+    fn the_inspected_row_clears_when_it_is_gone(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         model.update(cx, |m, _| m.focused_row = Some("gone-row".into()));
         rescan(&model, cx);
@@ -2201,29 +2507,97 @@ mod tests {
             matches!(m.cleanup, Some(Cleanup::Results { .. }))
         });
         model.read_with(cx, |m, _| {
-            let Some(Cleanup::Results { summary }) = &m.cleanup else {
+            let Some(Cleanup::Results { summary, .. }) = &m.cleanup else {
                 unreachable!()
             };
             assert!(summary.dry_run);
         });
     }
 
-    #[gpui::test]
-    fn closing_the_results_clears_the_selection_and_rescans(cx: &mut TestAppContext) {
-        let (model, cx) = setup(cx, true);
+    /// Opens the sheet over the preselected mock queue and runs it to the results.
+    fn run_cleanup(model: &Entity<AppModel>, cx: &mut VisualTestContext) {
         model.update(cx, |m, cx| m.open_cleanup(cx));
         cx.run_until_parked();
         model.update(cx, |m, cx| m.confirm_cleanup(cx));
-        settle(cx, &model, |m| {
+        settle(cx, model, |m| {
             matches!(m.cleanup, Some(Cleanup::Results { .. }))
         });
-        model.update(cx, |m, cx| m.close_cleanup(cx));
-        model.read_with(cx, |m, _| {
-            assert_eq!(
-                (m.phase, m.scan.is_some(), m.selected.is_empty()),
-                (Phase::Ready, true, true)
-            );
+    }
+
+    #[gpui::test]
+    fn enter_never_confirms_the_cleanup(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::ui::root::bind_keys(cx);
         });
+        let source = Source::Mock(MockData::new(true).with_step(Duration::ZERO));
+        let (model, cx) = cx.add_window_view(|window, cx| AppModel::new(source, window, cx));
+        cx.run_until_parked();
+        // Enter on each Tab stop in turn. The sheet paints last, so its stops come last in
+        // Tab order: walking back from the window root reaches them first. Enter on
+        // Cancel closes the sheet, so each stop gets a fresh sheet and a fresh walk.
+        for stops in 1..=10 {
+            model.update_in(cx, |m, window, cx| {
+                m.open_cleanup(cx);
+                window.focus(&m.focus_handle, cx);
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes(&"shift-tab ".repeat(stops));
+            // A focused element clicks on the key up that follows its key down.
+            let enter = gpui::Keystroke::parse("enter").unwrap();
+            cx.simulate_event(gpui::KeyDownEvent {
+                keystroke: enter.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(gpui::KeyUpEvent { keystroke: enter });
+            cx.run_until_parked();
+            let confirmed = model.read_with(cx, |m, _| {
+                matches!(
+                    m.cleanup,
+                    Some(Cleanup::Running { .. } | Cleanup::Results { .. })
+                )
+            });
+            assert!(
+                !confirmed,
+                "Enter confirmed after {stops} Shift-Tab presses"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn finishing_a_cleanup_starts_the_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        run_cleanup(&model, cx);
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
+    }
+
+    #[gpui::test]
+    fn closing_the_results_clears_the_queue(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        run_cleanup(&model, cx);
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        assert!(model.read_with(cx, |m, _| m.selected.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_sheet_slides_up_after_closing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        assert!(model.read_with(cx, |m, _| m.sheet_exit.is_some()));
+    }
+
+    #[gpui::test]
+    fn the_sheet_is_gone_after_its_exit(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.close_cleanup(cx));
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.sheet_exit.is_none()));
     }
 
     #[gpui::test]
@@ -2279,6 +2653,51 @@ mod tests {
             };
             assert_eq!((*permanent, plan.trash_total), (true, 0));
         });
+    }
+
+    /// What `export_script` gives for the current queue.
+    fn expected_script(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        model.read_with(cx, |m, _| {
+            let plan = m
+                .source
+                .build_plan(&m.snapshot_id(), m.selected_ids(), false)
+                .unwrap();
+            m.source.export_script(&plan.plan_id).unwrap()
+        })
+    }
+
+    #[gpui::test]
+    fn copy_as_shell_script_matches_export_script(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.copy_script(cx));
+        cx.run_until_parked();
+        let copied = cx.read_from_clipboard().and_then(|c| c.text());
+        assert_eq!(copied, Some(expected_script(&model, cx)));
+    }
+
+    #[gpui::test]
+    fn the_exported_file_matches_export_script(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cleanup.sh");
+        model.update(cx, |m, cx| m.export_script(cx));
+        cx.run_until_parked();
+        cx.simulate_new_path_selection(|_| Some(path.clone()));
+        cx.run_until_parked();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            expected_script(&model, cx)
+        );
+    }
+
+    #[gpui::test]
+    fn a_cancelled_save_panel_writes_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.export_script(cx));
+        cx.run_until_parked();
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.toast.is_none()));
     }
 
     #[gpui::test]

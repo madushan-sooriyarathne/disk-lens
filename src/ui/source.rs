@@ -381,6 +381,25 @@ impl Source {
         }
     }
 
+    /// Free bytes before and after a cleanup. The mock's volume never changes.
+    pub fn free_space(&self) -> Option<u64> {
+        match self {
+            Self::Live(state) => backend::free_space(state),
+            Self::Mock(m) => {
+                let v = &m.file.meta.volume;
+                Some(v.available.saturating_sub(v.purgeable))
+            }
+        }
+    }
+
+    /// The mock machine keeps no local snapshots.
+    pub fn local_snapshot_count(&self) -> Result<usize> {
+        match self {
+            Self::Live(state) => backend::local_snapshot_count(state),
+            Self::Mock(_) => Ok(0),
+        }
+    }
+
     pub fn reveal(&self, path: &str) -> Result<()> {
         match self {
             Self::Live(state) => backend::reveal_in_finder(state, path.to_owned()),
@@ -451,9 +470,10 @@ impl Source {
     pub fn export_script(&self, plan_id: &str) -> Result<String> {
         match self {
             Self::Live(state) => backend::export_script(state, plan_id),
+            // The mock's own scan time, so two exports of one plan are byte-equal.
             Self::Mock(m) => Ok(script::render(
                 &m.stored_plan(plan_id)?,
-                crate::cleanup::audit::now_ms() as i64 / 1000,
+                m.file.meta.scanned_at,
             )),
         }
     }
