@@ -7,7 +7,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Disableable, Selectable, Sizable, Size};
 
-use super::chrome::{INSPECTOR_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
+use super::chrome::{SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
 use super::explorer;
 use super::format::format_bytes;
 use super::model::{AppModel, Page};
@@ -302,8 +302,10 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .child(scan_button),
         )
         .child(
+            // Only Explore has an inspector until Phase 11 adds Recommended.
             icon_button("toggle-inspector", "inspector", "Inspector", &t)
-                .selected(model.inspector_visible)
+                .selected(model.inspector_visible && model.page == Page::Explore)
+                .disabled(model.page != Page::Explore)
                 .on_click(cx.listener(|m, _, _, cx| m.toggle_inspector(cx))),
         )
         .child(
@@ -318,21 +320,6 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .on_click(cx.listener(|m, _, _, cx| m.toggle_inspector(cx))),
         )
         .child(clean)
-}
-
-/// Empty until Phases 10 and 11 fill it.
-pub fn inspector(t: Theme) -> impl IntoElement {
-    div()
-        .w(px(INSPECTOR_WIDTH))
-        .flex_none()
-        .border_l_1()
-        .border_color(t.separator)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(theme::T_BODY))
-        .text_color(t.secondary)
-        .child("Nothing selected")
 }
 
 /// The page under the toolbar.

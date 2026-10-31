@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, screens, shell, theme};
+use super::{cleanup, inspector, screens, shell, theme};
 
 actions!(
     disklens,
@@ -156,7 +156,9 @@ impl Render for AppModel {
                                         .children(screens::update_banner(self, window, cx))
                                         .child(shell::page(self, window, cx)),
                                 )
-                                .when(self.inspector_visible, |d| d.child(shell::inspector(t))),
+                                .when(self.inspector_visible && self.page == Page::Explore, |d| {
+                                    d.child(inspector::render(self, t, cx))
+                                }),
                         ),
                 ),
         };

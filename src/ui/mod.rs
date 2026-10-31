@@ -6,6 +6,7 @@ pub mod chrome;
 pub mod cleanup;
 pub mod explorer;
 pub mod format;
+pub mod inspector;
 pub mod model;
 pub mod motion;
 pub mod overview;

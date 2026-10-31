@@ -123,7 +123,8 @@ impl MockData {
             .children
             .iter()
             .map(|c| ViewNode {
-                cleanable: self.cleanable(&c.path),
+                // Mock item sizes are illustrative and can exceed their folder.
+                cleanable: self.cleanable(&c.path).min(c.size),
                 children: Vec::new(),
                 ..c.clone()
             })

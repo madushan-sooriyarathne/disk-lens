@@ -17,6 +17,7 @@ macro_rules! icons {
 icons!(
     "back",
     "chev",
+    "doc",
     "folder",
     "fwd",
     "grid",
