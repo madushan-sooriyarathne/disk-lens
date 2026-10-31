@@ -9,6 +9,7 @@ use std::time::Duration;
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
 
 use super::explorer::{self, ExplorerState};
+use super::motion;
 use super::recommendations::PanelState;
 use super::selection;
 use super::source::Source;
@@ -714,16 +715,39 @@ impl AppModel {
                         this.view = Some(view);
                         this.hovered = None;
                         this.select_tile(select, cx);
+                        this.start_zoom(cx);
                     }
-                    Err(e) => tracing::warn!("could not load {path}: {e}"),
+                    Err(e) => {
+                        this.explorer.clear_zoom();
+                        tracing::warn!("could not load {path}: {e}");
+                    }
                 }
             },
         );
     }
 
+    /// Starts the zoom the last navigation prepared and ends it once it has played.
+    fn start_zoom(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.start_zoom() else {
+            return;
+        };
+        let duration = motion::Transition::new(motion::NAV, self.reduce_motion).duration();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            this.update(cx, |model, cx| {
+                if model.explorer.end_zoom(id) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Shows the folder at `path` in the explorer.
     pub fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
         self.forward.clear();
+        self.explorer.clear_zoom();
         self.load_view(path, None, cx);
     }
 
@@ -733,6 +757,9 @@ impl AppModel {
         if self.path != self.root_path {
             let left = self.path.clone();
             self.forward.push(left.clone());
+            if let Some(view) = &self.view {
+                self.explorer.prepare_zoom_out(view);
+            }
             self.load_view(parent_of(&left).to_owned(), Some(left), cx);
         }
     }
@@ -740,6 +767,7 @@ impl AppModel {
     /// Reopens the folder the last Back left.
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.forward.pop() {
+            self.explorer.clear_zoom();
             self.load_view(path, None, cx);
         }
     }
@@ -843,7 +871,12 @@ impl AppModel {
         };
         let path = node.path.clone();
         match node.kind {
-            ViewKind::Dir => self.navigate(path, cx),
+            ViewKind::Dir => {
+                self.navigate(path, cx);
+                if let Some(view) = &self.view {
+                    self.explorer.prepare_zoom_in(view, key);
+                }
+            }
             ViewKind::File => self.reveal(path, cx),
             ViewKind::Smaller => {}
         }
@@ -1557,6 +1590,41 @@ mod tests {
             let (from, to) = (at("~/Desktop"), at(m.tile.as_deref().unwrap()));
             assert!(to.x >= from.x + from.w, "{to:?} is not right of {from:?}");
         });
+    }
+
+    #[gpui::test]
+    fn opening_a_folder_zooms_into_it(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.open_tile("~/Desktop", cx);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(m.explorer.zooming()));
+    }
+
+    #[gpui::test]
+    fn the_zoom_ends_after_it_has_played(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.open_tile("~/Desktop", cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(!m.explorer.zooming()));
+    }
+
+    #[gpui::test]
+    fn a_breadcrumb_jump_does_not_zoom(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.explorer.set_size((800, 600));
+            m.navigate("~/Desktop".into(), cx);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| assert!(!m.explorer.zooming()));
     }
 
     #[gpui::test]

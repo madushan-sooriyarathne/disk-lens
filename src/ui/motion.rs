@@ -46,6 +46,14 @@ impl Transition {
     }
 }
 
+impl Transition {
+    pub fn duration(self) -> Duration {
+        match self {
+            Transition::Move { duration, .. } | Transition::CrossFade { duration } => duration,
+        }
+    }
+}
+
 /// Progress of a critically damped spring at `t` (0 to 1 of the animation's
 /// duration), scaled so it ends exactly at 1. Usable as a GPUI easing function.
 pub fn ease(t: f32) -> f32 {

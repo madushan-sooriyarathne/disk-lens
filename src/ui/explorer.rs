@@ -7,14 +7,15 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Context, Font, FontWeight, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Role,
-    SharedString, TextRun, Window, anchored, canvas, deferred, div, pattern_slash, prelude::*, px,
-    svg,
+    Animation, AnimationExt, AnyElement, Context, Font, FontWeight, Hsla, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, SharedString, TextRun, Window, anchored, canvas, deferred,
+    div, pattern_slash, prelude::*, px, relative, svg,
 };
 
 use super::format::{format_age, format_bytes, group_digits};
 use super::keymap;
 use super::model::{AppModel, ScanProgress};
+use super::motion;
 use super::selection::{self, row_for_node};
 use super::theme::{self, Texture, Theme};
 use super::treemap::{self, Dir, Rect};
@@ -38,19 +39,97 @@ struct Cached {
     rects: Rc<Vec<Rect>>,
 }
 
-/// Explorer-only UI state: the layout cache, the measured treemap area and the open menu.
+/// How the treemap moves between levels (PRD 13.5, Motion).
+enum ZoomKind {
+    /// Into a folder: the new level grows out of the tile's frame.
+    In { from: [f64; 4] },
+    /// Up a level: the level left shrinks back into its tile, `child` in the new one.
+    Out {
+        child: String,
+        view: ViewNode,
+        rects: Rc<Vec<Rect>>,
+    },
+}
+
+struct Zoom {
+    id: u64,
+    kind: ZoomKind,
+}
+
+/// Explorer-only UI state: the layout cache, the measured treemap area, the open
+/// menu and the drill-down zoom.
 #[derive(Default)]
 pub struct ExplorerState {
     /// Treemap area in whole pixels, measured by a canvas during prepaint.
     size: Option<(u32, u32)>,
     cached: Option<Cached>,
     menu: Option<Menu>,
+    /// Prepared when a navigation starts; starts when its view arrives.
+    pending: Option<ZoomKind>,
+    zoom: Option<Zoom>,
+    zoom_seq: u64,
 }
 
 impl ExplorerState {
     /// Closes the context menu; true if one was open (Esc closes it before going up).
     pub fn close_menu(&mut self) -> bool {
         self.menu.take().is_some()
+    }
+
+    /// Readies the zoom into the tile `key` of `view`, which is about to be opened.
+    pub(super) fn prepare_zoom_in(&mut self, view: &ViewNode, key: &str) {
+        self.pending = view
+            .children
+            .iter()
+            .position(|c| tile_key(c) == key)
+            .zip(self.rects(view))
+            .and_then(|(i, rects)| rects.get(i).map(|r| [r.x, r.y, r.w, r.h]))
+            .map(|from| ZoomKind::In { from });
+    }
+
+    /// Readies the zoom out of `view`, which is about to be left for its parent.
+    pub(super) fn prepare_zoom_out(&mut self, view: &ViewNode) {
+        self.pending = self.rects(view).map(|rects| ZoomKind::Out {
+            child: view.path.clone(),
+            view: view.clone(),
+            rects,
+        });
+    }
+
+    /// Navigation without a zoom (breadcrumb, Forward, Overview links).
+    pub(super) fn clear_zoom(&mut self) {
+        self.pending = None;
+    }
+
+    /// Starts the prepared zoom, if any, and returns its id for ending it.
+    pub(super) fn start_zoom(&mut self) -> Option<u64> {
+        let kind = self.pending.take()?;
+        self.zoom_seq += 1;
+        self.zoom = Some(Zoom {
+            id: self.zoom_seq,
+            kind,
+        });
+        Some(self.zoom_seq)
+    }
+
+    #[cfg(test)]
+    pub(super) fn zooming(&self) -> bool {
+        self.zoom.is_some()
+    }
+
+    /// Ends zoom `id` unless a newer one replaced it; true when it ended.
+    pub(super) fn end_zoom(&mut self, id: u64) -> bool {
+        let current = self.zoom.as_ref().is_some_and(|z| z.id == id);
+        if current {
+            self.zoom = None;
+        }
+        current
+    }
+
+    /// The measured treemap area in points.
+    pub(super) fn area(&self) -> (f64, f64) {
+        self.size
+            .map_or((0., 0.), |(w, h)| (f64::from(w), f64::from(h)))
     }
 
     /// Records the measured area; true when it changed.
@@ -252,12 +331,14 @@ pub fn render(
         ),
         Some(v) => {
             let menu_open = model.explorer.menu.is_some();
-            treemap.children(
+            let area = model.explorer.area();
+            let layer = div().absolute().top_0().left_0().size_full().children(
                 v.children
                     .iter()
                     .zip(rects.iter())
-                    .map(|(node, r)| tile(model, node, r, t, window, menu_open, cx)),
-            )
+                    .map(|(node, r)| tile(model, node, r, area, t, window, menu_open, cx)),
+            );
+            zoomed(treemap, layer, model, v, &rects, area, t, window)
         }
         None => treemap,
     };
@@ -272,6 +353,99 @@ pub fn render(
         .child(treemap)
         .child(texture_key(t, model.highlight_cleanable))
         .children(context_menu(model, t, cx))
+}
+
+/// The tile layer, moving while a zoom runs (PRD FR-EXP-8, 13.5 Motion): into a
+/// folder the new level grows out of the tile's frame; going up, the level left
+/// shrinks back into its tile over the new one. Reduce Motion cross-fades instead.
+#[allow(clippy::too_many_arguments)]
+fn zoomed(
+    treemap: gpui::Stateful<gpui::Div>,
+    layer: gpui::Div,
+    model: &AppModel,
+    view: &ViewNode,
+    rects: &[Rect],
+    area: (f64, f64),
+    t: Theme,
+    window: &Window,
+) -> gpui::Stateful<gpui::Div> {
+    let Some(zoom) = &model.explorer.zoom else {
+        return treemap.child(layer);
+    };
+    let transition = motion::Transition::new(motion::NAV, model.reduce_motion);
+    let moves = matches!(transition, motion::Transition::Move { .. });
+    let animation = Animation::new(transition.duration()).with_easing(motion::ease);
+    let full = [0., 0., area.0, area.1];
+    let frame = |d: gpui::Div, [x, y, w, h]: [f64; 4]| {
+        d.left(px(x as f32))
+            .top(px(y as f32))
+            .w(px(w as f32))
+            .h(px(h as f32))
+    };
+    match &zoom.kind {
+        ZoomKind::In { from } => {
+            let from = *from;
+            treemap.child(
+                layer.with_animation(("zoom", zoom.id), animation, move |d, p| {
+                    if moves {
+                        frame(d, treemap::zoom_frame(from, full, f64::from(p)))
+                    } else {
+                        d.opacity(p)
+                    }
+                }),
+            )
+        }
+        ZoomKind::Out {
+            child,
+            view: left,
+            rects: left_rects,
+        } => {
+            let to = view
+                .children
+                .iter()
+                .position(|c| tile_key(c) == *child)
+                .and_then(|i| rects.get(i))
+                .map(|r| [r.x, r.y, r.w, r.h]);
+            let scale = window.scale_factor();
+            let ghost = div().absolute().top_0().left_0().size_full().children(
+                left.children
+                    .iter()
+                    .zip(left_rects.iter())
+                    .map(|(node, r)| {
+                        let texture = texture(node, &model.recommendations);
+                        let (fill, stripe) = theme::tile_fill(&t, &node.category, texture);
+                        place(div(), r, area)
+                            .rounded(px(theme::R_TILE))
+                            .overflow_hidden()
+                            .bg(fill)
+                            .children(
+                                stripe.map(|s| div().absolute().inset_0().bg(hatch(s, scale))),
+                            )
+                    }),
+            );
+            treemap.child(layer).child(ghost.with_animation(
+                ("zoom", zoom.id),
+                animation,
+                move |d, p| match to.filter(|_| moves) {
+                    Some(to) => {
+                        frame(d, treemap::zoom_frame(full, to, f64::from(p))).opacity(1. - p)
+                    }
+                    None => d.opacity(1. - p),
+                },
+            ))
+        }
+    }
+}
+
+/// Positions `d` at `r` as fractions of the treemap area, so a moving layer
+/// carries its tiles with it.
+fn place<E: Styled>(d: E, r: &Rect, (w, h): (f64, f64)) -> E {
+    let frac = |v: f64, of: f64| relative((v / of.max(1.)) as f32);
+    d.absolute()
+        .left(frac(r.x, w))
+        .top(frac(r.y, h))
+        .w(frac(r.w, w))
+        .h(frac(r.h, h))
 }
 
 /// An empty canvas filling the treemap area. Its prepaint bounds are the
@@ -429,10 +603,12 @@ fn text_width(window: &Window, text: &str, size: f32, weight: FontWeight) -> f64
 }
 
 /// One absolutely positioned tile.
+#[allow(clippy::too_many_arguments)]
 fn tile(
     model: &AppModel,
     node: &ViewNode,
     r: &Rect,
+    area: (f64, f64),
     t: Theme,
     window: &Window,
     menu_open: bool,
@@ -476,11 +652,7 @@ fn tile(
         Role::Button,
         aria,
     )
-    .absolute()
-    .left(px(r.x as f32))
-    .top(px(r.y as f32))
-    .w(px(r.w as f32))
-    .h(px(r.h as f32))
+    .map(|d| place(d, r, area))
     .overflow_hidden()
     .rounded(px(theme::R_TILE))
     .bg(fill)
