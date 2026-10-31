@@ -2195,7 +2195,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn selection_survives_a_swap_by_path(cx: &mut TestAppContext) {
+    fn the_queue_survives_a_snapshot_swap_by_path(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
         let real_id = model.update(cx, |m, _| {
             let item = &mut m.recommendations[0].items[0];
@@ -2205,6 +2205,16 @@ mod tests {
         });
         rescan(&model, cx);
         assert!(model.read_with(cx, |m, _| m.selected.contains(&real_id)));
+    }
+
+    #[gpui::test]
+    fn the_queue_is_empty_after_a_relaunch(cx: &mut TestAppContext) {
+        let (staged, cx) = setup(cx, false);
+        staged.update(cx, |m, cx| m.select_safe(cx));
+        let source = Source::Mock(MockData::new(false).with_step(Duration::ZERO));
+        let relaunched = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
+        cx.run_until_parked();
+        assert!(relaunched.read_with(cx, |m, _| m.selected.is_empty()));
     }
 
     #[gpui::test]
