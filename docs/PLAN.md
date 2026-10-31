@@ -17,7 +17,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
-| 10 Explore and inspector | Built, awaiting visual check and review | v2, PRD sections 13.4.5 and 13.4.7. Branch `feat/phase-10-explore` |
+| 10 Explore and inspector | Built, QA passed, awaiting review | v2, PRD sections 13.4.5 and 13.4.7. Branch `feat/phase-10-explore` |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
@@ -175,8 +175,9 @@ Last full gate run on macOS (Phase 10, 2026-10-31): `cargo fmt --check`, `cargo 
   - The inspector is open by default and shows on Explore only; Phase 11 adds Recommended. The inspector itself does not slide in.
   - Textured fills are opaque mixes, so Reduce Transparency leaves them as they are.
   - Mock cleanable sizes are clamped to the tile, because the mock's item sizes under `~/Library` exceed the folder.
+- QA (2026-10-31): the user ran every Phase 10 check in `docs/QA.md` (mockup frames 2 and 8 in light and dark, Highlight Cleanable, the keymap, the zoom and its Reduce Motion fade, the context menu, Quick Look on the sandbox, VoiceOver, the real home scan at 960×640) and reported them all working, with no differences to list.
 - Open:
-  - `docs/QA.md`, Phase 10: the side-by-side check with frames 2 and 8, the keymap, Quick Look, the zoom, VoiceOver, and the real home scan at the minimum window size with screenshots (PRD V2-G2).
+  - Screenshots of the real home scan at the minimum window size are not saved in `docs/QA.md` yet (PRD V2-G2 asks for them).
   - Free disk space ran out once during this phase (`target/debug/incremental` had reached 4.3 GB); it was cleared, and the build cache will grow back.
 
 **Housekeeping**
