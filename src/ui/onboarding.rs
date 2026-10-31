@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 
 use gpui::{
     Context, Div, FontWeight, Image, ImageFormat, IntoElement, ParentElement, Role, Stateful,
-    Styled, Window, div, img, prelude::*, px,
+    Styled, Window, div, img, prelude::*, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Disableable, Sizable, Size};
@@ -176,8 +176,53 @@ fn first_scan(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> (Div, 
                 } else {
                     p.current
                 }),
-        );
+        )
+        .child(category_rows(t, &p.categories));
     let cancel = button("onboarding-cancel", "Cancel")
         .on_click(cx.listener(|m, _, _, cx| m.cancel_scan(cx)));
     (content, vec![cancel])
+}
+
+/// The six categories with their bytes so far, filling in as the scan finds them
+/// (PRD FR-ONB-4). `bytes` is in rules order; rows follow the sidebar's order.
+pub(super) fn category_rows(t: &Theme, bytes: &[u64]) -> Div {
+    let ids = &crate::rules::model::Rules::embedded().categories;
+    let of = |id: &str| {
+        ids.iter()
+            .position(|c| c.id == id)
+            .and_then(|i| bytes.get(i))
+            .copied()
+            .unwrap_or(0)
+    };
+    let total = bytes.iter().sum::<u64>().max(1);
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(theme::LEGEND_ORDER.map(|id| {
+            let size = of(id);
+            let (_, color) = theme::category_colors(t, id);
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().size(px(8.)).rounded_full().bg(color))
+                        .child(div().flex_1().child(theme::category_label(id)))
+                        .child(div().text_color(t.secondary).child(format_bytes(size))),
+                )
+                .child(
+                    div().h(px(4.)).rounded_full().bg(t.content).child(
+                        div()
+                            .h_full()
+                            .rounded_full()
+                            .bg(color)
+                            .w(relative(size as f32 / total as f32)),
+                    ),
+                )
+        }))
 }

@@ -9,6 +9,7 @@ use gpui::{
 
 use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, UpdateState};
+use super::onboarding;
 use super::theme::{self, Theme};
 
 const CARD_WIDTH: f32 = 480.;
@@ -175,6 +176,11 @@ pub fn scanning(
                     .text_xs()
                     .text_color(t.secondary)
                     .child(current),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .child(onboarding::category_rows(&t, &p.categories)),
             )
             .child(div().flex().child(cancel)),
     )
