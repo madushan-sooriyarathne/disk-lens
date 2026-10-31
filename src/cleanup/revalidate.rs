@@ -11,8 +11,7 @@ use super::protected::Protected;
 use crate::rules::guards::{self, Env};
 use crate::rules::matcher::Matcher;
 use crate::rules::model::Rules;
-use crate::scanner::tree::MediaExtensions;
-use crate::scanner::walk;
+use crate::scanner::{ScanOptions, walk};
 
 /// An item grown by more than this fraction of its scanned size...
 const GROWTH_RATIO: f64 = 0.2;
@@ -99,7 +98,7 @@ impl<'a> Revalidator<'a> {
 /// Allocated bytes under `path` now, counted like the scanner counts them.
 pub fn measure(path: &Path) -> Option<u64> {
     let never = Arc::new(AtomicBool::new(false));
-    walk::walk(path, &MediaExtensions::default(), &never, &mut |_| {})
+    walk::walk(path, &ScanOptions::default(), &never, &mut |_| {})
         .ok()
         .and_then(|w| w.nodes.first().map(|n| n.size))
 }

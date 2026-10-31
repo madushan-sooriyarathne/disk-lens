@@ -75,6 +75,8 @@ pub enum ScanEvent {
         files: u64,
         bytes: u64,
         current: String,
+        /// Bytes per category so far, in rules order (rough until the scan finishes).
+        categories: Vec<u64>,
     },
     Finished {
         meta: SnapshotMeta,

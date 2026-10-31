@@ -92,6 +92,18 @@ impl MockData {
         // A finished scan is fresh, like a real one.
         meta.scanned_at = crate::cleanup::audit::now_ms() as i64 / 1000;
         let step = self.step;
+        // The mock's category totals in rules order, grown evenly over the steps.
+        let totals = self.category_totals();
+        let full: Vec<u64> = crate::rules::model::Rules::embedded()
+            .categories
+            .iter()
+            .map(|c| {
+                totals
+                    .iter()
+                    .find(|t| t.category == c.id)
+                    .map_or(0, |t| t.size)
+            })
+            .collect();
         std::thread::spawn(move || {
             for i in 1..=SCAN_STEPS {
                 std::thread::sleep(step);
@@ -105,6 +117,7 @@ impl MockData {
                     files: i * 120_000,
                     bytes: (meta.scanned_size as f64 / SCAN_STEPS as f64 * i as f64).round() as u64,
                     current: format!("~/Library/Caches/step-{i}"),
+                    categories: full.iter().map(|b| b * i / SCAN_STEPS).collect(),
                 });
             }
             on_event(ScanEvent::Finished { meta });

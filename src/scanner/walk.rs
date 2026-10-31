@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use jwalk::{ClientState, DirEntry, WalkDirGeneric};
 
-use super::tree::{DirNode, MediaExtensions, NodeFlags, TreeBuilder};
+use super::ScanOptions;
+use super::tree::{DirNode, NodeFlags, TreeBuilder};
 use crate::error::{Error, Result};
 
 /// `SF_DATALESS`: the file's data lives in the cloud and is not on disk.
@@ -23,6 +24,8 @@ pub struct Progress {
     pub files: u64,
     pub bytes: u64,
     pub current: String,
+    /// Bytes per category so far, in rules order (rough; see `category::Live`).
+    pub categories: Vec<u64>,
 }
 
 pub struct WalkResult {
@@ -40,13 +43,16 @@ struct EntryStat {
     nlink: u64,
     mount: bool,
     valid: bool,
+    /// Category the containing folder decided, if any.
+    category: Option<u8>,
 }
 
 #[derive(Debug, Default, Clone)]
 struct Client;
 
 impl ClientState for Client {
-    type ReadDirState = ();
+    /// Category the folder being read inherits or decides; passed down to its children.
+    type ReadDirState = Option<u8>;
     type DirEntryState = EntryStat;
 }
 
@@ -66,7 +72,7 @@ fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
 
 pub fn walk(
     root: &Path,
-    media: &MediaExtensions,
+    options: &ScanOptions,
     cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<WalkResult> {
@@ -81,15 +87,25 @@ pub fn walk(
     let root_dev = root_md.dev();
 
     let cb_cancel = cancel.clone();
+    let live = options.live.clone();
+    let cb_root = root.to_path_buf();
     let walker = WalkDirGeneric::<Client>::new(root)
         .follow_links(false)
         .skip_hidden(false)
         .sort(true) // path order: the first sighting of a hard link is its smallest path
-        .process_read_dir(move |_depth, _path, _state, children| {
+        .process_read_dir(move |_depth, path, category, children| {
             if cb_cancel.load(Ordering::Relaxed) {
                 children.clear();
                 return;
             }
+            if !live.is_empty() {
+                let names = children
+                    .iter()
+                    .flatten()
+                    .filter_map(|c| c.file_name.to_str());
+                *category = live.dir(&cb_root, path, names, *category);
+            }
+            let category = *category;
             for child in children.iter_mut().flatten() {
                 let md = match std::fs::symlink_metadata(child.path()) {
                     Ok(md) => md,
@@ -112,6 +128,7 @@ pub fn walk(
                     nlink: md.nlink(),
                     mount,
                     valid: true,
+                    category,
                 };
                 if mount {
                     child.read_children = None; // never cross into another filesystem
@@ -119,10 +136,13 @@ pub fn walk(
             }
         });
 
-    let mut tree = TreeBuilder::with_media(media.clone());
+    let mut tree = TreeBuilder::with_media(options.media.clone());
+    let live = &options.live;
+    let mut categories = vec![0u64; live.len()];
     let mut inaccessible = 0u32;
     let (mut files, mut bytes) = (0u64, 0u64);
     let mut last_emit = Instant::now();
+    let mut emitted = false;
 
     let root_name = root.file_name().map_or_else(
         || root.display().to_string(),
@@ -157,6 +177,12 @@ pub fn walk(
             continue;
         }
         let name = entry.file_name.to_string_lossy();
+        if let Some(total) = categories.get_mut(usize::from(live.entry(
+            st.category,
+            !entry.file_type.is_dir() && options.media.is_media(&name),
+        ))) {
+            *total += st.allocated;
+        }
         if entry.file_type.is_dir() {
             let flags = NodeFlags {
                 mount: st.mount,
@@ -176,10 +202,12 @@ pub fn walk(
         }
         if last_emit.elapsed() >= PROGRESS_INTERVAL {
             last_emit = Instant::now();
+            emitted = true;
             on_progress(&Progress {
                 files,
                 bytes,
                 current: entry.parent_path().display().to_string(),
+                categories: categories.clone(),
             });
         }
     }
@@ -187,6 +215,15 @@ pub fn walk(
     // The callback stops descending once cancelled, so the loop can end early without noticing.
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Cancelled);
+    }
+    // A walk shorter than one interval still reports its counts once.
+    if !emitted || last_emit.elapsed() >= PROGRESS_INTERVAL {
+        on_progress(&Progress {
+            files,
+            bytes,
+            current: root.display().to_string(),
+            categories,
+        });
     }
     Ok(WalkResult {
         nodes: tree.finish(),

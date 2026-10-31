@@ -97,6 +97,8 @@ pub struct ScanProgress {
     pub files: u64,
     pub bytes: u64,
     pub current: String,
+    /// Bytes per category so far, in rules order.
+    pub categories: Vec<u64>,
 }
 
 pub struct AppModel {
@@ -687,12 +689,14 @@ impl AppModel {
                 files,
                 bytes,
                 current,
+                categories,
             } => {
                 if let Some(scan) = &mut self.scan {
                     *scan = ScanProgress {
                         files,
                         bytes,
                         current,
+                        categories,
                     };
                 }
                 false
