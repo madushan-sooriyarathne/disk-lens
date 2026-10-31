@@ -24,7 +24,7 @@ use super::selection::within;
 
 pub enum Source {
     Live(Arc<AppState>),
-    Mock(MockData),
+    Mock(Box<MockData>),
 }
 
 /// `assets/mock/snapshot.mock.json`, which mirrors `docs/mockup.jpg`.
@@ -42,6 +42,8 @@ pub struct MockData {
     pub full_disk_access: AtomicBool,
     /// In memory only: the mock never writes settings.
     onboarding_done: AtomicBool,
+    /// "preseed" and "open", in the order the Full Disk Access step made them.
+    pub fda_calls: Mutex<Vec<&'static str>>,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -70,6 +72,7 @@ impl MockData {
             plan: Mutex::new(None),
             full_disk_access: AtomicBool::new(true),
             onboarding_done: AtomicBool::new(false),
+            fda_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -327,8 +330,8 @@ impl Source {
     /// the mockup's rows; otherwise the live backend.
     pub fn from_env() -> Self {
         match std::env::var("DISKLENS_MOCK").as_deref() {
-            Ok("1" | "true") => Self::Mock(MockData::new(false)),
-            Ok("preselect") => Self::Mock(MockData::new(true)),
+            Ok("1" | "true") => Self::Mock(Box::new(MockData::new(false))),
+            Ok("preselect") => Self::Mock(Box::new(MockData::new(true))),
             _ => Self::Live(Arc::new(AppState::new(Config::from_env()))),
         }
     }
@@ -427,10 +430,21 @@ impl Source {
         }
     }
 
+    /// Makes macOS list DiskLens under Full Disk Access (PRD FR-ONB-3a).
+    pub fn preseed_access(&self) {
+        match self {
+            Self::Live(state) => backend::preseed_access(state),
+            Self::Mock(m) => m.fda_calls.lock().expect("mock calls").push("preseed"),
+        }
+    }
+
     pub fn open_fda_settings(&self) -> Result<()> {
         match self {
             Self::Live(_) => backend::open_fda_settings(),
-            Self::Mock(_) => Ok(()),
+            Self::Mock(m) => {
+                m.fda_calls.lock().expect("mock calls").push("open");
+                Ok(())
+            }
         }
     }
 
@@ -653,7 +667,7 @@ mod tests {
 
     #[test]
     fn unknown_path_and_row_are_errors() {
-        let s = Source::Mock(MockData::new(false));
+        let s = Source::Mock(Box::new(MockData::new(false)));
         assert!(matches!(s.view("/nowhere"), Err(Error::NotInSnapshot(_))));
         assert!(matches!(s.details("nope"), Err(Error::UnknownRow(_))));
     }
@@ -676,9 +690,9 @@ mod tests {
 
     #[test]
     fn preselection_only_when_asked() {
-        let none = Source::Mock(MockData::new(false));
+        let none = Source::Mock(Box::new(MockData::new(false)));
         assert!(none.preselected_rows().is_empty());
-        let rows = Source::Mock(MockData::new(true)).preselected_rows();
+        let rows = Source::Mock(Box::new(MockData::new(true))).preselected_rows();
         assert_eq!(rows.len(), 5);
         assert!(rows.contains(&"npm-cache".to_string()));
     }
@@ -701,7 +715,9 @@ mod tests {
 
     #[test]
     fn mock_scan_can_be_cancelled() {
-        let s = Source::Mock(MockData::new(false).with_step(Duration::from_millis(20)));
+        let s = Source::Mock(Box::new(
+            MockData::new(false).with_step(Duration::from_millis(20)),
+        ));
         let (tx, rx) = std::sync::mpsc::channel();
         s.start_scan(move |e| {
             let _ = tx.send(e);

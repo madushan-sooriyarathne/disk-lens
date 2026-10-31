@@ -191,6 +191,11 @@ pub fn check_permissions(state: &Arc<AppState>) -> bool {
     state.machine.full_disk_access()
 }
 
+/// One silent protected read so macOS lists DiskLens under Full Disk Access.
+pub fn preseed_access(state: &Arc<AppState>) {
+    state.machine.preseed_access();
+}
+
 /// Opens System Settings at Privacy & Security, Full Disk Access.
 pub fn open_fda_settings() -> Result<()> {
     // argv, no shell.

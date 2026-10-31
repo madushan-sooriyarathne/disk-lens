@@ -466,12 +466,16 @@ impl AppModel {
         );
     }
 
-    /// Opens the Full Disk Access pane; the activation recheck notices a grant.
+    /// Opens the Full Disk Access pane after the pre-seed read, so DiskLens is
+    /// already in the list; the activation recheck notices a grant.
     pub fn open_fda_settings(&mut self, cx: &mut Context<Self>) {
         off_thread(
             &self.source,
             cx,
-            |s| s.open_fda_settings(),
+            |s| {
+                s.preseed_access();
+                s.open_fda_settings()
+            },
             |this, opened, cx| {
                 if let Err(e) = opened {
                     tracing::warn!("could not open System Settings: {e}");
@@ -1452,7 +1456,7 @@ mod tests {
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
-        let source = Source::Mock(MockData::new(preselect).with_step(Duration::ZERO));
+        let source = Source::Mock(Box::new(MockData::new(preselect).with_step(Duration::ZERO)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         (model, cx)
@@ -1524,7 +1528,7 @@ mod tests {
         let cx = cx.add_empty_window();
         let mock = MockData::new(false).with_step(Duration::ZERO);
         mock.full_disk_access.store(false, Ordering::Relaxed);
-        let source = Source::Mock(mock);
+        let source = Source::Mock(Box::new(mock));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         (model, cx)
@@ -1590,6 +1594,18 @@ mod tests {
         model.update(cx, |m, cx| m.continue_without_access(cx));
         cx.run_until_parked();
         assert!(model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn open_settings_preseeds_before_opening(cx: &mut TestAppContext) {
+        let (model, cx) = setup_without_access(cx);
+        model.update(cx, |m, cx| m.open_fda_settings(cx));
+        cx.run_until_parked();
+        let calls = model.read_with(cx, |m, _| match m.source.as_ref() {
+            Source::Mock(mock) => mock.fda_calls.lock().unwrap().clone(),
+            Source::Live(_) => unreachable!("tests use the mock"),
+        });
+        assert_eq!(calls, ["preseed", "open"]);
     }
 
     #[gpui::test]
@@ -2171,7 +2187,9 @@ mod tests {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
         // Slow enough that the cancel lands before the first step ends.
-        let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
+        let source = Source::Mock(Box::new(
+            MockData::new(false).with_step(Duration::from_millis(30)),
+        ));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         model.update(cx, |m, cx| {
@@ -2220,7 +2238,7 @@ mod tests {
     fn the_queue_is_empty_after_a_relaunch(cx: &mut TestAppContext) {
         let (staged, cx) = setup(cx, false);
         staged.update(cx, |m, cx| m.select_safe(cx));
-        let source = Source::Mock(MockData::new(false).with_step(Duration::ZERO));
+        let source = Source::Mock(Box::new(MockData::new(false).with_step(Duration::ZERO)));
         let relaunched = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         assert!(relaunched.read_with(cx, |m, _| m.selected.is_empty()));
@@ -2277,7 +2295,9 @@ mod tests {
     fn cleanup_is_refused_while_scanning(cx: &mut TestAppContext) {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
-        let source = Source::Mock(MockData::new(true).with_step(Duration::from_millis(30)));
+        let source = Source::Mock(Box::new(
+            MockData::new(true).with_step(Duration::from_millis(30)),
+        ));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         model.update(cx, |m, cx| {
@@ -2299,8 +2319,9 @@ mod tests {
         let mock = MockData::new(false)
             .with_step(Duration::from_millis(30))
             .with_scanned_at(now - age_secs);
-        let model =
-            cx.update(|window, cx| cx.new(|cx| AppModel::new(Source::Mock(mock), window, cx)));
+        let model = cx.update(|window, cx| {
+            cx.new(|cx| AppModel::new(Source::Mock(Box::new(mock)), window, cx))
+        });
         cx.run_until_parked();
         (model, cx)
     }
@@ -2468,7 +2489,9 @@ mod tests {
     fn a_cancelled_rescan_keeps_the_view(cx: &mut TestAppContext) {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
-        let source = Source::Mock(MockData::new(false).with_step(Duration::from_millis(30)));
+        let source = Source::Mock(Box::new(
+            MockData::new(false).with_step(Duration::from_millis(30)),
+        ));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         model.update(cx, |m, cx| {
@@ -2534,7 +2557,7 @@ mod tests {
             gpui_component::init(cx);
             crate::ui::root::bind_keys(cx);
         });
-        let source = Source::Mock(MockData::new(true).with_step(Duration::ZERO));
+        let source = Source::Mock(Box::new(MockData::new(true).with_step(Duration::ZERO)));
         let (model, cx) = cx.add_window_view(|window, cx| AppModel::new(source, window, cx));
         cx.run_until_parked();
         // Enter on each Tab stop in turn. The sheet paints last, so its stops come last in
