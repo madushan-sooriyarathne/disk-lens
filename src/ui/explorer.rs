@@ -15,7 +15,7 @@ use super::format::{format_age, format_bytes, group_digits};
 use super::model::{AppModel, ScanProgress};
 use super::selection::row_for_node;
 use super::theme::{self, Theme};
-use super::treemap::{self, LayoutOptions, Rect};
+use super::treemap::{self, Rect};
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewNode};
 
@@ -88,7 +88,6 @@ impl ExplorerState {
             view,
             f64::from(size.0),
             f64::from(size.1),
-            LayoutOptions::default(),
         ));
         self.cached = Some(Cached {
             fingerprint: fp,
@@ -365,8 +364,17 @@ fn tile(
     let colors = theme::tile_colors(&t, node);
     let is_dir = node.kind == ViewKind::Dir;
     let size = format_bytes(node.size);
-    let radius = px(if r.group { 10. } else { 8. });
-    let show = treemap::label_visibility(r.w, r.h);
+    let radius = px(theme::R_TILE);
+    let label = treemap::tile_label(
+        &node.name,
+        &size,
+        None,
+        false,
+        r.w,
+        r.h,
+        |s| s.chars().count() as f64 * 8.0,
+        |s| s.chars().count() as f64 * 7.0,
+    );
 
     let mut tile = div()
         .id(SharedString::from(node.id.clone()))
@@ -438,58 +446,24 @@ fn tile(
         );
     }
 
-    if r.group {
+    if let Some(label) = label {
         tile = tile.child(
             div()
-                .flex()
-                .items_baseline()
-                .justify_between()
-                .gap_2()
-                .px_3()
-                .pt_2()
+                .absolute()
+                .left(px(10.))
+                .top(px(8.))
                 .text_size(px(13.))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(node.name.clone()),
-                )
-                .when(r.w >= 110., |d| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(12.))
-                            .text_color(t.secondary)
-                            .child(size),
-                    )
-                }),
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(label.name),
         );
-    } else {
-        if show.name {
-            tile = tile.child(
-                div()
-                    .absolute()
-                    .left(px(10.))
-                    .top(px(8.))
-                    .right(px(8.))
-                    .truncate()
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(node.name.clone()),
-            );
-        }
-        if show.size {
-            tile = tile.child(
-                div()
-                    .absolute()
-                    .left(px(10.))
-                    .bottom(px(8.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_size(px(treemap::size_font_px(r.w * r.h) as f32))
-                    .child(size),
-            );
-        }
+        tile = tile.child(
+            div()
+                .absolute()
+                .left(px(10.))
+                .top(px(25.))
+                .text_size(px(12.))
+                .child(label.line2),
+        );
     }
     tile.into_any_element()
 }
