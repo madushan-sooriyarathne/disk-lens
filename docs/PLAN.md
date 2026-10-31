@@ -16,8 +16,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 6 Packaging and release | Built, awaiting review | Branch `feat/phase-6-release` (stacked on Phase 5). Universal ad-hoc signed DMG, icon, updater. Developer ID signing, notarization and the macOS 13 launch are open (see What is left) |
 | 7 Background rescan | Done, merged | v2, PRD section 13.4.2; `docs/QA.md` Phase 7 checks passed on 2026-10-31 |
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
-| 9 Overview | Built, visual check approved, awaiting review | v2, PRD section 13.4.4. Branch `feat/phase-9-overview` |
-| 10 Explore and inspector | Not started | v2, PRD sections 13.4.5 and 13.4.7 |
+| 9 Overview | Merged | v2, PRD section 13.4.4 |
+| 10 Explore and inspector | Built, awaiting visual check and review | v2, PRD sections 13.4.5 and 13.4.7. Branch `feat/phase-10-explore` |
 | 11 Recommended and cleanup sheet | Not started | v2, PRD sections 13.4.6 and 13.4.8 |
 | 12 Onboarding | Not started | v2, PRD section 13.4.1 |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 9, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (376 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 10, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (429 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -158,6 +158,26 @@ Last full gate run on macOS (Phase 9, 2026-10-31): `cargo fmt --check`, `cargo c
 - Open:
   - The rest of `docs/QA.md`, Phase 9: the selection and navigation clicks, VoiceOver, and the sandbox run.
   - Whether the lower half of the window still reads as empty at the default size (8a open item).
+
+**Phase 10: Explore and inspector**
+- Built:
+  - `view.rs`: the view is one level, at most 12 children of 1% or more, then one smaller-items tile (`ViewKind::Smaller`, formerly `Other`) that lists what it merged. Nodes carry `file_count`, `cleanable` (bytes of recommended items at or below them) and `system_managed` (protected, or a `~/Library` folder with nothing cleanable). `merge_smaller` is shared with the mock. `ViewMode` is gone.
+  - `treemap.rs`: flat squarified layout in the view's order with 4 pt gaps and flush outer edges; pure functions for the label rule (`tile_label`, `fit_middle`), keyboard neighbours (`neighbor`) and the zoom frame, with a property test that labels fit at the minimum window size.
+  - `theme.rs`: `Texture` and `tile_fill`; the contrast test reads its surfaces from `tile_fill`.
+  - `explorer.rs`: the Explore page with textures, the cleanable line, lock glyphs, the texture key, Highlight Cleanable, tooltips, the context menu (Add to Queue, Reveal in Finder, Quick Look, Show Recommendation, Get Info) and the drill-down zoom.
+  - `inspector.rs`: folder, file and smaller-items panels. `keymap.rs`: h/j/k/l and the arrows, Space, Return, Backspace and ⌘↑ while the treemap has focus.
+  - `platform/quick_look.rs`: `QLPreviewPanel` with a one-item data source.
+- Decisions:
+  - Quick Look calls run on the next run loop turn (`performSelectorOnMainThread`): showing the panel makes it key, and GPUI handles our window resigning key by borrowing the app, which the action handler already holds (it panicked when called directly). The panel opens without a responder-chain controller.
+  - Texture follows the tile's tier: a tile at or inside a matched item is textured, a folder that only contains items stays solid with its cleanable line. A blocked safe item reads Restorable.
+  - The smaller-items tile counts only the items it merged; leftover bytes alone read "Other files". Space on it stages only its children's items, never its folder's.
+  - "Nothing here can be cleaned" is a toast rather than toolbar status text.
+  - The inspector is open by default and shows on Explore only; Phase 11 adds Recommended. The inspector itself does not slide in.
+  - Textured fills are opaque mixes, so Reduce Transparency leaves them as they are.
+  - Mock cleanable sizes are clamped to the tile, because the mock's item sizes under `~/Library` exceed the folder.
+- Open:
+  - `docs/QA.md`, Phase 10: the side-by-side check with frames 2 and 8, the keymap, Quick Look, the zoom, VoiceOver, and the real home scan at the minimum window size with screenshots (PRD V2-G2).
+  - Free disk space ran out once during this phase (`target/debug/incremental` had reached 4.3 GB); it was cleared, and the build cache will grow back.
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.

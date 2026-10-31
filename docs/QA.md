@@ -117,6 +117,19 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
 - [ ] Does the lower half of the window read as empty at 1280×820?
 - [ ] Sandbox run (`DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`): the Disk widget shows the real volume name (after a rescan, if the snapshot predates Phase 9); the purgeable line is hidden below 1 GB.
 
+## Phase 10: Explore and inspector
+
+Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance, then on the sandbox.
+
+- [ ] Side by side with frame 2 (Explore with Desktop selected) of `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`: 12 tiles plus "3 smaller items, 9.8 GB", textures (.npm striped, .ollama faded), cleanable lines, the texture key, and the inspector (Size, Files 612,480, Category, Cleanable 27.9 GB in 4 items, Largest folders, Recommended inside). List the differences in PLAN.md (Phase 10).
+- [ ] Highlight Cleanable (⌘⇧H) dims tiles with nothing to clean and the key reads "Highlight Cleanable is on" (compare frame 8).
+- [ ] Click a tile, then use h/j/k/l and the arrows: the selection moves to the nearest tile and stops at the edges. Space stages and unstages (the toolbar queue count changes); Space on Documents shows "Nothing here can be cleaned".
+- [ ] Return or double-click on Desktop zooms into it from the tile; Backspace, Esc or ⌘↑ shrinks back into the Desktop tile and leaves it selected. With Reduce Motion on, both cross-fade.
+- [ ] Right-click a tile: Add to Queue (when something inside is cleanable), Reveal in Finder, Quick Look, Show Recommendation (on a matched tile), Get Info.
+- [ ] Sandbox run (`DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`): ⌘Y on a file or folder opens Quick Look and ⌘Y again closes it; `~/Library` shows its system folders gray with a lock and the tooltip "Managed by macOS or an app".
+- [ ] VoiceOver (⌘F5): tiles read "name, size, category", and system tiles read "Managed by macOS or an app".
+- [ ] Real home scan at the minimum window size (960×640): no clipped or overlapping text in the treemap. Save screenshots of Home and two deeper folders here.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
