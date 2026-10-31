@@ -56,7 +56,9 @@ pub fn compute_stats(
             selected_size += size;
         }
     }
-    let VolumeInfo { total, available } = meta.volume;
+    let VolumeInfo {
+        total, available, ..
+    } = meta.volume;
     Stats {
         available,
         selected: selected_size,
@@ -91,7 +93,11 @@ mod tests {
 
     fn meta(total: u64, available: u64, scanned: u64) -> SnapshotMeta {
         SnapshotMeta {
-            volume: VolumeInfo { total, available },
+            volume: VolumeInfo {
+                total,
+                available,
+                ..Default::default()
+            },
             scanned_size: scanned,
             ..mock().meta
         }

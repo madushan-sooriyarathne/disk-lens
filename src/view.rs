@@ -372,6 +372,7 @@ mod tests {
                 volume: VolumeInfo {
                     total: 1,
                     available: 1,
+                    ..Default::default()
                 },
                 scanned_size: nodes[0].size,
                 inaccessible_count: 0,

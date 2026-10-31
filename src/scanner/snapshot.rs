@@ -54,6 +54,7 @@ mod tests {
                 volume: VolumeInfo {
                     total: 100,
                     available: 40,
+                    ..Default::default()
                 },
                 scanned_size: 8192,
                 inaccessible_count: 1,

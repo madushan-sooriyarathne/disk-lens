@@ -4,10 +4,17 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VolumeInfo {
     pub total: u64,
+    /// Includes purgeable space, as Finder counts it.
     pub available: u64,
+    /// Localized volume name ("Macintosh HD"); empty when unknown.
+    #[serde(default)]
+    pub name: String,
+    /// Part of `available` macOS frees on demand, mostly local snapshots.
+    #[serde(default)]
+    pub purgeable: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

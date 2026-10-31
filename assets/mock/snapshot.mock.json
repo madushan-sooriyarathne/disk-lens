@@ -1,5 +1,5 @@
 {
- "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09). All items Ready to match the mockup's counts; blocked states are covered by the sandbox fixture.",
+ "_note": "Mock matching docs/mockup.jpg. Shape mirrors PLAN.md section 3 contracts; sizes in bytes (decimal GB). preselected mirrors the mockup only; real app default selection is empty (S-09). All items Ready to match the mockup's counts; blocked states are covered by the sandbox fixture. volume.name and volume.purgeable (4.2 GB, illustrative) come from docs/mockup-v2.png.",
  "meta": {
   "id": "mock",
   "root": "~",
@@ -7,7 +7,9 @@
   "duration_ms": 41000,
   "volume": {
    "total": 462500000000,
-   "available": 39500000000
+   "available": 39500000000,
+   "name": "Macintosh HD",
+   "purgeable": 4200000000
   },
   "scanned_size": 135000000000,
   "inaccessible_count": 0
