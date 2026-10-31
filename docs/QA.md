@@ -106,6 +106,17 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
 - [ ] Reduce Transparency on (System Settings > Accessibility > Display), then focus the window: the sidebar turns opaque.
 - [ ] Sandbox run (`DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`) without Full Disk Access: the sidebar footer shows "Full Disk Access is off" with Grant Access…, and no banner sits above the page.
 
+## Phase 9: Overview
+
+Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance.
+
+- [ ] Side by side with frame 1 of `docs/mockup-v2.png` and `docs/mockup-v2-dark.png`: Disk (Macintosh HD, 39.5 GB available of 463 GB, +52.5 GB after cleanup, capacity bar and legend, the 4.2 GB purgeable line), Safe to clean (41.7 GB, 8 items), Worth a look (56.0 GB, 10 items), Largest folders (Desktop, Library, .ollama, .npm, .android). List the differences in PLAN.md (Phase 9).
+- [ ] Clear Queue (Edit menu), then Select Safe Items: the toolbar reads "Clean up 41.7 GB" and the "after cleanup" line reads +41.7 GB.
+- [ ] Review opens Recommended. Clicking Desktop opens Explore at `~/Desktop`.
+- [ ] VoiceOver (⌘F5): each widget reads as one sentence, and the folder rows read "Desktop, 41.5 GB, open in Explore".
+- [ ] Does the lower half of the window read as empty at 1280×820?
+- [ ] Sandbox run (`DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`): the Disk widget shows the real volume name (after a rescan, if the snapshot predates Phase 9); the purgeable line is hidden below 1 GB.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
