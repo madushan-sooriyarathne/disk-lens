@@ -560,10 +560,10 @@ impl AppModel {
 
     /// Starts dragging DiskLens.app, to drop it on the Full Disk Access list.
     pub fn drag_app(&mut self, window: &Window) {
-        let Some(bundle) = platform::drag::app_bundle() else {
-            return;
-        };
-        if let Err(e) = platform::drag::drag_app(window, &bundle) {
+        let dragged = platform::drag::app_path()
+            .map_err(|e| e.to_string())
+            .and_then(|path| platform::drag::drag_app(window, &path));
+        if let Err(e) = dragged {
             tracing::warn!("could not drag the app: {e}");
         }
     }

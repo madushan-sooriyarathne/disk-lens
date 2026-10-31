@@ -122,9 +122,8 @@ impl Render for AppModel {
         let full_window = |body: gpui::Div| body.p_4().bg(t.content);
         let body = match self.phase {
             Phase::Loading => full_window(body),
-            Phase::Onboarding(step) => {
-                full_window(body).child(onboarding::render(self, step, window, cx))
-            }
+            // Onboarding draws its own backdrop, edge to edge under the traffic lights.
+            Phase::Onboarding(step) => body.child(onboarding::render(self, step, window, cx)),
             Phase::Idle => full_window(body).child(screens::idle(self, window, cx)),
             Phase::Scanning => full_window(body).child(screens::scanning(self, window, cx)),
             Phase::Error => full_window(body).child(screens::error(self, window, cx)),

@@ -5,6 +5,7 @@ pub mod assets;
 pub mod chrome;
 pub mod cleanup;
 pub mod explorer;
+pub mod fda_preview;
 pub mod format;
 pub mod inspector;
 pub mod keymap;

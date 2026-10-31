@@ -30,15 +30,23 @@ pub fn app_bundle() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// Selects the app (or, outside a bundle, its binary) in Finder, where it can be
-/// dragged from when the in-app drag does not work.
+/// What Full Disk Access is granted to: the bundle, or under `cargo run` the binary,
+/// which the list accepts too.
+pub fn app_path() -> io::Result<PathBuf> {
+    match app_bundle() {
+        Some(bundle) => Ok(bundle),
+        None => std::env::current_exe(),
+    }
+}
+
+/// Selects the app in Finder, where it can be dragged from when the in-app drag does
+/// not work.
 pub fn reveal_app() -> io::Result<()> {
-    let path = match app_bundle() {
-        Some(bundle) => bundle,
-        None => std::env::current_exe()?,
-    };
     // argv, no shell.
-    Command::new("/usr/bin/open").arg("-R").arg(path).status()?;
+    Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(app_path()?)
+        .status()?;
     Ok(())
 }
 
