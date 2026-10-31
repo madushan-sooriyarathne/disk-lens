@@ -10,7 +10,7 @@ use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, 
 
 use super::explorer::{self, ExplorerState};
 use super::motion;
-use super::recommendations::PanelState;
+use super::recommendations::{self, PanelState};
 use super::selection;
 use super::source::Source;
 use super::stats;
@@ -146,6 +146,8 @@ pub struct AppModel {
     pub focus_handle: FocusHandle,
     /// The treemap, where the Explore keymap applies.
     pub treemap_focus: FocusHandle,
+    /// The Recommended list, where j/k/Space/Return apply.
+    pub list_focus: FocusHandle,
     pub explorer: ExplorerState,
     pub panel: PanelState,
     pub update_state: UpdateState,
@@ -360,6 +362,7 @@ impl AppModel {
             toast: None,
             focus_handle,
             treemap_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle(),
             explorer: ExplorerState::default(),
             panel: PanelState::default(),
             update_state: UpdateState::Idle,
@@ -889,6 +892,10 @@ impl AppModel {
 
     /// Space on a tile: stages its ready items, or unstages them (PRD FR-Q-2).
     pub fn stage_tile(&mut self, key: &str, cx: &mut Context<Self>) {
+        // The queue is the open plan's input while the sheet is up.
+        if self.cleanup.is_some() {
+            return;
+        }
         let Some(node) = self.find_tile(key) else {
             return;
         };
@@ -974,6 +981,58 @@ impl AppModel {
     pub fn select_safe(&mut self, cx: &mut Context<Self>) {
         self.selected = selection::select_safe(&self.recommendations, &self.selected);
         cx.notify();
+    }
+
+    /// j/k and the arrows on Recommended: focuses the next or previous row in list order, or
+    /// the first row when none is focused, and scrolls it into view (PRD FR-REC-5).
+    pub fn move_row(&mut self, down: bool, cx: &mut Context<Self>) {
+        let order = recommendations::ordered(&self.recommendations);
+        let current = self
+            .focused_row
+            .as_deref()
+            .and_then(|id| order.iter().position(|r| r.row_id == id));
+        let next = match current {
+            None => 0,
+            Some(i) if down => (i + 1).min(order.len().saturating_sub(1)),
+            Some(i) => i.saturating_sub(1),
+        };
+        let Some(id) = order.get(next).map(|r| r.row_id.clone()) else {
+            return;
+        };
+        if let Some(ix) = recommendations::list_index(&self.recommendations, &id) {
+            self.panel.scroll.scroll_to_item(ix);
+        }
+        if self.focused_row.as_deref() != Some(id.as_str()) {
+            self.focus_row(Some(id), cx);
+        }
+    }
+
+    /// Space on Recommended: stages or unstages the focused row's ready items.
+    pub fn stage_row(&mut self, cx: &mut Context<Self>) {
+        if self.cleanup.is_some() {
+            return;
+        }
+        let Some(row) = self
+            .focused_row
+            .as_deref()
+            .and_then(|id| self.recommendations.iter().find(|r| r.row_id == id))
+        else {
+            return;
+        };
+        if selection::ready_ids(row).is_empty() {
+            self.show_toast("Nothing here can be cleaned".into(), cx);
+        } else {
+            let id = row.row_id.clone();
+            self.toggle_row(&id, cx);
+        }
+    }
+
+    /// Return on Recommended: shows the focused row in the inspector.
+    pub fn open_row(&mut self, cx: &mut Context<Self>) {
+        if self.focused_row.is_some() {
+            self.inspector_visible = true;
+            cx.notify();
+        }
     }
 
     /// Opens the detail drawer for `row_id` and loads its details; `None` closes it.
@@ -1789,6 +1848,67 @@ mod tests {
             assert!(!m.selected.contains(&ready));
             assert!(!m.selected.contains(blocked));
         });
+    }
+
+    /// The first row the Recommended list shows.
+    fn first_listed_row(model: &Entity<AppModel>, cx: &mut VisualTestContext) -> String {
+        model.read_with(cx, |m, _| {
+            recommendations::ordered(&m.recommendations)[0]
+                .row_id
+                .clone()
+        })
+    }
+
+    #[gpui::test]
+    fn j_with_nothing_focused_focuses_the_first_listed_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let first = first_listed_row(&model, cx);
+        model.update(cx, |m, cx| m.move_row(true, cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.focused_row.clone()),
+            Some(first)
+        );
+    }
+
+    #[gpui::test]
+    fn k_moves_to_the_previous_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let first = first_listed_row(&model, cx);
+        model.update(cx, |m, cx| {
+            m.move_row(true, cx);
+            m.move_row(true, cx);
+            m.move_row(false, cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| m.focused_row.clone()),
+            Some(first)
+        );
+    }
+
+    #[gpui::test]
+    fn space_on_a_row_stages_its_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let expected: HashSet<String> = model.update(cx, |m, cx| {
+            m.focus_row(Some("npm-cache".into()), cx);
+            m.stage_row(cx);
+            let row = m.recommendations.iter().find(|r| r.row_id == "npm-cache");
+            selection::ready_ids(row.unwrap())
+                .into_iter()
+                .map(String::from)
+                .collect()
+        });
+        assert_eq!(model.read_with(cx, |m, _| m.selected.clone()), expected);
+    }
+
+    #[gpui::test]
+    fn return_on_a_row_opens_the_inspector(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.inspector_visible = false;
+            m.focus_row(Some("npm-cache".into()), cx);
+            m.open_row(cx);
+        });
+        assert!(model.read_with(cx, |m, _| m.inspector_visible));
     }
 
     #[gpui::test]

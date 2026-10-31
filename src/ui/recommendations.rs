@@ -1,28 +1,63 @@
-//! Recommendations card: tier sections, rows, footer and the detail drawer
-//! (PRD sections 7.4 and 7.5).
+//! Recommended page (PRD 13.4.6): tier sections, rows and the queue footer.
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, AnyView, App, ClickEvent, Context, Div, ElementId, FontWeight,
-    Role, SharedString, Stateful, Toggled, Window, div, ease_out_quint, prelude::*, px,
+    Role, ScrollHandle, SharedString, Stateful, Toggled, Window, div, ease_out_quint,
+    linear_color_stop, linear_gradient, prelude::*, px, svg,
 };
+use gpui_component::button::Button;
+use gpui_component::{Sizable, Size};
 
 use super::format::{format_bytes, format_size};
+use super::keymap;
 use super::model::AppModel;
 use super::selection::{RowState, blocked_reason, row_state};
+use super::shell::CONTROL_HEIGHT;
 use super::stats::compute_stats;
 use super::theme::{self, MONO, Theme};
 use crate::recommend::model::{ItemDetails, ItemStatus, MethodView, RecItem, Recommendation, Tier};
 
-/// Panel-only UI state. The panel keeps none: selection, focus and details
-/// live in the model.
+/// Page-only UI state; selection, focus and details live in the model.
 #[derive(Default)]
-pub struct PanelState {}
+pub struct PanelState {
+    /// The list, so j/k can bring the focused row into view.
+    pub(super) scroll: ScrollHandle,
+}
 
-const NOTHING_SELECTED: &str = "Select items to clean first";
-const SCANNING: &str = "Available when the update finishes";
+const TIERS: [Tier; 2] = [Tier::Safe, Tier::Review];
+const ROW_HEIGHT: f32 = 52.;
+/// Height of the fade at the list's bottom edge (FR-REC-1).
+const FADE: f32 = 48.;
+
+/// Rows as the list shows them: safe first, then review, each in the backend's order.
+pub(super) fn ordered(recs: &[Recommendation]) -> Vec<&Recommendation> {
+    TIERS
+        .iter()
+        .flat_map(|tier| recs.iter().filter(move |r| r.tier == *tier))
+        .collect()
+}
+
+/// The list child index of `row_id`: each tier's rows follow its header.
+pub(super) fn list_index(recs: &[Recommendation], row_id: &str) -> Option<usize> {
+    let mut ix = 0;
+    for tier in TIERS {
+        let rows: Vec<&Recommendation> = recs.iter().filter(|r| r.tier == tier).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        ix += 1;
+        for r in rows {
+            if r.row_id == row_id {
+                return Some(ix);
+            }
+            ix += 1;
+        }
+    }
+    None
+}
 
 pub fn render(
     model: &mut AppModel,
@@ -30,109 +65,106 @@ pub fn render(
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let t = theme::current(window);
-    let card = div()
+    let page = div()
         .relative()
         .size_full()
         .flex()
         .flex_col()
-        .overflow_hidden()
-        .rounded(px(12.))
-        .border_1()
-        .border_color(t.separator)
-        .bg(t.widget);
+        .gap(px(theme::GAP_WIDGET));
     let Some(meta) = &model.meta else {
-        return card;
+        return page;
     };
     let recs = &model.recommendations;
     let totals = compute_stats(meta, recs, &HashSet::new());
     let chosen = compute_stats(meta, recs, &model.selected);
 
-    let mut body = div()
-        .id("recommendations-body")
-        .flex_1()
-        .min_h_0()
+    let mut list = div()
+        .id("recommendations-list")
+        .size_full()
         .overflow_y_scroll()
-        .border_t_1()
-        .border_color(t.separator);
+        .track_scroll(&model.panel.scroll)
+        .pb(px(FADE));
     if recs.is_empty() {
-        body = body.child(
+        list = list.child(
             div()
-                .px_5()
-                .py_8()
+                .pt_10()
                 .flex()
                 .justify_center()
-                .text_size(px(13.))
                 .text_color(t.secondary)
                 .child("Nothing to clean up in this scan."),
         );
     }
-    for (tier, total) in [
-        (Tier::Safe, totals.safe.size),
-        (Tier::Review, totals.review.size),
-    ] {
+    let focused = model.focused_row.as_deref();
+    let mut first = true;
+    for (tier, total) in TIERS
+        .into_iter()
+        .zip([totals.safe.size, totals.review.size])
+    {
         let rows: Vec<&Recommendation> = recs.iter().filter(|r| r.tier == tier).collect();
         if rows.is_empty() {
             continue;
         }
-        let last = rows.len() - 1;
-        body = body.child(
+        list = list.child(
             div()
                 .flex()
                 .items_center()
                 .justify_between()
-                .px_5()
-                .py_2()
-                .border_b_1()
-                .border_color(t.separator)
+                .px_1()
+                .pt(px(if first { 6. } else { 20. }))
+                .pb_2()
                 .child(tier_pill(&t, tier))
                 .child(
                     div()
-                        .font_family(MONO)
-                        .text_size(px(13.))
                         .text_color(t.secondary)
+                        .font_features(theme::numeric())
                         .child(format_bytes(total)),
                 ),
         );
-        for (i, r) in rows.into_iter().enumerate() {
-            body = body.child(row(&t, r, &model.selected, i == last, cx));
+        first = false;
+        let mut previous_on = true;
+        for r in rows {
+            let on = focused == Some(r.row_id.as_str());
+            // Hairlines separate rows, except next to the highlighted one.
+            list = list.child(row(&t, r, &model.selected, on, !on && !previous_on, cx));
+            previous_on = on;
         }
     }
 
-    let card = card
-        .child(
-            div()
-                .px_5()
-                .pt_5()
-                .pb_3()
-                .child(
-                    div()
-                        .text_size(px(15.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Recommendations"),
-                )
-                .child(
-                    div()
-                        .mt_0p5()
-                        .text_size(px(13.))
-                        .text_color(t.secondary)
-                        .child("Select items to build a cleanup script"),
-                ),
-        )
-        .child(body)
-        .child(footer(
-            &t,
-            chosen.selected,
-            chosen.selected_rows,
-            model.scan.is_some(),
-            cx,
+    let fade = div()
+        .absolute()
+        .bottom_0()
+        .left_0()
+        .w_full()
+        .h(px(FADE))
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(t.content.opacity(0.), 0.),
+            linear_color_stop(t.content, 1.),
         ));
+    let list = div()
+        .id("recommendations")
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .track_focus(&model.list_focus)
+        .key_context(keymap::LIST)
+        .on_action(cx.listener(|m, _: &keymap::SelectDown, _, cx| m.move_row(true, cx)))
+        .on_action(cx.listener(|m, _: &keymap::SelectUp, _, cx| m.move_row(false, cx)))
+        .on_action(cx.listener(|m, _: &keymap::StageSelected, _, cx| m.stage_row(cx)))
+        .on_action(cx.listener(|m, _: &keymap::OpenSelected, _, cx| m.open_row(cx)))
+        .child(list)
+        .child(fade);
+
+    let page = page
+        .child(list)
+        .child(footer(&t, chosen.selected, chosen.selected_rows, cx));
 
     match model
         .focused_row
         .as_ref()
         .and_then(|id| recs.iter().find(|r| &r.row_id == id))
     {
-        Some(r) => card.child(drawer(
+        Some(r) => page.child(drawer(
             &t,
             r,
             model.details.as_ref().filter(|d| d.row_id == r.row_id),
@@ -141,7 +173,7 @@ pub fn render(
             &meta.root,
             cx,
         )),
-        None => card,
+        None => page,
     }
 }
 
@@ -242,14 +274,20 @@ pub(super) fn checkbox(
         .justify_center()
         .rounded(px(4.))
         .border_1()
-        .border_color(if on { t.label } else { t.secondary })
-        .bg(if on { t.label } else { t.widget })
-        .text_color(t.widget)
+        .border_color(if on { t.accent } else { t.neutral_border })
+        .bg(if on { t.accent } else { t.content })
+        .text_color(gpui::white())
         .text_size(px(size - 4.))
         .font_weight(FontWeight::SEMIBOLD);
     b = match state {
         RowState::All => b.child("✓"),
-        RowState::Some => b.child(div().w(px(size - 8.)).h(px(2.)).rounded_full().bg(t.widget)),
+        RowState::Some => b.child(
+            div()
+                .w(px(size - 8.))
+                .h(px(2.))
+                .rounded_full()
+                .bg(gpui::white()),
+        ),
         RowState::None => b,
     };
     if disabled {
@@ -278,7 +316,8 @@ fn row(
     t: &Theme,
     r: &Recommendation,
     selected: &HashSet<String>,
-    last: bool,
+    on: bool,
+    hairline: bool,
     cx: &mut Context<AppModel>,
 ) -> impl IntoElement {
     let reason = blocked_reason(r);
@@ -297,186 +336,120 @@ fn row(
         SharedString::from(format!("check-{}", r.row_id)),
         state,
         reason.is_some(),
-        18.,
+        16.,
     );
     if reason.is_none() {
         check = theme::focusable(check, t, Role::CheckBox, format!("Select {}", r.label))
             .aria_toggled(toggled(state))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                // The checkbox stages; only the rest of the row selects it (FR-REC-2).
+                cx.stop_propagation();
                 this.toggle_row(&toggle_id, cx);
             }));
     }
 
-    let sub = div()
-        .id(SharedString::from(format!("paths-{}", r.row_id)))
-        .truncate()
-        .text_size(px(12.))
-        .line_height(px(16.));
-    let sub = match reason {
-        Some(reason) => sub.text_color(t.review_text).child(reason.to_owned()),
-        None => sub
-            .font_family(MONO)
-            .text_color(t.secondary)
-            .tooltip(tip(paths))
-            .child(r.paths_hint.clone()),
-    };
-
-    let mut line = div()
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_5()
-        .py_3()
-        .border_color(t.separator)
-        .child(check)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .truncate()
-                        .text_size(px(15.))
-                        .line_height(px(20.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(if reason.is_some() {
-                            t.secondary
-                        } else {
-                            t.label
-                        })
-                        .child(r.label.clone()),
-                )
-                .child(sub),
-        )
-        .child(
-            div()
-                .flex_none()
-                .font_family(MONO)
-                .text_size(px(15.))
-                .font_weight(FontWeight::MEDIUM)
-                .child(format_size(r.size, r.size_is_estimate)),
-        )
-        .child(
-            theme::focusable(
-                ghost_button(t, SharedString::from(format!("open-{}", r.row_id)), "›"),
-                t,
-                Role::Button,
-                format!("Details for {}", r.label),
+    let line = theme::focusable(
+        div().id(SharedString::from(format!("row-{}", r.row_id))),
+        t,
+        Role::Button,
+        format!("{}, {}", r.label, format_size(r.size, r.size_is_estimate)),
+    )
+    .flex()
+    .items_center()
+    .gap_3()
+    .h(px(ROW_HEIGHT))
+    .px(px(10.))
+    .rounded(px(theme::R_CONTROL))
+    .cursor_pointer()
+    .when(on, |d| d.bg(t.selected))
+    .child(check)
+    .child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .child(
+                div()
+                    .truncate()
+                    .text_color(if reason.is_some() {
+                        t.secondary
+                    } else {
+                        t.label
+                    })
+                    .child(r.label.clone()),
             )
-            .text_size(px(18.))
-            .line_height(px(18.))
-            .mr(px(-8.))
-            .tooltip(tip(format!("Details for {}", r.label)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.focus_row(Some(open_id.clone()), cx);
-            })),
-        );
-    if !last {
-        line = line.border_b_1();
-    }
-    line
+            .child(
+                div()
+                    .id(SharedString::from(format!("paths-{}", r.row_id)))
+                    .truncate()
+                    .font_family(MONO)
+                    .text_size(px(theme::T_SMALL))
+                    .text_color(t.secondary)
+                    .tooltip(tip(paths))
+                    .child(r.paths_hint.clone()),
+            ),
+    )
+    .children(reason.map(|reason| {
+        div()
+            .flex_none()
+            .text_size(px(12.))
+            .text_color(t.review_text)
+            .child(reason.to_owned())
+    }))
+    .child(
+        div()
+            .flex_none()
+            .w(px(84.))
+            .flex()
+            .justify_end()
+            .font_weight(FontWeight::MEDIUM)
+            .child(format_size(r.size, r.size_is_estimate)),
+    )
+    .child(
+        svg()
+            .path("icons/ui/chev.svg")
+            .size(px(14.))
+            .flex_none()
+            .text_color(t.tertiary),
+    )
+    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+        // Clicking a row hands the keyboard to the list.
+        window.focus(&this.list_focus, cx);
+        this.focus_row(Some(open_id.clone()), cx);
+        this.inspector_visible = true;
+    }));
+    // The hairline sits outside the rounded row so it stays straight.
+    div()
+        .border_t_1()
+        .border_color(if hairline {
+            t.separator
+        } else {
+            gpui::transparent_black()
+        })
+        .child(line)
 }
 
-fn footer(
-    t: &Theme,
-    size: u64,
-    rows: usize,
-    scanning: bool,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let secondary = |id: &'static str, label: &'static str| {
-        div()
-            .id(id)
-            .px_3()
-            .py_1p5()
-            .rounded_lg()
-            .border_1()
-            .border_color(t.separator)
-            .text_size(px(13.))
-            .font_weight(FontWeight::MEDIUM)
-            .child(label)
-    };
-    let bg = t.content;
-    let nothing = rows == 0;
+/// The queue summary and Select Safe Items (FR-REC-4).
+fn footer(t: &Theme, size: u64, rows: usize, cx: &mut Context<AppModel>) -> impl IntoElement {
     div()
-        .px_5()
-        .py_4()
-        .border_t_1()
-        .border_color(t.separator)
+        .flex()
+        .items_center()
+        .justify_between()
+        .pt_1()
         .child(
             div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .text_size(px(13.))
                 .text_color(t.secondary)
-                .child(
-                    div()
-                        .font_family(MONO)
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(t.label)
-                        .child(format_bytes(size)),
-                )
+                .font_features(theme::numeric())
                 .child(format!(
-                    "selected · {rows} {}",
+                    "{} staged · {rows} {}",
+                    format_bytes(size),
                     if rows == 1 { "item" } else { "items" }
                 )),
         )
         .child(
-            div()
-                .mt_3()
-                .flex()
-                .gap_2()
-                .child(
-                    theme::focusable(
-                        secondary("select-safe", "Select safe"),
-                        t,
-                        Role::Button,
-                        "Select safe",
-                    )
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(bg))
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.select_safe(cx))),
-                )
-                .child(if nothing {
-                    secondary("copy-script", "Copy script")
-                        .opacity(0.4)
-                        .tooltip(tip(NOTHING_SELECTED.into()))
-                } else {
-                    theme::focusable(
-                        secondary("copy-script", "Copy script"),
-                        t,
-                        Role::Button,
-                        "Copy script",
-                    )
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(bg))
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_script(cx)))
-                })
-                .child({
-                    let clean = div()
-                        .id("clean-selected")
-                        .ml_auto()
-                        .px_3()
-                        .py_1p5()
-                        .rounded_lg()
-                        .bg(t.label)
-                        .text_color(t.widget)
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child("Clean selected");
-                    if nothing {
-                        clean.opacity(0.4).tooltip(tip(NOTHING_SELECTED.into()))
-                    } else if scanning {
-                        clean.opacity(0.4).tooltip(tip(SCANNING.into()))
-                    } else {
-                        theme::focusable(clean, t, Role::Button, "Clean selected")
-                            .cursor_pointer()
-                            .on_click(
-                                cx.listener(|this, _: &ClickEvent, _, cx| this.open_cleanup(cx)),
-                            )
-                    }
-                }),
+            Button::new("select-safe")
+                .label("Select Safe Items")
+                .with_size(Size::Size(px(CONTROL_HEIGHT)))
+                .on_click(cx.listener(|m, _, _, cx| m.select_safe(cx))),
         )
 }
 
@@ -744,6 +717,38 @@ mod tests {
             }),
             "Runs `brew cleanup`"
         );
+    }
+
+    fn rec(row_id: &str, tier: Tier) -> Recommendation {
+        Recommendation {
+            row_id: row_id.into(),
+            rule_id: row_id.into(),
+            label: row_id.into(),
+            paths_hint: String::new(),
+            tier,
+            size: 1,
+            size_is_estimate: false,
+            items: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ordered_puts_safe_rows_first() {
+        let recs = [rec("r", Tier::Review), rec("s", Tier::Safe)];
+        let ids: Vec<&str> = ordered(&recs).iter().map(|r| r.row_id.as_str()).collect();
+        assert_eq!(ids, ["s", "r"]);
+    }
+
+    #[test]
+    fn list_index_counts_both_tier_headers() {
+        let recs = [rec("r", Tier::Review), rec("s", Tier::Safe)];
+        assert_eq!(list_index(&recs, "r"), Some(3));
+    }
+
+    #[test]
+    fn list_index_skips_an_empty_tier() {
+        let recs = [rec("r", Tier::Review)];
+        assert_eq!(list_index(&recs, "r"), Some(1));
     }
 
     #[test]
