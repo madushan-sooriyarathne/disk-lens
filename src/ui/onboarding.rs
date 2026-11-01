@@ -6,8 +6,8 @@ use std::sync::{Arc, LazyLock};
 
 use gpui::{
     Animation, AnimationExt, App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat,
-    IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, div, img,
-    linear_color_stop, linear_gradient, prelude::*, px, relative, rgba, svg,
+    IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, canvas, div, fill,
+    img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgba, svg,
 };
 
 use super::format::{format_bytes, group_digits};
@@ -127,31 +127,40 @@ fn step_transition(model: &AppModel, content: Div) -> impl IntoElement {
         )
 }
 
+/// Where the glow has faded out, as a fraction of the window height.
+const GLOW_END: f32 = 0.6;
+
 /// A warm glow from the top over the window color, and film grain over both.
 fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
-    let glow: Hsla = if t.dark {
-        rgba(0xff5a2e38).into()
-    } else {
-        rgba(0xff6a3d2e).into()
-    };
-    let tiles = ((width / NOISE_TILE).ceil() * (height / NOISE_TILE).ceil()) as usize;
+    let glow = glow(t);
     div()
         .absolute()
         .inset_0()
         .child(div().absolute().inset_0().bg(linear_gradient(
             180.,
             linear_color_stop(glow, 0.),
-            linear_color_stop(glow.opacity(0.), 0.6),
+            linear_color_stop(glow.opacity(0.), GLOW_END),
         )))
-        .child(
-            div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .flex_wrap()
-                .opacity(if t.dark { 0.06 } else { 0.05 })
-                .children((0..tiles).map(|_| img(NOISE.clone()).size(px(NOISE_TILE)))),
-        )
+        .child(grain(t, width, height))
+}
+
+fn glow(t: &Theme) -> Hsla {
+    if t.dark {
+        rgba(0xff5a2e38).into()
+    } else {
+        rgba(0xff6a3d2e).into()
+    }
+}
+
+fn grain(t: &Theme, width: f32, height: f32) -> Div {
+    let tiles = ((width / NOISE_TILE).ceil() * (height / NOISE_TILE).ceil()) as usize;
+    div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .flex_wrap()
+        .opacity(if t.dark { 0.06 } else { 0.05 })
+        .children((0..tiles).map(|_| img(NOISE.clone()).size(px(NOISE_TILE))))
 }
 
 const STEPS: [(Step, &str); 3] = [
@@ -362,19 +371,40 @@ const HERO_MAX: f32 = 260.;
 const HERO_MIN: f32 = 220.;
 
 fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) -> Div {
-    // The pane fades into the window below the DiskLens row.
+    // The pane fades into the window below the DiskLens row. The fade ends in the
+    // backdrop's color at that height (window color plus what is left of the glow),
+    // read from where it lands, so the pane has no bottom edge; grain over the hero
+    // carries the backdrop's texture across.
     let hero_h = (height - ACCESS_REST).clamp(HERO_MIN, HERO_MAX);
-    let fade = div()
-        .absolute()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .h(px((hero_h - fda_preview::DISKLENS_BOTTOM).max(40.)))
-        .bg(linear_gradient(
-            180.,
-            linear_color_stop(t.content.opacity(0.), 0.),
-            linear_color_stop(t.content, 1.),
-        ));
+    let (content, glow) = (t.content, glow(t));
+    let fade = canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let window_h = f32::from(window.viewport_size().height);
+            let left = (1. - f32::from(bounds.bottom()) / (GLOW_END * window_h)).clamp(0., 1.);
+            window.paint_quad(fill(
+                bounds,
+                linear_gradient(
+                    180.,
+                    linear_color_stop(content.opacity(0.), 0.),
+                    linear_color_stop(content, 1.),
+                ),
+            ));
+            window.paint_quad(fill(
+                bounds,
+                linear_gradient(
+                    180.,
+                    linear_color_stop(glow.opacity(0.), 0.),
+                    linear_color_stop(glow.opacity(left), 1.),
+                ),
+            ));
+        },
+    )
+    .absolute()
+    .left_0()
+    .right_0()
+    .bottom_0()
+    .h(px((hero_h - fda_preview::DISKLENS_BOTTOM).max(40.)));
     let hero = div()
         .relative()
         .h(px(hero_h))
@@ -386,7 +416,8 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
             APP_ICON.clone(),
             model.reduce_motion,
         ))
-        .child(fade);
+        .child(fade)
+        .child(grain(t, COLUMN, hero_h));
     let action = if model.access_confirmed {
         div()
             .h(px(PILL_H))
