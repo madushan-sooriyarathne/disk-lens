@@ -1,6 +1,7 @@
 #!/bin/bash
-# Regenerates assets/icons/icon.icns from assets/icons/icon.svg. Writes only
-# assets/icons/icon.icns and target/icon/.
+# Regenerates assets/icons/icon.icns and icon-256.png (the onboarding draws the
+# PNG, which decodes far faster than the SVG) from assets/icons/icon.svg. Writes
+# only those two files and target/icon/.
 #
 # Uses only tools that ship with macOS: qlmanage renders the SVG (WebKit),
 # sips scales it, iconutil packs the iconset.
@@ -28,4 +29,5 @@ for size in 16 32 128 256 512; do
 done
 
 iconutil -c icns "$ICONSET" -o "$REPO/assets/icons/icon.icns"
-echo "wrote assets/icons/icon.icns"
+cp "$ICONSET/icon_128x128@2x.png" "$REPO/assets/icons/icon-256.png"
+echo "wrote assets/icons/icon.icns and assets/icons/icon-256.png"

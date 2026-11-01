@@ -5,7 +5,7 @@
 use std::sync::{Arc, LazyLock};
 
 use gpui::{
-    Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat, IntoElement, MouseButton,
+    App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat, IntoElement, MouseButton,
     ParentElement, Role, Stateful, Styled, Window, div, img, linear_color_stop, linear_gradient,
     prelude::*, px, relative, rgba, svg,
 };
@@ -22,10 +22,12 @@ const DISPLAY: f32 = 34.;
 const PILL_H: f32 = 40.;
 const NOISE_TILE: f32 = 128.;
 
+/// `scripts/make-icon.sh`. A PNG, because GPUI rasterizes an SVG of this size on its
+/// first draw and the icon would pop in.
 static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(
-        ImageFormat::Svg,
-        include_bytes!("../../assets/icons/icon.svg").to_vec(),
+        ImageFormat::Png,
+        include_bytes!("../../assets/icons/icon-256.png").to_vec(),
     ))
 });
 
@@ -55,6 +57,12 @@ const FEATURES: [(&str, &str, &str); 3] = [
         "You confirm every cleanup, and most items go to the Trash first.",
     ),
 ];
+
+/// Starts decoding the images, so they are ready by the first onboarding frame.
+pub fn preload(window: &mut Window, cx: &mut App) {
+    APP_ICON.clone().get_render_image(window, cx);
+    NOISE.clone().get_render_image(window, cx);
+}
 
 pub fn render(
     model: &mut AppModel,
