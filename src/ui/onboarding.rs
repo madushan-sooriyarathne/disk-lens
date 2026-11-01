@@ -1,6 +1,6 @@
 //! First launch (PRD 13.4.1): Welcome, Full Disk Access and the first scan. Content
 //! sits centred on the window over the brand colors (a blue glow and a hint of
-//! Cantaloupe) with film grain, with Back and the page dots at the bottom.
+//! Cantaloupe), with Back and the page dots at the bottom, and film grain over it all.
 
 use std::sync::{Arc, LazyLock};
 
@@ -94,17 +94,15 @@ pub fn render(
         Step::Access => access(&t, model, f32::from(viewport.height), cx),
         Step::FirstScan => first_scan(&t, model, cx),
     };
+    // Grain is the last layer, so the preview's fade never hides it. It takes no
+    // clicks: plain divs and images insert no hitbox.
     div()
         .relative()
         .size_full()
         .overflow_hidden()
         .bg(base(&t))
         .text_size(px(theme::T_BODY))
-        .child(backdrop(
-            &t,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-        ))
+        .child(backdrop(&t))
         .child(
             div()
                 .absolute()
@@ -115,6 +113,11 @@ pub fn render(
                 .child(step_transition(model, content)),
         )
         .child(footer(&t, model, step, cx))
+        .child(grain(
+            &t,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+        ))
 }
 
 /// How far a step travels as it enters.
@@ -150,8 +153,8 @@ const GLOW_END: f32 = 0.6;
 const WARM_END: f32 = 0.3;
 
 /// Brand colors: an Electric Blue glow from the top and a hint of Cantaloupe from
-/// the bottom over the base, and film grain over all of it.
-fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
+/// the bottom over the base.
+fn backdrop(t: &Theme) -> Div {
     let (glow, warmth) = (glow(t), warmth(t));
     div()
         .absolute()
@@ -166,7 +169,6 @@ fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
             linear_color_stop(warmth, 0.),
             linear_color_stop(warmth.opacity(0.), WARM_END),
         )))
-        .child(grain(t, width, height))
 }
 
 /// Midnight in dark mode; white in light mode.
@@ -187,10 +189,15 @@ fn warmth(t: &Theme) -> Hsla {
 }
 
 fn grain(t: &Theme, width: f32, height: f32) -> Div {
-    let tiles = ((width / NOISE_TILE).ceil() * (height / NOISE_TILE).ceil()) as usize;
+    // Whole tiles wide, so every row fills; the parent clips the overhang. At the
+    // window's own width the last part tile would wrap and leave a bare strip.
+    let cols = (width / NOISE_TILE).ceil();
+    let tiles = (cols * (height / NOISE_TILE).ceil()) as usize;
     div()
         .absolute()
-        .inset_0()
+        .top_0()
+        .left_0()
+        .w(px(cols * NOISE_TILE))
         .flex()
         .flex_wrap()
         .opacity(if t.dark { 0.06 } else { 0.05 })
@@ -410,9 +417,9 @@ const HERO_MIN: f32 = 220.;
 
 fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) -> Div {
     // The pane fades into the window below the DiskLens row. The fade ends in the
-    // backdrop's color at that height (the base plus what is left of the glow and the
-    // warmth), read from where it lands, so the pane has no bottom edge; grain over
-    // the hero carries the backdrop's texture across.
+    // backdrop's color at that height (the base with what is left of the glow and
+    // the warmth composited over it), read from where it lands, so the pane has no
+    // bottom edge.
     let hero_h = (height - ACCESS_REST).clamp(HERO_MIN, HERO_MAX);
     let (base, glow, warmth) = (base(t), glow(t), warmth(t));
     let fade = canvas(
@@ -422,16 +429,17 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
             let y = f32::from(bounds.bottom());
             let glow_left = (1. - y / (GLOW_END * window_h)).clamp(0., 1.);
             let warmth_left = (1. - (window_h - y) / (WARM_END * window_h)).clamp(0., 1.);
-            for color in [base, glow.opacity(glow_left), warmth.opacity(warmth_left)] {
-                window.paint_quad(fill(
-                    bounds,
-                    linear_gradient(
-                        180.,
-                        linear_color_stop(color.opacity(0.), 0.),
-                        linear_color_stop(color, 1.),
-                    ),
-                ));
-            }
+            let end = base
+                .blend(glow.opacity(glow_left))
+                .blend(warmth.opacity(warmth_left));
+            window.paint_quad(fill(
+                bounds,
+                linear_gradient(
+                    180.,
+                    linear_color_stop(end.opacity(0.), 0.),
+                    linear_color_stop(end, 1.),
+                ),
+            ));
         },
     )
     .absolute()
@@ -446,8 +454,7 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
         .flex()
         .justify_center()
         .child(fda_preview::render(t, app_icon(t), model.reduce_motion))
-        .child(fade)
-        .child(grain(t, COLUMN, hero_h));
+        .child(fade);
     let action = if model.access_confirmed {
         div()
             .h(px(PILL_H))
