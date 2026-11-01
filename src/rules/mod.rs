@@ -1,6 +1,7 @@
 //! Rules engine: `rules.toml` model, validation, categories and matching (RULES.md).
 
 pub mod category;
+pub mod git_state;
 pub mod guards;
 pub mod load;
 pub mod matcher;
