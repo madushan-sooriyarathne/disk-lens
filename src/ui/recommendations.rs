@@ -191,6 +191,23 @@ pub(super) fn tier_pill(t: &Theme, tier: Tier) -> Div {
         .child(tier_label(tier))
 }
 
+/// FR-GIT-2: the badge on a row or item whose project has uncommitted or unpushed work.
+pub(super) fn active_work_pill(t: &Theme) -> Div {
+    div()
+        .flex_none()
+        .px_2()
+        .rounded_md()
+        .text_size(px(theme::T_SMALL))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(t.review_text)
+        .bg(t.review_tint)
+        .child("Active work")
+}
+
+pub(super) fn has_active_work(r: &Recommendation) -> bool {
+    r.items.iter().any(|i| i.active_work.is_some())
+}
+
 /// `/Users/x/.npm` -> `~/.npm` under the scan root.
 pub(super) fn tilde(path: &str, root: &str) -> String {
     match path.strip_prefix(root) {
@@ -290,6 +307,7 @@ fn row(
         .join("\n");
     let toggle_id = r.row_id.clone();
     let open_id = r.row_id.clone();
+    let active = has_active_work(r);
 
     let mut check = checkbox(
         t,
@@ -312,7 +330,12 @@ fn row(
         div().id(SharedString::from(format!("row-{}", r.row_id))),
         t,
         Role::Button,
-        format!("{}, {}", r.label, format_size(r.size, r.size_is_estimate)),
+        format!(
+            "{}, {}{}",
+            r.label,
+            format_size(r.size, r.size_is_estimate),
+            if active { ", active work" } else { "" }
+        ),
     )
     .flex()
     .items_center()
@@ -329,13 +352,21 @@ fn row(
             .min_w_0()
             .child(
                 div()
-                    .truncate()
-                    .text_color(if reason.is_some() {
-                        t.secondary
-                    } else {
-                        t.label
-                    })
-                    .child(r.label.clone()),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(if reason.is_some() {
+                                t.secondary
+                            } else {
+                                t.label
+                            })
+                            .child(r.label.clone()),
+                    )
+                    .when(active, |d| d.child(active_work_pill(t))),
             )
             .child(
                 div()
@@ -526,6 +557,7 @@ fn context_menu(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recommend::model::{ItemStatus, MethodView, RecItem};
 
     fn rec(row_id: &str, tier: Tier) -> Recommendation {
         Recommendation {
@@ -538,6 +570,31 @@ mod tests {
             size_is_estimate: false,
             items: Vec::new(),
         }
+    }
+
+    fn with_item(mut r: Recommendation, active_work: Option<&str>) -> Recommendation {
+        r.items.push(RecItem {
+            item_id: "i".into(),
+            path: "/p".into(),
+            name: "i".into(),
+            size: 1,
+            status: ItemStatus::Ready,
+            method: MethodView::Delete,
+            active_work: active_work.map(Into::into),
+        });
+        r
+    }
+
+    #[test]
+    fn a_row_with_one_active_item_has_active_work() {
+        let r = with_item(rec("r", Tier::Review), Some("3 uncommitted files"));
+        assert!(has_active_work(&r));
+    }
+
+    #[test]
+    fn a_row_without_active_items_has_no_active_work() {
+        let r = with_item(rec("r", Tier::Review), None);
+        assert!(!has_active_work(&r));
     }
 
     #[test]

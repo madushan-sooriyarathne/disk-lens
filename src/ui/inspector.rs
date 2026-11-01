@@ -10,7 +10,9 @@ use gpui_component::{Disableable, Sizable, Size};
 use super::chrome::INSPECTOR_WIDTH;
 use super::format::{format_bytes, format_size, group_digits};
 use super::model::{AppModel, Page};
-use super::recommendations::{checkbox, tier_pill, tilde, tip, toggled};
+use super::recommendations::{
+    active_work_pill, checkbox, has_active_work, tier_pill, tilde, tip, toggled,
+};
 use super::selection::{self, RowState, within};
 use super::shell::{self, CONTROL_HEIGHT};
 use super::stats::{compute_stats, largest_folders};
@@ -646,7 +648,14 @@ fn recommendation(
                 .flex_col()
                 .items_start()
                 .gap_2()
-                .child(tier_pill(&t, r.tier))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(tier_pill(&t, r.tier))
+                        .when(has_active_work(r), |d| d.child(active_work_pill(&t))),
+                )
                 .child(
                     div()
                         .text_size(px(17.))
@@ -739,7 +748,14 @@ fn rec_item(
                 .flex_1()
                 .min_w_0()
                 .child(div().truncate().child(i.name.clone()))
-                .child(sub),
+                .child(sub)
+                .children(i.active_work.as_ref().map(|why| {
+                    div()
+                        .truncate()
+                        .text_size(px(theme::T_SMALL))
+                        .text_color(t.review_text)
+                        .child(why.clone())
+                })),
         )
         .child(
             div()
