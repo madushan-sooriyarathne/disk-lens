@@ -205,6 +205,19 @@ Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PW
 - [x] `otool -L target/release/disklens` lists no libgit2, OpenSSL or libssh2 dylib.
 - [x] `scripts/package.sh` builds the universal DMG at 15.7 MB, under 25 MB (2026-11-01).
 
+## Phase 15a: Pro licensing (app side)
+
+Mint tokens with `DISKLENS_LICENSE_KEY_PATH=~/.config/disklens/license.key scripts/mint-license.sh pro` (or `trial`). The script prints only the token.
+
+- [ ] `DISKLENS_MOCK=1 cargo run`: a Pro palette entry (`>` then "Saved Filters") opens the Pro sheet with Buy DiskLens Pro, Start 7-Day Trial and Enter License…; Buy and Trial open `<site>/buy` and `<site>/trial` in the browser (`DISKLENS_SITE_URL` to point them elsewhere).
+- [ ] The sidebar footer shows "DiskLens Pro…" while free and opens the same sheet; there is no nag at launch.
+- [ ] ⌘, and DiskLens › Settings… open one Settings window; a second ⌘, focuses it; closing it leaves the app running.
+- [ ] `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`: pasting a minted Pro token activates ("DiskLens Pro"), and a background rescan starts; a minted trial token shows "Trial: 7 days left"; a token with one character changed is refused with its reason; Remove License returns to Free.
+- [ ] With Pro active, a trial token is refused ("A Pro license is already active").
+- [ ] `DISKLENS_MOCK=pro cargo run`: `> stage dormant rust targets` lists Stage All for the rule; `> stage tier:safe` shows the item count and stages only ready items; Save Filter, Apply Saved Filter and Forget Saved Filter work and survive a relaunch in the sandbox run.
+- [ ] Light and dark: the Pro sheet, Settings window and footer status follow the system appearance with no off-platform controls.
+- [ ] Packaged app (`scripts/package.sh`, copy to `/Applications`): `open 'disklens://activate?token=<minted>'` opens Settings with the token filled in and does not activate until Activate is clicked; `open 'disklens://other'` does nothing.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
