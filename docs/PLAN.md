@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 14 merged with Phase 13, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (568 tests, 3 release-only tests ignored) all pass.
+Last full gate run on macOS (Phase 14 merged with Phase 13, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (569 tests, 3 release-only tests ignored) all pass.
 
 ### What is left
 
@@ -247,7 +247,7 @@ Last full gate run on macOS (Phase 14 merged with Phase 13, 2026-11-01): `cargo 
 - Built:
   - `rules/git_state.rs` reads a repository in process with libgit2 (`git2`, vendored and static, no https or ssh): status entries (untracked included, untracked folders as one entry, ignored files excluded, the index never written) and, per local branch and a detached HEAD, the commits no `refs/remotes/*` ref contains (counted up to 1000).
   - `git_active`, the first *demoting* guard (RULES.md section 4.2). `recommend::build::analyze` checks it once per snapshot, reading each repository once. An affected item moves to the review row "<label> (active work)" (`<row_id>:active`) with `RecItem.active_work` set to the reason; the treemap draws it as review tier (`Analysis::tier_of`). It never blocks, so revalidation and cleanup are unchanged.
-  - Rules: `rust-target-idle` and `python-venv-idle` (safe), `dist-idle` (review), all with `project_idle_days = 30`, `quiet_minutes = 60` and `git_active`; `node-modules-idle` and `next-turbo-build` get `git_active`. Idle evidence adds `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `requirements.txt`, `uv.lock` and `poetry.lock`. Every rule has a required, non-empty `keywords` list for the palette.
+  - Rules: `rust-target-idle` and `python-venv-idle` (safe), `dist-idle` (review), all with `project_idle_days = 30`, `quiet_minutes = 60` and `git_active`; `node-modules-idle` and `next-turbo-build` get `git_active`. Idle evidence adds `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `requirements.txt`, `uv.lock` and `poetry.lock`. Every rule has a required, non-empty `keywords` list; the palette matches recommendation rows on their rule's ID and keywords, so "dormant rust targets" finds `rust-target-idle` (FR-KB-2).
   - UI: an amber Active work pill on the row and in the inspector, with each item's reason under its path; the mock marks one item.
   - Fixture v4: `Desktop/aw-clean`, `aw-dirty`, `aw-unpushed` and `aw-noupstream` (each with ignored `target` and `node_modules`), plus idle `py-proj` and `js-lib`; fixture commits are dated 2024-01-01.
 - Decisions (2026-11-01):
