@@ -23,6 +23,7 @@ libc = "0.2.191"
 objc2 = "0.6.5"
 raw-window-handle = "0.6.2"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSURL", "NSString", "NSArray", "NSDictionary", "NSError", "NSValue", "NSObject", "NSEnumerator", "NSGeometry"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 toml = "1.1.8"
 globset = "0.4.20"
 wait-timeout = "0.2.1"
