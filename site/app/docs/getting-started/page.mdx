@@ -1,0 +1,37 @@
+import { meta } from "@/lib/seo";
+
+export const metadata = meta("Getting started", "Install DiskLens, run your first scan and clean up your first safe item.", "/docs/getting-started");
+
+# Getting started
+
+DiskLens needs macOS 13 or later and runs on Apple Silicon and Intel.
+
+## Install
+
+Open the downloaded disk image and drag DiskLens to Applications. If macOS asks you to confirm the first launch, open System Settings, choose Privacy & Security and click Open Anyway.
+
+## First run
+
+A three-step guide opens the first time:
+
+1. **Welcome.** What DiskLens does, in three points.
+2. **Full Disk Access.** DiskLens explains why macOS hides some folders and opens the right System Settings pane. You can continue without it. See [Full Disk Access](/docs/full-disk-access).
+3. **First scan.** The scan starts by itself and shows files, bytes and the six categories filling in. When it finishes you land on the Overview.
+
+## The three pages
+
+- **Overview** shows your disk, how much is safe to clean, and your largest folders.
+- **Explore** shows one folder level as a treemap. Striped tiles are disposable, translucent tiles are restorable, solid tiles are your data, and a lock marks space macOS manages. Double-click a folder to open it.
+- **Recommended** lists what DiskLens found, split into *Safe to remove* and *Review first*.
+
+## Your first cleanup
+
+1. In Recommended, tick an item, or press Space on a tile in Explore. Items you stage collect in the queue.
+2. Click **Clean up**. DiskLens lists exactly what will happen to each item.
+3. Click the confirm button. Pressing Return does not confirm.
+
+Nothing is staged when DiskLens opens, and nothing runs until you confirm. Read [How cleanup works](/docs/how-cleanup-works) for the details.
+
+## Rescans
+
+DiskLens shows your last results at launch and updates them in the background. If the data is more than a day old it rescans on its own. Press <kbd>⌘R</kbd> to rescan now.

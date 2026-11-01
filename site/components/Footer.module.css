@@ -1,0 +1,12 @@
+.footer { background: var(--surface); padding-block: 2.5rem; font-size: 0.9375rem; }
+.cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem 1.5rem; }
+.note { grid-column: 1 / -1; color: var(--text-2); }
+.cols nav { display: grid; gap: 0.5rem; align-content: start; }
+.cols h2 { font-size: 0.8125rem; letter-spacing: 0.02em; color: var(--text-3); font-weight: 600; margin-bottom: 0.25rem; }
+.cols a { color: var(--text-2); text-decoration: none; }
+.cols a:hover { color: var(--text); text-decoration: underline; }
+
+@media (min-width: 720px) {
+  .cols { grid-template-columns: 2fr repeat(3, 1fr); }
+  .note { grid-column: auto; }
+}

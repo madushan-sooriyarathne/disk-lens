@@ -1,0 +1,46 @@
+import { meta } from "@/lib/seo";
+
+export const metadata = meta("Keyboard shortcuts", "Every DiskLens keyboard shortcut: menu commands, the command palette and Explore treemap navigation.", "/docs/keyboard-shortcuts");
+
+# Keyboard shortcuts
+
+## Menu bar
+
+| Menu | Command | Shortcut |
+|------|---------|----------|
+| File | Rescan | <kbd>⌘R</kbd> |
+| File | Export Cleanup Script… | <kbd>⌘E</kbd> |
+| File | Reveal in Finder | <kbd>⌘⇧R</kbd> |
+| View | Command Palette | <kbd>⌘K</kbd> |
+| View | Overview | <kbd>⌘1</kbd> |
+| View | Explore | <kbd>⌘2</kbd> |
+| View | Recommended | <kbd>⌘3</kbd> |
+| View | Show Inspector | <kbd>⌥⌘I</kbd> |
+| View | Highlight Cleanable | <kbd>⌘⇧H</kbd> |
+| View | Quick Look | <kbd>⌘Y</kbd> |
+| View | Show Sidebar | <kbd>⌃⌘S</kbd> |
+
+The Edit menu holds Add to Queue, Select Safe Items and Clear Queue. Show Queue is in the View menu. Help › Keyboard Shortcuts lists everything in the app.
+
+## Explore
+
+These work while the treemap has focus and no text field is focused.
+
+| Key | Action |
+|-----|--------|
+| <kbd>h</kbd> / <kbd>←</kbd>, <kbd>j</kbd> / <kbd>↓</kbd>, <kbd>k</kbd> / <kbd>↑</kbd>, <kbd>l</kbd> / <kbd>→</kbd> | Move the selection to the nearest tile in that direction |
+| <kbd>Space</kbd> | Stage or unstage the selected tile |
+| <kbd>Return</kbd> | Open the folder. On a file, reveal it in Finder |
+| <kbd>Backspace</kbd>, <kbd>Esc</kbd>, <kbd>⌘↑</kbd> | Up one level. Esc first closes an open menu or popover |
+| <kbd>⌘Y</kbd> | Quick Look the selected item |
+| <kbd>/</kbd> | Command palette limited to folders under the current one |
+
+<kbd>Tab</kbd> moves focus between the sidebar, toolbar, content and inspector. In Recommended, <kbd>j</kbd>, <kbd>k</kbd> and the arrow keys move between rows, with the same Space and Return.
+
+## Command palette
+
+Press <kbd>⌘K</kbd> from any page. <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>⌃N</kbd>/<kbd>⌃P</kbd> move, <kbd>Return</kbd> runs and <kbd>Esc</kbd> closes. One fuzzy list covers pages, folders in your last scan, recommendations and app commands.
+
+Type `>` to limit the list to commands. After `> filter`, add terms such as `size>1GB`, `size<100MB`, `tier:safe`, `tier:review`, `category:<id>` or `idle>30d`. An active filter shows as a token in the toolbar.
+
+With Pro, batch commands stage many items at once, for example `> stage safe size>1GB`, and you can save filters. Batch commands only stage items. Cleaning always goes through the confirm button.

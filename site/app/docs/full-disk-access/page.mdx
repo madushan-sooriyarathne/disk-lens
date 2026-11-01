@@ -1,0 +1,25 @@
+import { meta } from "@/lib/seo";
+
+export const metadata = meta("Full Disk Access", "Why DiskLens asks for Full Disk Access on macOS, how to grant it, and what happens without it.", "/docs/full-disk-access");
+
+# Full Disk Access
+
+macOS protects some folders in your home folder, such as parts of Library, Mail and Safari data. Without permission DiskLens cannot read their sizes, so it skips them and shows a notice in the sidebar saying how many folders it could not read. Your totals are lower than the real usage until you grant access.
+
+DiskLens only reads sizes and names. It never reads file contents.
+
+## Grant access
+
+1. In the first-run guide, click **Open System Settings**. You can also open System Settings, then Privacy & Security, then Full Disk Access.
+2. Switch DiskLens on. If DiskLens is not in the list, drag its icon from the guide into the list.
+3. DiskLens notices the change by itself and moves on.
+
+macOS may ask you to quit and reopen an app after you change this setting.
+
+## Continue without it
+
+Choose **Continue without** in the guide. DiskLens works, and the sidebar notice stays until access is granted. DiskLens never asks for an administrator password for scanning or cleanup.
+
+## After an update
+
+macOS ties the permission to the app build. If DiskLens says access is missing after an update, switch it off and on again in the same pane.

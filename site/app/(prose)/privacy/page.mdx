@@ -1,0 +1,26 @@
+import { meta } from "@/lib/seo";
+
+export const metadata = meta("Privacy", "How DiskLens and disklens.space handle your data. Draft.", "/privacy");
+
+# Privacy
+
+> **Draft.** This text describes how the product works today. It has not had legal review and may change before launch.
+
+## The app
+
+- DiskLens has no telemetry and no account.
+- Scans read file sizes and names on your Mac. File contents are never read, and scan results never leave your Mac.
+- Once per launch the app asks GitHub Releases for the latest version file, to offer updates.
+- License keys are checked offline. The app does not contact the license server.
+
+## The website and purchases
+
+- **Orders.** When you buy, we keep your email address, the order and its status, and the license key we issued, so we can deliver it and re-send it on request.
+- **Trials.** We keep your email address and the trial key, so that each address gets one trial and can recover its key. This is stored as plain text next to a hash of the address.
+- **Payments.** Payments are handled by payments.lk. We do not see or store your card details.
+- **Email.** Keys are emailed through Amazon SES.
+- **The key in the link.** The links in your emails open a page that carries the key in the part of the address after the `#`. Browsers do not send that part to servers, so it does not appear in our server logs.
+
+## Your choices
+
+Ask us to remove your email and order records, apart from anything we must keep for accounting. A removed license key keeps working, because keys are verified offline.

@@ -1,0 +1,172 @@
+/* Tokens follow PRD 13.5: system fonts, one accent, status colors, fills over borders. */
+:root {
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --surface-2: #ebebf0;
+  --text: #1d1d1f;
+  --text-2: #515154;
+  --text-3: #6e6e73;
+  --hairline: rgba(0, 0, 0, 0.12);
+  --accent: #007aff;
+  --accent-strong: #0062cc; /* white text on #007AFF is 4.0:1, below AA */
+  --link: #0062cc;
+  --safe: #34c759;
+  --safe-text: #1c6b34;
+  --safe-bg: rgba(52, 199, 89, 0.15);
+  --review: #ff9500;
+  --review-text: #8a4f00;
+  --review-bg: rgba(255, 149, 0, 0.16);
+  --stripe: rgba(0, 98, 204, 0.28);
+  --chrome: rgba(255, 255, 255, 0.72);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 40px rgba(0, 0, 0, 0.12);
+  --radius: 14px;
+  --radius-sm: 8px;
+  --max: 1080px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --surface: #2c2c2e;
+    --surface-2: #3a3a3c;
+    --text: #f5f5f7;
+    --text-2: #c7c7cc;
+    --text-3: #a1a1a6;
+    --hairline: rgba(255, 255, 255, 0.16);
+    --accent: #0a84ff;
+    --accent-strong: #0a6cd9;
+    --link: #6cb6ff;
+    --safe: #30d158;
+    --safe-text: #30d158;
+    --safe-bg: rgba(48, 209, 88, 0.18);
+    --review: #ff9f0a;
+    --review-text: #ff9f0a;
+    --review-bg: rgba(255, 159, 10, 0.18);
+    --stripe: rgba(108, 182, 255, 0.4);
+    --chrome: rgba(28, 28, 30, 0.72);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: 5rem;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 1rem/1.55 var(--font);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: break-word;
+}
+
+h1, h2, h3 {
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+/* Tracking tightens as size grows (apple-design). */
+h1 { font-size: clamp(2.25rem, 7vw, 3.75rem); letter-spacing: -0.03em; font-weight: 700; }
+h2 { font-size: clamp(1.5rem, 4vw, 2.25rem); letter-spacing: -0.02em; font-weight: 650; }
+h3 { font-size: 1.125rem; letter-spacing: -0.01em; font-weight: 600; line-height: 1.3; }
+p { margin: 0; }
+
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+img { max-width: 100%; height: auto; }
+
+code, kbd, pre { font-family: var(--mono); font-size: 0.9em; }
+
+.wrap { width: min(100% - 2rem, var(--max)); margin-inline: auto; }
+.section { padding-block: clamp(3rem, 8vw, 6rem); }
+.lead { font-size: clamp(1.0625rem, 2.4vw, 1.3125rem); color: var(--text-2); line-height: 1.45; max-width: 40rem; }
+.muted { color: var(--text-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Shared form and button primitives, used by several pages. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: 44px; padding: 0 1.25rem; border: 0; border-radius: 10px;
+  font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+  background: var(--surface-2); color: var(--text);
+  transition: transform 100ms ease-out, background-color 150ms ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--accent-strong); color: #fff; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+a.btn:hover { text-decoration: none; }
+
+.field {
+  width: 100%; min-height: 44px; padding: 0 0.875rem; border-radius: 10px;
+  border: 1px solid var(--hairline); background: var(--bg); color: var(--text); font: inherit;
+}
+.field::placeholder { color: var(--text-3); }
+
+/* The signature: the app's "disposable" stripe, reused wherever the site says reclaimable. */
+.stripes {
+  background-image: repeating-linear-gradient(45deg, var(--stripe) 0 1.5px, transparent 1.5px 7px);
+}
+
+.badge {
+  display: inline-block; padding: 0.125rem 0.5rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; line-height: 1.5; letter-spacing: 0.01em;
+  background: var(--surface-2); color: var(--text-2);
+}
+.badge-safe { background: var(--safe-bg); color: var(--safe-text); }
+.badge-review { background: var(--review-bg); color: var(--review-text); }
+
+.page { padding-block: clamp(2.5rem, 7vw, 5rem); display: grid; gap: 1.5rem; }
+.page > h1 { font-size: clamp(2rem, 6vw, 3rem); }
+
+.prose { max-width: 42rem; }
+.prose-page { padding-block: clamp(2.5rem, 7vw, 5rem); }
+.prose > * + * { margin-top: 1rem; }
+.prose h1 { margin-bottom: 0.5rem; font-size: clamp(2rem, 6vw, 2.75rem); }
+.prose h2 { margin-top: 2.5rem; font-size: 1.5rem; }
+.prose h3 { margin-top: 1.75rem; }
+.prose ul, .prose ol { padding-left: 1.25rem; }
+.prose li + li { margin-top: 0.375rem; }
+.prose code { background: var(--surface); padding: 0.1em 0.35em; border-radius: 5px; }
+.prose pre { background: var(--surface); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; }
+.prose pre code { background: none; padding: 0; }
+.prose kbd {
+  background: var(--surface-2); padding: 0.1em 0.45em; border-radius: 5px;
+  box-shadow: 0 1px 0 var(--hairline); white-space: nowrap;
+}
+.prose table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; display: block; overflow-x: auto; }
+.prose th, .prose td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.prose th { color: var(--text-3); font-weight: 600; }
+.prose blockquote { margin-inline: 0; padding: 0.75rem 1rem; background: var(--review-bg); border-radius: var(--radius-sm); }
+.prose hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 2rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:active { transform: none; }
+}
+
+@media (prefers-contrast: more) {
+  :root { --hairline: currentColor; }
+}

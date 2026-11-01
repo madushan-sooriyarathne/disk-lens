@@ -1,0 +1,26 @@
+.hero { padding-block: clamp(2.5rem, 8vw, 5rem) clamp(2rem, 6vw, 4rem); display: grid; gap: 1.5rem; justify-items: center; text-align: center; }
+.hero .lead { margin-inline: auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; }
+/* The word "safe" carries the app's disposable stripe: the one memorable mark on the page. */
+.mark { border-radius: 0.25em; padding-inline: 0.15em; color: var(--safe-text); box-shadow: inset 0 -0.12em 0 var(--safe); }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-content: center; color: var(--text-2); font-size: 0.875rem; }
+.legend li { display: flex; align-items: center; gap: 0.5rem; text-align: left; }
+.swatch { width: 18px; height: 18px; border-radius: 4px; flex: none; }
+.disposable { background-color: var(--surface); }
+.restorable { background: rgba(214, 90, 140, 0.18); }
+.kept { background: rgba(118, 99, 214, 0.28); }
+.points { display: grid; gap: 2rem; }
+.points p { color: var(--text-2); margin-top: 0.5rem; }
+.band { background: var(--surface); }
+.band h2 { margin-bottom: 1.5rem; }
+.safety { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; gap: 1rem; }
+.safety li { padding-left: 1.75rem; position: relative; color: var(--text-2); }
+.safety li::before { content: ""; position: absolute; left: 0; top: 0.45em; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--safe); }
+.head { display: grid; gap: 0.75rem; margin-bottom: 2rem; }
+.cta { display: grid; gap: 1rem; justify-items: center; text-align: center; }
+.cta h2 { margin-bottom: 0; }
+
+@media (min-width: 720px) {
+  .points { grid-template-columns: repeat(3, 1fr); gap: 2.5rem; }
+  .safety { grid-template-columns: repeat(2, 1fr); gap: 1.25rem 2.5rem; }
+}

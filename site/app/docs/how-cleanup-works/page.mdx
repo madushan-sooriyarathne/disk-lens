@@ -1,0 +1,42 @@
+import { meta } from "@/lib/seo";
+
+export const metadata = meta("How cleanup works", "How DiskLens decides what is safe to clean: tiers, guards, the Trash, dry runs and script export.", "/docs/how-cleanup-works");
+
+# How cleanup works
+
+## Where items come from
+
+DiskLens matches your scan against a fixed list of rules for caches, build output, SDKs, models and worktrees. Only items that a rule matched in the current scan can be cleaned. The interface sends item IDs to the engine, never raw paths, so it cannot be pointed at an arbitrary folder.
+
+## Tiers
+
+- **Safe to remove.** Regenerable data, such as package caches and build output. It comes back when the tool needs it.
+- **Review first.** Items that are probably fine to remove but cost something, such as a model you would download again, or an SDK. Read the explanation before you stage them.
+
+Each item explains what it is, what happens if it is removed, and how it regenerates.
+
+## Guards
+
+- **Protected paths.** A hardcoded list of folders is refused, whatever the rules say.
+- **Repositories.** A folder that contains a `.git` directory is never deleted by path.
+- **Active work.** Build output in a repository with uncommitted changes or unpushed commits moves to review and shows an *Active work* badge with the reason. If DiskLens cannot finish the check, it counts as active work.
+- **Running apps.** An item can be blocked while its app is open, for example "Quit Xcode to clean".
+- **Changed since scan.** Right before each item runs, DiskLens checks it again. It is skipped if it moved outside your home folder, became a symlink, no longer matches its rule, or grew by more than 20% and more than 1 GB.
+
+## The queue and the confirm button
+
+You stage items with a checkbox, Space or the command palette. The queue starts empty on every launch. Select Safe Items stages the safe tier in one step. Only the confirm button in the cleanup sheet starts a cleanup. Shortcuts and the palette can stage, but never remove.
+
+## Trash, deletion and tools
+
+Most items are moved to the Trash, which frees space once you empty it. Some caches are cleared by deleting them or by running the owning tool's own command. For review items that go to the Trash, a checkbox lets you delete permanently instead. It is off by default. Commands run without a shell, with a time limit.
+
+## Dry run, script export and the audit log
+
+- **Dry run.** Debug builds log what they would do and change nothing.
+- **Script export.** *Copy as Shell Script* or *Export Cleanup Script…* produces a readable bash script that runs the same steps the app would. Read it, run it yourself, or keep it.
+- **Audit log.** Every action is recorded with time, rule, path, method, size and result in `~/Library/Logs/DiskLens`.
+
+## Why space may not come back at once
+
+Moving to the Trash does not free space until the Trash is emptied. macOS can also hold space in local Time Machine snapshots. When that happens the results sheet says how much is still held.

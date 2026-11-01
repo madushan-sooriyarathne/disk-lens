@@ -1,0 +1,27 @@
+/* Translucent chrome with content scrolling beneath it; solid when transparency is reduced. */
+.header {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--chrome);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--hairline);
+}
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1.5rem; padding-block: 0.625rem; }
+.brand {
+  display: flex; align-items: center; gap: 0.5rem; margin-right: auto;
+  color: var(--text); font-weight: 650; font-size: 1.0625rem; letter-spacing: -0.01em; text-decoration: none;
+}
+.nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; order: 3; width: 100%; }
+.nav a { color: var(--text-2); font-size: 0.9375rem; text-decoration: none; padding-block: 0.25rem; }
+.nav a:hover { color: var(--text); }
+.cta { min-height: 36px; padding: 0 1rem; font-size: 0.9375rem; }
+
+@media (min-width: 720px) {
+  .nav { order: 0; width: auto; }
+  .brand { margin-right: 0; }
+  .cta { margin-left: auto; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .header { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

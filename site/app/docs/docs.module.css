@@ -1,0 +1,10 @@
+.docs { display: grid; gap: 1.5rem; padding-block: clamp(2rem, 6vw, 4rem); }
+.nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-content: start; }
+.nav h2 { width: 100%; font-size: 0.8125rem; color: var(--text-3); font-weight: 600; }
+.nav a { color: var(--text-2); text-decoration: none; padding-block: 0.25rem; }
+.nav a:hover { color: var(--text); text-decoration: underline; }
+
+@media (min-width: 800px) {
+  .docs { grid-template-columns: 13rem 1fr; gap: 3rem; }
+  .nav { display: grid; position: sticky; top: 5.5rem; align-self: start; }
+}

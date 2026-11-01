@@ -1,0 +1,2 @@
+.shot { display: block; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); line-height: 0; }
+.shot img { width: 100%; height: auto; }
