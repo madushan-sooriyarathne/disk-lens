@@ -1,19 +1,19 @@
 //! First launch (PRD 13.4.1): Welcome, Full Disk Access and the first scan. Content
-//! sits centred on the window over a warm gradient with film grain, with the page
-//! indicator at the bottom.
+//! sits centred on the window over a warm gradient with film grain, with Back and
+//! the page dots at the bottom.
 
 use std::sync::{Arc, LazyLock};
 
 use gpui::{
-    App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat, IntoElement, MouseButton,
-    ParentElement, Role, Stateful, Styled, Window, div, img, linear_color_stop, linear_gradient,
-    prelude::*, px, relative, rgba, svg,
+    Animation, AnimationExt, App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat,
+    IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, div, img,
+    linear_color_stop, linear_gradient, prelude::*, px, relative, rgba, svg,
 };
 
-use super::fda_preview;
 use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, Step};
 use super::theme::{self, Theme};
+use super::{fda_preview, motion};
 
 /// Width of the centred column.
 const COLUMN: f32 = 488.;
@@ -95,9 +95,36 @@ pub fn render(
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(div().w(px(COLUMN)).child(content)),
+                .child(step_transition(model, content)),
         )
         .child(footer(&t, model, step, cx))
+}
+
+/// How far a step travels as it enters.
+const SLIDE: f32 = 24.;
+
+/// The step slides in from the side it comes from (the right going forward, the
+/// left going back) as it fades in; under Reduce Motion it only fades.
+fn step_transition(model: &AppModel, content: Div) -> impl IntoElement {
+    let transition = motion::Transition::new(motion::NAV, model.reduce_motion);
+    let moves = matches!(transition, motion::Transition::Move { .. });
+    let from = if model.went_back { -SLIDE } else { SLIDE };
+    div()
+        .relative()
+        .w(px(COLUMN))
+        .child(content)
+        .with_animation(
+            ("onboarding-step", model.step_seq),
+            Animation::new(transition.duration()).with_easing(motion::ease),
+            move |d, p| {
+                let d = d.opacity(p);
+                if moves {
+                    d.left(px((1. - p) * from))
+                } else {
+                    d
+                }
+            },
+        )
 }
 
 /// A warm glow from the top over the window color, and film grain over both.
