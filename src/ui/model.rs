@@ -11,8 +11,7 @@ use std::time::Duration;
 use std::borrow::Cow;
 
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
-use gpui_component::IndexPath;
-use gpui_component::command::CommandState;
+use gpui_component::input::{InputEvent, InputState};
 
 use super::cleanup;
 use super::explorer::{self, ExplorerState};
@@ -1178,10 +1177,26 @@ impl AppModel {
         {
             return;
         }
-        let state = cx.new(|cx| CommandState::new(window, cx));
-        state.update(cx, |s, cx| s.focus(window, cx));
+        let placeholder = match &scope {
+            Some(path) => format!(
+                "Search folders in {}",
+                super::inspector::display_path(&self.root_path, path)
+            ),
+            None => "Search or type > for commands".into(),
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        input.update(cx, |s, cx| s.focus(window, cx));
+        let query = cx.subscribe_in(&input, window, |this, input, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                let query = input.read(cx).value().to_string();
+                this.palette_query(query, cx);
+            }
+        });
         self.palette = Some(Palette {
-            state,
+            input,
+            selected: 0,
+            scroll: gpui::ScrollHandle::new(),
+            _query: query,
             scope,
             query: String::new(),
             folders: Vec::new(),
@@ -1201,6 +1216,7 @@ impl AppModel {
     pub fn palette_query(&mut self, query: String, cx: &mut Context<Self>) {
         let Some(p) = &mut self.palette else { return };
         p.query = query.clone();
+        p.selected = 0;
         let scope = p.scope.clone();
         let wants_folders = scope.is_some() || !query.trim_start().starts_with('>');
         if !wants_folders {
@@ -1245,17 +1261,60 @@ impl AppModel {
                 self.filter.is_some(),
                 &self.root_path,
             );
+            // Folder results arrive after the query, and may be fewer.
+            let count = p.groups.iter().map(|g| g.entries.len()).sum::<usize>();
+            p.selected = p.selected.min(count.saturating_sub(1));
         }
     }
 
-    /// Return on a palette row.
-    pub fn palette_confirm(&mut self, ix: IndexPath, window: &mut Window, cx: &mut Context<Self>) {
+    /// Moves the palette highlight, without wrapping, and scrolls it into view.
+    pub fn palette_move(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(p) = &mut self.palette else { return };
+        let count = p.groups.iter().map(|g| g.entries.len()).sum::<usize>();
+        p.selected = p
+            .selected
+            .saturating_add_signed(delta)
+            .min(count.saturating_sub(1));
+        p.scroll
+            .scroll_to_item(palette::child_index(&p.groups, p.selected));
+        cx.notify();
+    }
+
+    /// Hover over a palette row.
+    pub fn palette_select(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.palette
+            && p.selected != ix
+        {
+            p.selected = ix;
+            cx.notify();
+        }
+    }
+
+    /// Return on the highlighted palette row.
+    pub fn palette_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let entry = self
             .palette
             .as_ref()
-            .and_then(|p| p.groups.get(ix.section)?.entries.get(ix.row).cloned());
+            .and_then(|p| palette::entry_at(&p.groups, p.selected).cloned());
         if let Some(entry) = entry {
             self.run_entry(entry, window, cx);
+        }
+    }
+
+    /// Esc in the palette: clears the field, then closes.
+    pub fn palette_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.palette {
+            Some(p) if !p.query.is_empty() => self.set_palette_query("", window, cx),
+            _ => self.close_palette(cx),
+        }
+    }
+
+    /// Writes the field as if typed: the input doesn't report its own writes.
+    fn set_palette_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = &self.palette {
+            p.input
+                .update(cx, |s, cx| s.set_value(query.to_owned(), window, cx));
+            self.palette_query(query.to_owned(), cx);
         }
     }
 
@@ -1264,10 +1323,7 @@ impl AppModel {
     pub fn run_entry(&mut self, entry: Entry, window: &mut Window, cx: &mut Context<Self>) {
         match entry {
             Entry::Command(Cmd::Filter) => {
-                if let Some(p) = &self.palette {
-                    p.state
-                        .update(cx, |s, cx| s.set_query("> filter ", window, cx));
-                }
+                self.set_palette_query("> filter ", window, cx);
                 return;
             }
             Entry::Invalid(_) => return,
@@ -3395,6 +3451,46 @@ mod tests {
         assert!(model.read_with(cx, |m, _| m.palette.is_none()));
     }
 
+    /// A window that takes keystrokes, with the palette open on an empty field.
+    fn palette_window(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::ui::root::bind_keys(cx);
+        });
+        let source = Source::Mock(Box::new(MockData::new(false).with_step(Duration::ZERO)));
+        let (model, cx) = cx.add_window_view(|window, cx| AppModel::new(source, window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-k");
+        cx.run_until_parked();
+        (model, cx)
+    }
+
+    #[gpui::test]
+    fn arrows_and_ctrl_n_move_the_highlight(cx: &mut TestAppContext) {
+        let (model, cx) = palette_window(cx);
+        cx.simulate_keystrokes("down ctrl-n");
+        let selected = model.read_with(cx, |m, _| m.palette.as_ref().map(|p| p.selected));
+        assert_eq!(selected, Some(2));
+    }
+
+    #[gpui::test]
+    fn return_runs_the_highlighted_entry(cx: &mut TestAppContext) {
+        let (model, cx) = palette_window(cx);
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        assert_eq!(model.read_with(cx, |m, _| m.page), Page::Explore);
+    }
+
+    #[gpui::test]
+    fn escape_clears_the_query_before_closing(cx: &mut TestAppContext) {
+        let (model, cx) = palette_window(cx);
+        cx.simulate_input("x");
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        let query = model.read_with(cx, |m, _| m.palette.as_ref().map(|p| p.query.clone()));
+        assert_eq!(query, Some(String::new()));
+    }
+
     #[gpui::test]
     fn the_palette_does_not_open_over_the_cleanup_sheet(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, true);
@@ -3487,7 +3583,8 @@ mod tests {
     #[gpui::test]
     fn no_palette_entry_starts_a_cleanup(cx: &mut TestAppContext) {
         let (model, cx) = setup(cx, false);
-        for query in ["", ">", "> filter size>1GB"] {
+        // An empty field lists suggestions only; "show" and "stage" reach every row.
+        for query in ["", ">", "> filter size>1GB", "show", "stage"] {
             // Rescan swaps a new snapshot in, which closes the palette.
             settle(cx, &model, |m| m.scan.is_none());
             open(&model, cx, None);

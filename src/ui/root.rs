@@ -1,10 +1,7 @@
 //! Window layout by phase (PRD section 9) and window-wide keys.
 
-use std::rc::Rc;
-
 use gpui::{
-    App, Context, KeyBinding, KeyBindingContextPredicate, Menu, MenuItem, SystemMenuType, Window,
-    actions, div, prelude::*, px,
+    App, Context, KeyBinding, Menu, MenuItem, SystemMenuType, Window, actions, div, prelude::*, px,
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
@@ -62,24 +59,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-m", Minimize, Some(CONTEXT)),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
-    bind_palette_keys(cx);
-}
-
-/// ⌃N and ⌃P move through the palette list like the arrows (PRD FR-KB-1).
-/// gpui-component keeps its list actions crate-private, so they are bound by name.
-fn bind_palette_keys(cx: &mut App) {
-    let bind = |keys: &str, action: &str, cx: &mut App| {
-        let built = cx.build_action(action, None).ok().and_then(|action| {
-            let context = KeyBindingContextPredicate::parse("Command").ok()?;
-            KeyBinding::load(keys, action, Some(Rc::new(context)), false, None, cx).ok()
-        });
-        match built {
-            Some(binding) => cx.bind_keys([binding]),
-            None => tracing::warn!("could not bind {keys} to {action} in the palette"),
-        }
-    };
-    bind("ctrl-n", "ui::SelectDown", cx);
-    bind("ctrl-p", "ui::SelectUp", cx);
 }
 
 /// The menu bar in PRD FR-WIN-4.
@@ -252,15 +231,15 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &KeyboardShortcuts, _, cx| {
                 this.show_notice(palette::Notice::Shortcuts, cx)
             }))
-            // Esc goes back a step in onboarding. Otherwise it closes a notice, then the
-            // palette, then the cleanup dialog (not while it runs), then the context
-            // menu, then the queue, then clears the inspected row on Recommended,
-            // otherwise goes up.
-            .on_action(cx.listener(|this, _: &Back, _, cx| {
+            // Esc goes back a step in onboarding. Otherwise it closes a notice, then clears
+            // the palette's field, then closes the palette, then the cleanup dialog (not
+            // while it runs), then the context menu, then the queue, then clears the
+            // inspected row on Recommended, otherwise goes up.
+            .on_action(cx.listener(|this, _: &Back, window, cx| {
                 if this.notice.is_some() {
                     this.close_notice(cx);
                 } else if this.palette.is_some() {
-                    this.close_palette(cx);
+                    this.palette_escape(window, cx);
                 } else if matches!(this.phase, Phase::Onboarding(_)) {
                     this.onboarding_back(cx);
                 } else if let Some(stage) = &this.cleanup {

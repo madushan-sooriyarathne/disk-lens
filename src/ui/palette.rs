@@ -3,23 +3,27 @@
 //! (`filter.rs`). Also the two notice sheets it opens: a Pro feature's explanation
 //! (until Phase 15 adds licensing) and Keyboard Shortcuts.
 //!
-//! Built on gpui-component's `Command` with its own filtering off: its match is a
-//! substring test, so `groups` ranks with the fuzzy matcher the folder search uses.
+//! Drawn in the look of Raycast's compact window: a large field, rows with an icon and
+//! a kind, and a footer naming what Return does. The field is gpui-component's `Input`;
+//! the list is drawn here, because the kit's `Command` fixes a small field and plain
+//! rows. `groups` ranks with the fuzzy matcher the folder search uses.
 
 use std::collections::HashSet;
 
 use gpui::{
-    Action, AnyElement, Context, Entity, FontWeight, IntoElement, Window, deferred, div,
-    prelude::*, px,
+    Action, AnyElement, BoxShadow, Context, Entity, FontWeight, IntoElement, Keystroke,
+    ScrollHandle, SharedString, Subscription, Window, deferred, div, point, prelude::*, px,
+    relative, svg,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::command::{Command, CommandGroup, CommandItem, CommandState};
+use gpui_component::input::{Input, InputState};
 use gpui_component::kbd::Kbd;
 use gpui_component::{Sizable, Size};
 
 use super::filter::Filter;
 use super::format::format_bytes;
 use super::inspector::display_path;
+use super::keymap;
 use super::model::{AppModel, Page};
 use super::root;
 use super::selection;
@@ -28,13 +32,24 @@ use crate::recommend::model::Recommendation;
 use crate::rules::model::Rules;
 use crate::view::{FolderHit, Fuzzy};
 
-const WIDTH: f32 = 560.;
+const WIDTH: f32 = 640.;
+const BAR_H: f32 = 52.;
+const ROW_H: f32 = 40.;
+const ROW_TEXT: f32 = 14.;
+/// About eight and a half rows, so a cut-off row shows there is more.
+const LIST_MAX_H: f32 = 360.;
 /// Folder results outside a `/` search, so pages and commands stay in view.
 const FOLDERS_SHOWN: usize = 8;
+/// Entries under an empty field: Raycast's compact window shows a few, not everything.
+const SUGGESTIONS: usize = 4;
 
 /// The open palette.
 pub struct Palette {
-    pub state: Entity<CommandState>,
+    pub input: Entity<InputState>,
+    /// The highlighted entry, a flat index over all groups.
+    pub selected: usize,
+    pub scroll: ScrollHandle,
+    pub _query: Subscription,
     /// `/` in Explore: folders under this path only.
     pub scope: Option<String>,
     pub query: String,
@@ -283,8 +298,21 @@ pub fn groups(
             })
             .collect()
     };
+    let empty = query.trim().is_empty();
     if scoped {
-        return keep(vec![group("Folders", folder_entries(usize::MAX))]);
+        let n = if empty { SUGGESTIONS } else { usize::MAX };
+        return keep(vec![group("Folders", folder_entries(n))]);
+    }
+    if empty {
+        return vec![group(
+            "Suggestions",
+            vec![
+                Entry::Page(Page::Overview),
+                Entry::Page(Page::Explore),
+                Entry::Page(Page::Recommended),
+                Entry::Command(Cmd::Rescan),
+            ],
+        )];
     }
     let mut commands: Vec<Entry> = COMMANDS.into_iter().map(Entry::Command).collect();
     commands.push(Entry::Command(Cmd::Filter));
@@ -336,6 +364,23 @@ pub fn groups(
     ])
 }
 
+/// The entry at flat index `ix` across all groups.
+pub fn entry_at(groups: &[Group], ix: usize) -> Option<&Entry> {
+    groups.iter().flat_map(|g| &g.entries).nth(ix)
+}
+
+/// The list's child index of entry `ix`: every group adds a heading before its rows.
+pub fn child_index(groups: &[Group], ix: usize) -> usize {
+    let mut before = 0;
+    for (headings, g) in groups.iter().enumerate() {
+        if ix < before + g.entries.len() {
+            return ix + headings + 1;
+        }
+        before += g.entries.len();
+    }
+    ix + groups.len()
+}
+
 /// `filter size>1GB` -> `size>1GB`; `filters` is not the filter command.
 fn filter_terms(rest: &str) -> Option<&str> {
     let terms = rest.strip_prefix("filter")?;
@@ -377,37 +422,108 @@ pub fn render(
 ) -> Option<AnyElement> {
     let palette = model.palette.as_ref()?;
     let t = theme::current(window);
-    let entity = cx.entity();
-    let mut command = Command::new(&palette.state)
-        .filterable(false)
-        .placeholder(if palette.scope.is_some() {
-            "Search folders here"
-        } else {
-            "Search or type > for commands"
-        })
-        .max_h(px(380.))
-        .empty(|_, _, _| div().p_3().child("No results"))
-        .on_query({
-            let entity = entity.clone();
-            move |query, _, cx| {
-                let query = query.to_owned();
-                entity.update(cx, |m, cx| m.palette_query(query, cx));
-            }
-        })
-        .on_confirm({
-            let entity = entity.clone();
-            move |ix, window, cx| entity.update(cx, |m, cx| m.palette_confirm(ix, window, cx))
-        })
-        .on_cancel(move |_, cx| entity.update(cx, |m, cx| m.close_palette(cx)));
+    let typed = !palette.query.trim().is_empty();
+    let mut list = Vec::new();
+    let mut ix = 0;
     for g in &palette.groups {
-        command = command.group(
-            CommandGroup::new()
-                .label(g.label)
-                .items(g.entries.iter().map(|e| item(e, t))),
+        list.push(
+            div()
+                .px_2()
+                .pt_2()
+                .pb_1()
+                .text_size(px(theme::T_SMALL))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(t.secondary)
+                .child(g.label)
+                .into_any_element(),
         );
+        for e in &g.entries {
+            list.push(row(e, ix, ix == palette.selected, t, window, cx));
+            ix += 1;
+        }
     }
+    let scope = palette
+        .scope
+        .as_ref()
+        .map(|s| display_path(&model.root_path, s));
+    let bar = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .h(px(BAR_H))
+        .px_4()
+        .flex_none()
+        .child(
+            svg()
+                .path("icons/ui/search.svg")
+                .size(px(18.))
+                .flex_none()
+                .text_color(t.tertiary),
+        )
+        .child(
+            div().flex_1().min_w_0().child(
+                Input::new(&palette.input)
+                    .appearance(false)
+                    .with_size(Size::Size(px(20.))),
+            ),
+        )
+        .children(scope.map(|s| {
+            div()
+                .flex_none()
+                .text_size(px(theme::T_SMALL))
+                .text_color(t.secondary)
+                .child(format!("In {s}"))
+        }));
+    let body = if !list.is_empty() {
+        let footer = entry_at(&palette.groups, palette.selected).and_then(verb);
+        div()
+            .child(div().h(px(1.)).bg(t.separator))
+            .child(
+                div()
+                    .id("palette-list")
+                    .track_scroll(&palette.scroll)
+                    .overflow_y_scroll()
+                    .max_h(px(LIST_MAX_H))
+                    .p_2()
+                    .children(list),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    .h(px(ROW_H))
+                    .px_3()
+                    .border_t_1()
+                    .border_color(t.separator)
+                    .children(footer.map(|v| {
+                        div()
+                            .text_size(px(theme::T_SMALL))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(v)
+                    }))
+                    .children(
+                        footer
+                            .and_then(|_| Keystroke::parse("enter").ok())
+                            .map(Kbd::new),
+                    ),
+            )
+    } else if typed {
+        div().child(div().h(px(1.)).bg(t.separator)).child(
+            div()
+                .py_4()
+                .text_center()
+                .text_color(t.secondary)
+                .child("No results"),
+        )
+    } else {
+        div()
+    };
     Some(
         deferred(
+            // No scrim: the palette floats like Raycast's window. The backdrop only
+            // catches the click outside.
             div()
                 .id("palette-backdrop")
                 .absolute()
@@ -415,9 +531,10 @@ pub fn render(
                 .left_0()
                 .size_full()
                 .occlude()
-                .bg(t.scrim)
                 .flex()
                 .justify_center()
+                // Without it the row flex stretches the panel to the window's height.
+                .items_start()
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(|m, _, _, cx| m.close_palette(cx)),
@@ -425,18 +542,48 @@ pub fn render(
                 .child(
                     div()
                         .id("palette")
-                        .mt(px(96.))
+                        .key_context(keymap::PALETTE)
+                        .on_action(
+                            cx.listener(|m, _: &keymap::SelectUp, _, cx| m.palette_move(-1, cx)),
+                        )
+                        .on_action(
+                            cx.listener(|m, _: &keymap::SelectDown, _, cx| m.palette_move(1, cx)),
+                        )
+                        .on_action(cx.listener(|m, _: &keymap::OpenSelected, window, cx| {
+                            m.palette_confirm(window, cx)
+                        }))
+                        .mt(relative(0.14))
                         .w(px(WIDTH))
-                        .h_auto()
+                        .max_w(relative(0.9))
+                        .flex()
+                        .flex_col()
                         .rounded(px(theme::R_WIDGET))
+                        .border_1()
+                        .border_color(t.separator)
                         .bg(t.popover)
-                        .shadow_lg()
+                        .shadow(vec![
+                            BoxShadow {
+                                color: gpui::black().opacity(0.35),
+                                offset: point(px(0.), px(24.)),
+                                blur_radius: px(64.),
+                                spread_radius: px(0.),
+                                inset: false,
+                            },
+                            BoxShadow {
+                                color: gpui::black().opacity(0.2),
+                                offset: point(px(0.), px(2.)),
+                                blur_radius: px(8.),
+                                spread_radius: px(0.),
+                                inset: false,
+                            },
+                        ])
                         .overflow_hidden()
                         .text_size(px(theme::T_BODY))
                         .text_color(t.label)
                         // Clicks inside stay inside.
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(command.bordered(false)),
+                        .child(bar)
+                        .child(body),
                 ),
         )
         .with_priority(2)
@@ -444,48 +591,132 @@ pub fn render(
     )
 }
 
-/// One list row: label, a secondary detail, a Pro tag and the shortcut.
-fn item(entry: &Entry, t: Theme) -> CommandItem {
-    let label = entry.label();
-    let detail = match entry {
-        Entry::Folder { size, .. } => Some(format_bytes(*size)),
-        _ => None,
+/// One list row: icon, title, then a Pro tag, the folder size, the shortcut or the kind.
+fn row(
+    entry: &Entry,
+    ix: usize,
+    selected: bool,
+    t: Theme,
+    window: &Window,
+    cx: &mut Context<AppModel>,
+) -> AnyElement {
+    let invalid = matches!(entry, Entry::Invalid(_));
+    let trailing = match entry {
+        Entry::Pro(_) => div()
+            .px(px(6.))
+            .rounded(px(4.))
+            .bg(t.selected)
+            .text_size(px(theme::T_SMALL))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(t.accent_text)
+            .child("Pro")
+            .into_any_element(),
+        Entry::Folder { size, .. } => div()
+            .text_color(t.secondary)
+            .child(format_bytes(*size))
+            .into_any_element(),
+        _ => match entry
+            .action()
+            .and_then(|a| Kbd::binding_for_action(a.as_ref(), Some(root::CONTEXT), window))
+        {
+            Some(k) => k.appearance(false).into_any_element(),
+            None => div()
+                .text_color(t.secondary)
+                .child(kind(entry))
+                .into_any_element(),
+        },
     };
-    let pro = matches!(entry, Entry::Pro(_));
-    let action = entry.action();
-    let item = CommandItem::new().label(label.clone());
-    let item = if matches!(entry, Entry::Invalid(_)) {
-        gpui_component::Disableable::disabled(item, true)
-    } else {
-        item
-    };
-    item.child(move |window, _| {
-        let kbd = action
-            .as_ref()
-            .and_then(|a| Kbd::binding_for_action(a.as_ref(), Some(root::CONTEXT), window));
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .w_full()
-            .child(div().flex_1().min_w_0().truncate().child(label.clone()))
-            .children(pro.then(|| {
-                div()
-                    .px(px(6.))
-                    .rounded(px(4.))
-                    .bg(t.selected)
-                    .text_size(px(theme::T_SMALL))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(t.accent_text)
-                    .child("Pro")
-            }))
-            .children(detail.clone().map(|d| {
-                div()
-                    .text_size(px(theme::T_SMALL))
-                    .text_color(t.secondary)
-                    .child(d)
-            }))
-            .children(kbd.map(|k| k.appearance(false)))
+    div()
+        .id(("palette-row", ix))
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .h(px(ROW_H))
+        .px_2()
+        .rounded(px(theme::R_CONTROL))
+        .when(selected, |d| d.bg(t.selected))
+        .when(!invalid, |d| {
+            // Mouse move, not hover: arrow keys scroll rows under a still pointer.
+            d.on_mouse_move(cx.listener(move |m, _, _, cx| m.palette_select(ix, cx)))
+                .on_click(cx.listener(move |m, _, window, cx| {
+                    m.palette_select(ix, cx);
+                    m.palette_confirm(window, cx);
+                }))
+        })
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(24.))
+                .child(
+                    svg()
+                        .path(SharedString::from(format!("icons/ui/{}.svg", icon(entry))))
+                        .size(px(16.))
+                        .text_color(t.secondary),
+                ),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(ROW_TEXT))
+                .text_color(if invalid { t.secondary } else { t.label })
+                .child(entry.label()),
+        )
+        .child(div().flex_none().child(trailing))
+        .into_any_element()
+}
+
+/// The line icon (`assets/icons/ui/`) at the start of a row.
+fn icon(entry: &Entry) -> &'static str {
+    match entry {
+        Entry::Page(Page::Overview) => "grid",
+        Entry::Page(Page::Explore) => "map",
+        Entry::Page(Page::Recommended) | Entry::Row { .. } => "sparkle",
+        Entry::Folder { .. } => "folder",
+        Entry::Stage { .. } => "tray",
+        Entry::Command(c) => match c {
+            Cmd::Rescan => "rescan",
+            Cmd::SelectSafe | Cmd::ShowQueue | Cmd::ClearQueue => "tray",
+            Cmd::ExportScript | Cmd::Shortcuts => "doc",
+            Cmd::ToggleInspector => "inspector",
+            Cmd::HighlightCleanable => "grid",
+            Cmd::Filter | Cmd::ClearFilter => "search",
+        },
+        Entry::Filter(_) => "search",
+        Entry::Pro(_) => "lock",
+        Entry::Invalid(_) => "x",
+    }
+}
+
+/// What a row is, shown on the right when it has no shortcut.
+fn kind(entry: &Entry) -> &'static str {
+    match entry {
+        Entry::Page(_) => "Page",
+        Entry::Folder { .. } => "Folder",
+        Entry::Row { .. } => "Recommendation",
+        Entry::Stage { .. } => "Action",
+        Entry::Command(_) => "Command",
+        Entry::Filter(_) | Entry::Invalid(_) => "Filter",
+        Entry::Pro(_) => "Pro",
+    }
+}
+
+/// What Return does to the highlighted row, for the footer.
+fn verb(entry: &Entry) -> Option<&'static str> {
+    Some(match entry {
+        Entry::Page(_) => "Open Page",
+        Entry::Folder { .. } => "Go to Folder",
+        Entry::Row { .. } => "Show",
+        Entry::Stage { staged: false, .. } => "Stage",
+        Entry::Stage { .. } => "Unstage",
+        Entry::Command(_) => "Run",
+        Entry::Filter(_) => "Apply Filter",
+        Entry::Pro(_) => "Learn More",
+        Entry::Invalid(_) => return None,
     })
 }
 
@@ -666,7 +897,38 @@ mod tests {
 
     #[test]
     fn folders_show_under_the_root_as_tilde() {
-        assert!(labels(&list("")).contains(&"Go to ~/Projects".to_owned()));
+        assert!(labels(&list("proj")).contains(&"Go to ~/Projects".to_owned()));
+    }
+
+    #[test]
+    fn an_empty_query_suggests_the_pages_and_rescan() {
+        assert_eq!(
+            labels(&list(" ")),
+            ["Overview", "Explore", "Recommended", "Rescan"]
+        );
+    }
+
+    #[test]
+    fn a_scoped_empty_query_shows_four_folders() {
+        let folders: Vec<FolderHit> = (0..6)
+            .map(|i| FolderHit {
+                path: format!("/r/{i}"),
+                name: i.to_string(),
+                size: 1,
+            })
+            .collect();
+        let g = groups("", true, &[], &HashSet::new(), &folders, false, "/r");
+        assert_eq!(g[0].entries.len(), 4);
+    }
+
+    #[test]
+    fn child_index_skips_group_headings() {
+        // The second entry of group 2 has both headings before it.
+        let g = list(">");
+        assert_eq!(
+            child_index(&g, g[0].entries.len() + 1),
+            g[0].entries.len() + 3
+        );
     }
 
     #[test]
