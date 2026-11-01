@@ -46,6 +46,13 @@ pub const LEGEND_ORDER: [&str; 6] = [
     "package_caches",
 ];
 
+// Brand kit colors, used by the onboarding. White text needs the deep blue: on
+// Electric Blue it is only 3.2:1.
+pub const MIDNIGHT: u32 = 0x02070a;
+pub const BRAND_BLUE: u32 = 0x0297de;
+pub const BRAND_BLUE_DEEP: u32 = 0x0277b5;
+pub const CANTALOUPE: u32 = 0xfc734d;
+
 /// v2 tokens (PRD 13.5), named after `docs/mockup-v2/mockup.html`. Text shades
 /// carry their WCAG ratio in the tests; `*_tint` are the tinted fills under them.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -411,6 +418,11 @@ mod tests {
             ("review_text/review_tint", t.review_text, t.review_tint),
             ("clean_text/clean", t.clean_text, t.clean),
             ("danger/content", t.danger, t.content),
+            (
+                "white/brand_blue_deep",
+                gpui::white(),
+                rgb(BRAND_BLUE_DEEP).into(),
+            ),
         ]
         .into_iter()
         .map(|(n, a, b)| (n.to_owned(), a, b))

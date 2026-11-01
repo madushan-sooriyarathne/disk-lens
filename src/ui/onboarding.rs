@@ -1,13 +1,13 @@
 //! First launch (PRD 13.4.1): Welcome, Full Disk Access and the first scan. Content
-//! sits centred on the window over a warm gradient with film grain, with Back and
-//! the page dots at the bottom.
+//! sits centred on the window over the brand colors (a blue glow and a hint of
+//! Cantaloupe) with film grain, with Back and the page dots at the bottom.
 
 use std::sync::{Arc, LazyLock};
 
 use gpui::{
     Animation, AnimationExt, App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat,
     IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, canvas, div, fill,
-    img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgba, svg,
+    img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, svg,
 };
 
 use super::format::{format_bytes, group_digits};
@@ -97,7 +97,7 @@ pub fn render(
         .relative()
         .size_full()
         .overflow_hidden()
-        .bg(t.content)
+        .bg(base(&t))
         .text_size(px(theme::T_BODY))
         .child(backdrop(
             &t,
@@ -143,12 +143,15 @@ fn step_transition(model: &AppModel, content: Div) -> impl IntoElement {
         )
 }
 
-/// Where the glow has faded out, as a fraction of the window height.
+/// Where the glow has faded out, as a fraction of the window height from the top,
+/// and the warmth, from the bottom.
 const GLOW_END: f32 = 0.6;
+const WARM_END: f32 = 0.3;
 
-/// A warm glow from the top over the window color, and film grain over both.
+/// Brand colors: an Electric Blue glow from the top and a hint of Cantaloupe from
+/// the bottom over the base, and film grain over all of it.
 fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
-    let glow = glow(t);
+    let (glow, warmth) = (glow(t), warmth(t));
     div()
         .absolute()
         .inset_0()
@@ -157,15 +160,29 @@ fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
             linear_color_stop(glow, 0.),
             linear_color_stop(glow.opacity(0.), GLOW_END),
         )))
+        .child(div().absolute().inset_0().bg(linear_gradient(
+            0.,
+            linear_color_stop(warmth, 0.),
+            linear_color_stop(warmth.opacity(0.), WARM_END),
+        )))
         .child(grain(t, width, height))
 }
 
-fn glow(t: &Theme) -> Hsla {
+/// Midnight in dark mode; white in light mode.
+fn base(t: &Theme) -> Hsla {
     if t.dark {
-        rgba(0xff5a2e38).into()
+        rgb(theme::MIDNIGHT).into()
     } else {
-        rgba(0xff6a3d2e).into()
+        t.content
     }
+}
+
+fn glow(t: &Theme) -> Hsla {
+    Hsla::from(rgb(theme::BRAND_BLUE)).opacity(if t.dark { 0.25 } else { 0.14 })
+}
+
+fn warmth(t: &Theme) -> Hsla {
+    Hsla::from(rgb(theme::CANTALOUPE)).opacity(if t.dark { 0.1 } else { 0.07 })
 }
 
 fn grain(t: &Theme, width: f32, height: f32) -> Div {
@@ -256,7 +273,11 @@ fn indicator(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>
                         .h(px(6.))
                         .w(px(if i == current { 18. } else { 6. }))
                         .rounded_full()
-                        .bg(if i == current { t.accent } else { dim })
+                        .bg(if i == current {
+                            rgb(theme::BRAND_BLUE).into()
+                        } else {
+                            dim
+                        })
                         .when(active, |d| d.group_hover("dot", move |s| s.bg(hover))),
                 )
                 .when(active, |d| {
@@ -316,7 +337,7 @@ fn text_button(t: &Theme, id: &'static str, label: &'static str) -> Stateful<Div
 }
 
 fn welcome(t: &Theme, cx: &mut Context<AppModel>) -> Div {
-    let tints = [t.accent, t.safe, t.review];
+    let tints = [rgb(theme::BRAND_BLUE).into(), t.safe, t.review];
     let features = div()
         .flex()
         .flex_col()
@@ -372,7 +393,7 @@ fn welcome(t: &Theme, cx: &mut Context<AppModel>) -> Div {
                     t,
                     "onboarding-continue",
                     "Continue",
-                    t.accent,
+                    rgb(theme::BRAND_BLUE_DEEP).into(),
                     gpui::white(),
                 )
                 .on_click(cx.listener(|m, _, _, cx| m.onboarding_continue(cx))),
@@ -388,32 +409,28 @@ const HERO_MIN: f32 = 220.;
 
 fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) -> Div {
     // The pane fades into the window below the DiskLens row. The fade ends in the
-    // backdrop's color at that height (window color plus what is left of the glow),
-    // read from where it lands, so the pane has no bottom edge; grain over the hero
-    // carries the backdrop's texture across.
+    // backdrop's color at that height (the base plus what is left of the glow and the
+    // warmth), read from where it lands, so the pane has no bottom edge; grain over
+    // the hero carries the backdrop's texture across.
     let hero_h = (height - ACCESS_REST).clamp(HERO_MIN, HERO_MAX);
-    let (content, glow) = (t.content, glow(t));
+    let (base, glow, warmth) = (base(t), glow(t), warmth(t));
     let fade = canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
             let window_h = f32::from(window.viewport_size().height);
-            let left = (1. - f32::from(bounds.bottom()) / (GLOW_END * window_h)).clamp(0., 1.);
-            window.paint_quad(fill(
-                bounds,
-                linear_gradient(
-                    180.,
-                    linear_color_stop(content.opacity(0.), 0.),
-                    linear_color_stop(content, 1.),
-                ),
-            ));
-            window.paint_quad(fill(
-                bounds,
-                linear_gradient(
-                    180.,
-                    linear_color_stop(glow.opacity(0.), 0.),
-                    linear_color_stop(glow.opacity(left), 1.),
-                ),
-            ));
+            let y = f32::from(bounds.bottom());
+            let glow_left = (1. - y / (GLOW_END * window_h)).clamp(0., 1.);
+            let warmth_left = (1. - (window_h - y) / (WARM_END * window_h)).clamp(0., 1.);
+            for color in [base, glow.opacity(glow_left), warmth.opacity(warmth_left)] {
+                window.paint_quad(fill(
+                    bounds,
+                    linear_gradient(
+                        180.,
+                        linear_color_stop(color.opacity(0.), 0.),
+                        linear_color_stop(color, 1.),
+                    ),
+                ));
+            }
         },
     )
     .absolute()
@@ -449,7 +466,7 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
             t,
             "onboarding-open",
             "Open System Settings",
-            t.accent,
+            rgb(theme::BRAND_BLUE_DEEP).into(),
             gpui::white(),
         )
         .on_click(cx.listener(|m, _, _, cx| m.open_fda_settings(cx)))
