@@ -755,7 +755,24 @@ Decisions (2026-11-01, PRD section 13.8): one-time purchase with paid major upgr
 4. A Settings window (⌘,) with the license. `disklens://activate?token=…` opens it with the token filled in; activating always takes a click. Closing it does not quit the app.
 5. Palette batch commands (stage a rule, stage by filter) and saved filters (PRD FR-KB-4), all of which only stage. Run Sweep Rule Now stays an explanation until Phase 22.
 
-**15b: website and license server.** Two separate deployables beside the crate: `site/` (Next.js marketing site on Bun, no secrets) and `server/` (Bun and TypeScript license server: payments.lk checkout and webhook, token signing, one trial per email, order lookup). Planned in detail after 15a is reviewed.
+**15b: website and license server** (`feat/phase-15b-web`). Two separate deployables beside the crate, each with its own `package.json` and lockfile; no JS or Cargo workspace. They share only the token contract (section 3) and HTTP.
+
+1. `server/` (Bun and TypeScript, `Bun.serve` routes, `bun:sqlite`), the only code that holds secrets and talks to payments.lk:
+   - `GET /health` (`ok`, mode, signing key ID) and `GET /price` (`PRO_PRICE_CENTS`, LKR).
+   - `POST /checkout {email}`: a pending order with a random `ord_` ref, then a payments.lk checkout (`reference` and idempotency key = ref, success URL `<site>/success?ref=…`); returns the checkout URL.
+   - `POST /webhooks/payments-lk`: verified with the SDK's `constructEvent` (`payments-signature`, HMAC-SHA256, 300 s tolerance). Events whose mode differs from the server's key (test or live) are ignored.
+   - `GET /orders/:ref`: the order status, and the token once paid. A pending order asks payments.lk for its checkout once, so a missing or late webhook still settles.
+   - Settling is shared by the webhook and the poll and happens once per order: the payment must have succeeded, be in LKR, match the mode and cover the order's amount. Only the call that mints sends the email.
+   - `POST /trial {email}` and `POST /recover {email}`: always answer 202. A trial is minted once per normalized email and re-sent on repeat. Rate limited per email and per IP.
+   - Tokens are signed with `node:crypto` (Ed25519, BLAKE2b) in the minisign layout from the license secret key (`LICENSE_SECRET_KEY`, unencrypted). Email goes through AWS SES with React Email; `MAIL_DRY_RUN=1` writes it to `server/.mail/` instead.
+2. `site/` (Next.js App Router on Bun, plain CSS, no secrets; only `NEXT_PUBLIC_*` env): landing, features, pricing (price from the server), download, docs, FAQ, changelog, privacy, terms, and the buy, trial, success, activate (`#<token>`), recover and cancel pages. Pro features come from `site/content/features.ts` with an available or coming status.
+3. Contract: `server/test/fixtures/contract.json` holds a token minted by the server code with a test-only key, and `tests/license_contract.rs` verifies it with the app's code.
+4. The app's default site becomes `https://disklens.space`.
+
+**Acceptance (15b):**
+- `bun test` (server) covers: checkout; webhook signature, replay and mode checks; underpayment; poll settling; one trial per email; recovery; CORS. No network calls in tests.
+- `cargo test --test license_contract` passes; `bun run build` (site) passes.
+- Manual checks in `docs/QA.md` Phase 15b: a sandbox purchase activates Pro in the packaged app, a trial arrives only by email, and recovery re-sends both.
 
 **Acceptance (15a):**
 - Tests: a valid token activates Pro; a tampered, ended, wrong-key or older-major token does not; no network call is made.

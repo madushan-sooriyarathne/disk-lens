@@ -499,7 +499,7 @@ Rule: the free tier never stops someone from understanding their disk or cleanin
 - A rule that is free in v1 stays free when a Pro scanner extends the same data (Ollama models, Docker, unavailable simulators, the pnpm store).
 - Licensing is checked offline: a license is a signed token verified against a public key in the app (`assets/license.pub`, a key pair separate from the update key), the same approach as the update signature. No account is required. The app never calls the license server: Buy and Start Trial open the website, and a token gets into the app by pasting it in Settings or through a `disklens://activate?token=…` link that fills it in for the user to confirm.
 
-**Distribution:** direct download, as in v1 (the App Store sandbox blocks scanning). Payments go through payments.lk; the price is still open (section 13.8).
+**Distribution:** direct download, as in v1 (the App Store sandbox blocks scanning). Payments go through payments.lk, in LKR (the only currency it supports); the price is still open (section 13.8). The marketing site is `https://disklens.space` and the license server `https://api.disklens.space`.
 
 ### 13.7 Platform direction
 
@@ -516,6 +516,8 @@ GPUI stays the UI stack because Windows and Linux builds are planned after v2. T
 | Pro pricing | **Decided (2026-11-01):** one-time purchase with paid major upgrades. A license token names the highest major version it unlocks. The price itself is still open |
 | Payment and license provider | **Decided (2026-11-01):** payments.lk takes the payment. It does not issue licenses, so our own license server (`server/`, Bun and TypeScript, separate from the marketing site in `site/`) signs the tokens. Built in Phase 15b |
 | Trial | **Decided (2026-11-01):** 7 days, fully usable. A trial is a signed token with an expiry, issued once per email by the license server. The app makes no network call for it |
+| Token delivery | **Decided (2026-11-01):** a purchase shows its token on the success page (with Open in DiskLens and Copy) and emails it. A trial is sent by email only, so one trial per email means one per real inbox. `/recover` emails every token for an address. Email goes through AWS SES with React Email templates and links to `https://disklens.space/activate#<token>` (the token stays in the fragment, out of server logs; mail clients strip `disklens://` links). A refund marks the order refunded; an offline token cannot be revoked |
+| Website | **Decided (2026-11-01):** a full marketing site (features, pricing, download, docs, FAQ, changelog, legal, and the purchase, trial, activate and recover pages). Pro features show as available or "Coming in 2.x" from one data file, so the site never sells a feature that isn't built |
 | Which Pro features ship with v2.0 | Recommended first set: snapshot inspector, containers and VMs, AI models hub, lockfile tags and orphaned stores, palette batch commands. They extend the main window and need no background process. Then the menu bar agent and auto-sweep (auto-sweep depends on the agent), then other volumes, history and the rest in point releases |
 | Privileged snapshot deletion mechanism | A one-shot `osascript` `do shell script … with administrator privileges` (works with ad-hoc signing, but goes through a shell), or an `SMAppService` privileged helper (needs Developer ID and user approval in System Settings). Decided by the Phase 17 spike |
 | Developer ID | Still needed from v1 (PLAN.md Phase 6); required before selling |
