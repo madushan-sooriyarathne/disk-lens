@@ -6,7 +6,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::cleanup::model::CleanupPlan;
 use crate::config::Config;
-use crate::platform::{Facts, MacSystem, MacTrash, ProcessRunner, Runner, System, Trash};
+use crate::platform::{
+    Access, Facts, MacAccess, MacSystem, MacTrash, ProcessRunner, Runner, System, Trash,
+};
 use crate::recommend::build::Analysis;
 use crate::rules::guards::Env;
 use crate::rules::tools::Tools;
@@ -60,6 +62,8 @@ pub struct Machine {
     /// Cleanup commands.
     pub commands: Box<dyn Runner>,
     pub trash: Box<dyn Trash>,
+    /// Full Disk Access checks.
+    pub access: Box<dyn Access>,
     /// The real home folder, where tools and their config live.
     home: PathBuf,
     sandbox: bool,
@@ -81,6 +85,7 @@ impl Machine {
                 home: home.display().to_string(),
             }),
             trash: Box::new(MacTrash),
+            access: Box::new(MacAccess),
             home,
             sandbox: config.scan_root.is_some(),
             tools: OnceLock::new(),
@@ -95,7 +100,12 @@ impl Machine {
     /// Full Disk Access is a property of this process, so the real home is probed
     /// even when a sandbox is scanned.
     pub fn full_disk_access(&self) -> bool {
-        crate::platform::full_disk_access(&self.home)
+        crate::platform::full_disk_access(self.access.as_ref(), &self.home)
+    }
+
+    /// Makes macOS list DiskLens under Full Disk Access (PRD FR-ONB-3a).
+    pub fn preseed_access(&self) {
+        crate::platform::preseed_access(self.access.as_ref(), &self.home);
     }
 
     pub fn env<'a>(&'a self, facts: &'a Facts) -> Env<'a> {

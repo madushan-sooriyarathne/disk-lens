@@ -51,11 +51,14 @@ pub fn start_scan(
     // A scan blocks for a long time, so it gets a thread rather than a UI executor slot.
     std::thread::spawn(move || {
         let options = ScanOptions::from_rules(Rules::embedded());
+        let mut categories = Vec::new();
         let result = scanner::scan(&root, &options, &cancel, &mut |p| {
+            categories.clone_from(&p.categories);
             on_event(ScanEvent::Progress {
                 files: p.files,
                 bytes: p.bytes,
                 current: p.current.clone(),
+                categories: p.categories.clone(),
             });
         });
         let event = match result {
@@ -67,6 +70,7 @@ pub fn start_scan(
                     files: snap.nodes[0].file_count,
                     bytes: snap.meta.scanned_size,
                     current: "Finding recommendations…".into(),
+                    categories,
                 });
                 let meta = snap.meta.clone();
                 install(&state, snap);
@@ -185,6 +189,11 @@ pub fn reveal_in_finder(state: &Arc<AppState>, node_path: String) -> Result<()> 
 /// Whether the app has Full Disk Access (PRD 7.8). Cheap enough to call on every window focus.
 pub fn check_permissions(state: &Arc<AppState>) -> bool {
     state.machine.full_disk_access()
+}
+
+/// One silent protected read so macOS lists DiskLens under Full Disk Access.
+pub fn preseed_access(state: &Arc<AppState>) {
+    state.machine.preseed_access();
 }
 
 /// Opens System Settings at Privacy & Security, Full Disk Access.

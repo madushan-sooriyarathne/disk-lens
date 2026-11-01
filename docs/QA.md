@@ -146,6 +146,36 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance, t
 - [ ] Held line (needs a machine with local Time Machine snapshots: `tmutil listlocalsnapshots /`): after a real cleanup that frees at least 1 GB, the results say "X is still held by N local Time Machine snapshots." when free space grew by less than was freed. Only with the user present.
 - [x] VoiceOver (⌘F5): rows read "label, size", the queue's remove buttons read "Remove … from the queue", and the sheet's Clean button is not a Tab stop. (2026-10-31: confirmed by the user.)
 
+## Phase 12: Onboarding
+
+Run with `DISKLENS_MOCK=onboarding cargo run` (access is granted 6 s after Open System Settings), in light and dark appearance.
+
+- [ ] Backdrop: Midnight in dark mode, white in light; the Electric Blue glow at the top and the Cantaloupe at the bottom are hints, not a wash; the grain is just visible, in light and dark. Content is centred with no card; Back (not on Welcome) and the page dots sit at the bottom, lined up with the left and right edges of the content column.
+- [ ] Brand: the glass icon shows light in dark mode and dark in light mode, with no white box around it (Welcome, System Settings preview, drag row); Continue and Open System Settings are deep blue with white text; the active dot and the first Welcome feature are Electric Blue. The packaged app's Dock and Finder icon is the dark glass icon.
+- [ ] The app icon shows on the first frame of Welcome and on the drag card, with no pop-in.
+- [ ] Welcome: app icon, "Welcome to DiskLens", the subtitle, three feature rows, Continue; VoiceOver reads "Step 1 of 3".
+- [ ] Full Disk Access: the System Settings pane matches the real one in the current appearance (capsule, title, description, rows, switches) and DiskLens's switch turns on in a loop (still with Reduce Motion). At 960×640 the pane is cropped below the DiskLens row and nothing overlaps the page dots. The top of the pane is clear; below the DiskLens row it fades into the backdrop with no edge, no vertical seam and the same grain as the window. The grain stays under the text, the buttons and the pane.
+- [ ] Open System Settings leaves the window's size and position alone; within about a second of the simulated grant "Full Disk Access is on" shows and the first scan starts without clicking DiskLens.
+- [ ] The DiskLens card: dragging the icon starts a drag of the app (under `cargo run`, the binary); Show in Finder selects it in Finder.
+- [ ] Continue Without goes straight to the first scan.
+- [ ] First scan: the large byte count and file count grow, the stacked bar and the legend fill in. Cancel goes to the idle screen. Quit and relaunch with the same mode: Welcome again.
+- [ ] Let a first scan finish: Scan complete shows the safe-to-clean size, the item count and what is worth a look (or the nothing-to-clean line); Back, Esc and the dots do nothing; Go to Overview opens the Overview. With the live app, relaunch: no onboarding (`settings.json` has `"onboarding_done": true`).
+- [ ] Back and dots: Back goes one step back; Esc does the same. The dot of a step reached before goes to it; a later dot does nothing. Back during the first scan cancels it and shows Full Disk Access, with no error.
+- [ ] Step changes slide the content in from the right going forward and from the left going back, and fade it in; with Reduce Motion it only fades.
+- [ ] Keyboard: Tab reaches every button; Return on a focused button activates it.
+
+### Spike (fresh macOS user account, packaged app from `scripts/package.sh`)
+
+Each run starts with DiskLens not in the Full Disk Access list (`tccutil reset SystemPolicyAllFiles` for the bundle id, or a new account).
+
+| Check | macOS 26.6 | macOS 13 | macOS 14 | macOS 15 |
+|-------|-----------|----------|----------|----------|
+| No TCC prompt from launch to the end of onboarding | | untested | untested | untested |
+| DiskLens is in the list after Open System Settings (`~/.Trash` pre-seed) | | untested | untested | untested |
+| Dragging the icon from the card into the list adds DiskLens | | untested | untested | untested |
+| After the drag, DiskLens still responds to clicks | | untested | untested | untested |
+| Turning DiskLens on advances the step within a second, System Settings in front | | untested | untested | untested |
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

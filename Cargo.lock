@@ -1258,6 +1258,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-quick-look-ui",
+ "raw-window-handle",
  "rayon",
  "serde",
  "serde_json",

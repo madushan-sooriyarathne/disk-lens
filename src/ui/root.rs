@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, inspector, keymap, screens, shell, theme};
+use super::{cleanup, inspector, keymap, onboarding, screens, shell, theme};
 use crate::view::ViewKind;
 
 actions!(
@@ -122,7 +122,8 @@ impl Render for AppModel {
         let full_window = |body: gpui::Div| body.p_4().bg(t.content);
         let body = match self.phase {
             Phase::Loading => full_window(body),
-            Phase::Onboarding => full_window(body).child(screens::onboarding(self, window, cx)),
+            // Onboarding draws its own backdrop, edge to edge under the traffic lights.
+            Phase::Onboarding(step) => body.child(onboarding::render(self, step, window, cx)),
             Phase::Idle => full_window(body).child(screens::idle(self, window, cx)),
             Phase::Scanning => full_window(body).child(screens::scanning(self, window, cx)),
             Phase::Error => full_window(body).child(screens::error(self, window, cx)),
@@ -218,11 +219,13 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &ExportScript, _, cx| this.export_script(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
-            // Esc closes the cleanup dialog (not while it runs), then the context
-            // menu, then the queue, then clears the inspected row on Recommended,
-            // otherwise goes up.
+            // Esc goes back a step in onboarding. Otherwise it closes the cleanup
+            // dialog (not while it runs), then the context menu, then the queue, then
+            // clears the inspected row on Recommended, otherwise goes up.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if let Some(stage) = &this.cleanup {
+                if matches!(this.phase, Phase::Onboarding(_)) {
+                    this.onboarding_back(cx);
+                } else if let Some(stage) = &this.cleanup {
                     if !matches!(stage, Cleanup::Running { .. }) {
                         this.close_cleanup(cx);
                     }

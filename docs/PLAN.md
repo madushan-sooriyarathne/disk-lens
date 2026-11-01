@@ -18,8 +18,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 8 Design foundation and window shell | Merged (8a and 8b) | v2, PRD sections 13.4.3 and 13.5. Split in two: 8a (GPUI 0.3.10, gpui-component evaluation, `docs/mockup-v2.png`) merged; 8b (tokens, fonts, chrome, shell, menus, motion, icons) merged |
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Merged | v2, PRD sections 13.4.5 and 13.4.7 |
-| 11 Recommended and cleanup sheet | Built, QA passed, awaiting review | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10. Branch `feat/phase-11-recommended` |
-| 12 Onboarding | Not started | v2, PRD section 13.4.1 |
+| 11 Recommended and cleanup sheet | Merged | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10 |
+| 12 Onboarding | Built, awaiting QA and the spike | v2, PRD section 13.4.1. Branch `feat/phase-12-onboarding` |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Not started | v2, PRD section 13.4.11 (free) |
 | 15 Pro licensing and gating | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (458 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (490 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -70,11 +70,11 @@ Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo 
   - Contrast: the PRD's tier colors fail WCAG AA as text in light mode. Safe green on its pill fill is 2.9:1, and review amber on its fill is 2.0:1; blocked reasons are in amber on white. Decide whether to darken the light text shades (fills and hatches can stay) or accept it. Dark mode passes, and the tests cover the text and muted tokens in both themes.
 
 **Phase 6: packaging and release**
-- Decisions (2026-10-25): bundle identifier `com.madushan.disklens`; ad-hoc signing until a Developer ID certificate exists; signed auto-updates are part of v1; the icon is `assets/icons/icon.svg` (glassy treemap with a lens).
+- Decisions (2026-10-25): bundle identifier `com.madushan.disklens`; ad-hoc signing until a Developer ID certificate exists; signed auto-updates are part of v1; the icon is `assets/icons/icon.svg` (glassy treemap with a lens). Replaced on 2026-11-01 by the brand kit's glass icon: its rendered `icon.icns` (dark, also the bundle icon) and `icon-light.icns`, which hold the small cut in the 16 and 32 px slots. The kit's renders are used as they are because qlmanage, the only SVG renderer that ships with macOS, flattens the glass onto white.
 - Built:
   - Version 1.0.0. `[package.metadata.packager]` in `Cargo.toml` (cargo-packager 0.11.8), the x86_64 target in `rust-toolchain.toml`, and `MACOSX_DEPLOYMENT_TARGET = 13.0` in `.cargo/config.toml`.
   - `scripts/package.sh`: builds both slices, joins them with `lipo`, and runs `cargo packager` for `DiskLens.app` and `DiskLens_<version>_universal.dmg` in `target/packager`. Hardened runtime, ad-hoc unless `DISKLENS_SIGNING_IDENTITY` is set; cargo-packager notarizes and staples when the `APPLE_API_*` variables are set. With the minisign key set it also writes `DiskLens.app.tar.gz`, its `.sig` and `latest.json`, then prints the `gh release create --draft` command without running it.
-  - `scripts/make-icon.sh` regenerates `icon.icns` from `icon.svg` with tools that ship with macOS.
+  - `scripts/make-icon.sh` extracts `icon-256.png` and `icon-256-light.png` (drawn by the onboarding: the light icon in dark mode, the dark icon in light mode) from `icon.icns` and `icon-light.icns` with `iconutil`.
   - `src/update.rs` and an update banner: one check per launch against `releases/latest/download/latest.json`, Install, then Restart. Not offered during a scan or cleanup.
 - Measured (2026-10-25): DMG 9.0 MB with the updater (target 25 MB); universal binary 15.3 MB; the updater adds about 0.9 MB to the arm64 binary.
 - Open:
@@ -203,6 +203,29 @@ Last full gate run on macOS (Phase 11, 2026-10-31): `cargo fmt --check`, `cargo 
   - The held line needs a machine with local snapshots and a real cleanup.
   - Switching to Recommended does not move keyboard focus into the list; click a row or Tab to it first.
 
+**Phase 12: Onboarding**
+- Built:
+  - `onboarding.rs`: Welcome, Full Disk Access and First scan (`Phase::Onboarding(Step)`), centred on the window over the brand colors (Midnight base in dark mode, white in light, an Electric Blue glow from the top and a hint of Cantaloupe from the bottom) and film grain (`assets/onboarding/noise.png` from `scripts/make-noise.py`), with Back and the page dots at the bottom, on the edges of the content column. A dot goes to any step reached before, Esc goes back, and each step slides in from the side it comes from (a cross-fade under Reduce Motion). It shows when no last snapshot loads and `onboarding_done` is false.
+  - `fda_preview.rs`: a drawn copy of the macOS 26 Full Disk Access pane (from the user's screenshot) with DiskLens switching on, in light or dark with the app. The other rows are neutral placeholders, so no other app's name or icon is shown. In a short window the pane is cropped below the DiskLens row.
+  - The access step checks the probe at once and every 500 ms (`ACCESS_POLL`) while it is on screen, and on window activation; a grant shows a check mark and moves on after 400 ms. Leaving the step drops the poll.
+  - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. The window keeps its size and position.
+  - Drag card: the app icon as an AppKit drag source carrying the bundle URL (`platform/drag.rs`; under `cargo run`, the binary), with Show in Finder as the fallback.
+  - First scan: `category::Live` tallies bytes per category during the walk (path, marker in the folder, media extension); `ScanEvent::Progress` carries the totals. The step shows the bytes so far large, a stacked category bar and a legend. The exact totals replace them at finish.
+  - Full Disk Access checks go through the `platform::Access` trait; `FakeAccess` records paths, and a test proves the onboarding probes never touch Desktop, Documents or Downloads.
+  - `DISKLENS_MOCK=onboarding` starts the mock as a first launch; access is granted 6 s after Open System Settings.
+- Decisions (2026-10-31):
+  - Live category totals are rough while scanning (hard links count per link, loose media files count as media instead of the folder share); exact at finish.
+  - Native drag plus the Finder fallback; the spike decides whether the native drag stays.
+  - The spike runs on this Mac (macOS 26.6) with a fresh account; macOS 13, 14 and 15 are recorded as untested.
+  - Onboarding shows only without a last snapshot, so an upgraded v1 user with a snapshot skips it. Continue Without no longer marks it done; the first finished scan does, from onboarding or the idle screen.
+  - Cancel during the first scan goes to the idle screen; the next launch starts again at Welcome.
+  - Redesign after the first review (2026-11-01): no card, content on the window like Raycast's onboarding; the animated toggle became the drawn System Settings pane; the drag icon is always shown.
+  - Second review (2026-11-01): the app icon is a pre-rendered PNG (`icon-256.png`), decoded when the window opens, because GPUI rasterized the SVG on first draw. Moving the window beside System Settings was dropped at the user's request (it resized the window); `platform/window.rs` is gone. If a window frame change comes back, make it outside GPUI's update: AppKit resizes synchronously and GPUI's resize handler cannot borrow the app inside an update, which leaves part of the window undrawn. Back from the first scan cancels it and returns to Full Disk Access; the first scan cannot restart until the cancelled one stops. Only the incoming step animates.
+  - Brand pass (2026-11-01): the app icon is the brand kit's glass icon; the bundle uses the dark `.icns` and the onboarding shows the light icon in dark mode and the dark icon in light mode. Film grain stays in the backdrop, under the content. The fade under the System Settings preview is one gradient ending in the composited backdrop color, and bands whose opacity follows it paint the same noise on the same window grid, so the grain the fade covers comes back. The first scan ends on Scan complete (safe to clean, worth a look, Go to Overview) instead of jumping to the Overview. Onboarding takes the brand colors: buttons in the deep brand blue `#0277B5` (white on Electric Blue is only 3.2:1; the AA test covers the pair), the active dot and first Welcome feature in Electric Blue, and the backdrop above. The Cantaloupe hint goes past the brand kit's orange-for-reclaimable rule, at the user's request. A real macOS 26 Liquid Glass icon (Icon Composer `.icon`, compiled by `actool`) is not done.
+- Open:
+  - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
+  - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
+
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
 
@@ -270,11 +293,11 @@ disklens/
     make-fixture.sh     builds .sandbox/home with realistic and adversarial cases
     make-perf-tree.sh   2M empty files in .sandbox/perf
     package.sh          universal .app, DMG and update artifacts in target/packager
-    make-icon.sh        assets/icons/icon.icns from icon.svg
+    make-icon.sh        assets/icons/icon-256.png and icon-256-light.png from the icns files
   rules/rules.toml
   assets/
     mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
-    icons/              icon.svg (source), icon.icns (generated), ui/*.svg (line icons)
+    icons/              icon.icns, icon-light.icns (sources, from the brand kit), icon-256*.png (generated), ui/*.svg (line icons)
     update.pub          minisign public key for updates
   src/
     main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs, settings.rs, update.rs
@@ -649,7 +672,7 @@ Logic first, on the current UI, because it is independent of the redesign.
 
 1. The three-step flow in PRD 13.4.1 with a page indicator.
 2. Spike first, on macOS 13, 14 and 15 with a fresh user account: which silent protected read (`~/.Trash` first) adds DiskLens to the Full Disk Access list without any prompt, and whether the list accepts a dragged `.app` URL. Record the results in `docs/QA.md`; anything that shows a prompt is dropped.
-3. Open System Settings: the pre-seed read, the deep link, and moving the window to the right half of its screen (restored when the step ends). Window frame changes go in `chrome.rs`.
+3. Open System Settings: the pre-seed read and the deep link. The window keeps its frame.
 4. Drag card: toggle animation (still image with Reduce Motion) and a draggable app icon. The drag source is native (`NSDraggingSource` with the bundle's file URL, in `platform/`), because GPUI drags stay inside the window. Fallback if that fails: "Show DiskLens in Finder".
 5. A 500 ms background timer on the FDA probe while the step is visible, plus the activation recheck; it stops when the step is left.
 6. The first-scan view with categories filling in.

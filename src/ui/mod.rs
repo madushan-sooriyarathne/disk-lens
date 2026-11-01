@@ -5,11 +5,13 @@ pub mod assets;
 pub mod chrome;
 pub mod cleanup;
 pub mod explorer;
+pub mod fda_preview;
 pub mod format;
 pub mod inspector;
 pub mod keymap;
 pub mod model;
 pub mod motion;
+pub mod onboarding;
 pub mod overview;
 pub mod recommendations;
 pub mod root;
@@ -38,6 +40,7 @@ pub fn run() {
             root::bind_keys(cx);
             root::set_menus(cx);
             cx.open_window(chrome::window_options(cx), |window, cx| {
+                onboarding::preload(window, cx);
                 let model = cx.new(|cx| AppModel::new(Source::from_env(), window, cx));
                 // gpui-component's popovers, tooltips and sheets mount under Root.
                 cx.new(|cx| gpui_component::Root::new(model, window, cx))

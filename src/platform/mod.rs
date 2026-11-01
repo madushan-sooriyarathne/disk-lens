@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use wait_timeout::ChildExt;
 
+pub mod drag;
 mod quick_look;
 mod snapshots;
 pub use quick_look::quick_look;
@@ -69,19 +70,50 @@ impl Trash for MacTrash {
     }
 }
 
+/// Opens files and folders for the Full Disk Access checks. Contents are never read.
+pub trait Access: Send + Sync {
+    /// Opens a file for reading.
+    fn open(&self, path: &Path) -> io::Result<()>;
+    /// Opens a folder for listing.
+    fn list(&self, path: &Path) -> io::Result<()>;
+}
+
+pub struct MacAccess;
+
+impl Access for MacAccess {
+    fn open(&self, path: &Path) -> io::Result<()> {
+        std::fs::File::open(path).map(drop)
+    }
+
+    fn list(&self, path: &Path) -> io::Result<()> {
+        std::fs::read_dir(path).map(drop)
+    }
+}
+
 /// The privacy database only processes with Full Disk Access can open (PRD 7.8).
 const TCC_DB: &str = "Library/Application Support/com.apple.TCC/TCC.db";
+/// Listing it needs Full Disk Access and shows no prompt; the attempt is what makes
+/// macOS list the app under Full Disk Access (PRD FR-ONB-3a, checked in docs/QA.md).
+const PRESEED: &str = ".Trash";
 
 /// Whether this process has Full Disk Access: `TCC.db` under the real `home`
-/// opens for reading. The file is opened, never read.
-pub fn full_disk_access(home: &Path) -> bool {
-    match std::fs::File::open(home.join(TCC_DB)) {
+/// opens for reading.
+pub fn full_disk_access(access: &dyn Access, home: &Path) -> bool {
+    match access.open(&home.join(TCC_DB)) {
         Ok(_) => true,
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied => false,
         Err(e) => {
             tracing::warn!("full disk access check failed, treating as not granted: {e}");
             false
         }
+    }
+}
+
+/// One silent protected read right before System Settings opens, so DiskLens is
+/// already in the Full Disk Access list. Without access it fails, as expected.
+pub fn preseed_access(access: &dyn Access, home: &Path) {
+    if let Err(e) = access.list(&home.join(PRESEED)) {
+        tracing::debug!("pre-seed read: {e}");
     }
 }
 
@@ -227,6 +259,37 @@ impl Trash for FakeTrash {
     }
 }
 
+/// Records every path and answers as `granted` says.
+#[derive(Debug, Default)]
+pub struct FakeAccess {
+    pub granted: bool,
+    pub paths: Mutex<Vec<std::path::PathBuf>>,
+}
+
+impl FakeAccess {
+    fn record(&self, path: &Path) -> io::Result<()> {
+        self.paths
+            .lock()
+            .expect("fake paths")
+            .push(path.to_path_buf());
+        if self.granted {
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        }
+    }
+}
+
+impl Access for FakeAccess {
+    fn open(&self, path: &Path) -> io::Result<()> {
+        self.record(path)
+    }
+
+    fn list(&self, path: &Path) -> io::Result<()> {
+        self.record(path)
+    }
+}
+
 /// Canned outputs keyed by `"<program file name> <args...>"`; unknown commands fail
 /// with `NotFound`. Every call is recorded.
 #[derive(Debug, Default)]
@@ -339,19 +402,46 @@ mod tests {
     #[test]
     fn full_disk_access_when_tcc_db_opens() {
         let home = home_with_tcc_db(0o600);
-        assert!(full_disk_access(home.path()));
+        assert!(full_disk_access(&MacAccess, home.path()));
     }
 
     #[test]
     fn no_full_disk_access_when_tcc_db_is_unreadable() {
         let home = home_with_tcc_db(0o000);
-        assert!(!full_disk_access(home.path()));
+        assert!(!full_disk_access(&MacAccess, home.path()));
     }
 
     #[test]
     fn no_full_disk_access_when_tcc_db_is_missing() {
         let home = tempfile::tempdir().unwrap();
-        assert!(!full_disk_access(home.path()));
+        assert!(!full_disk_access(&MacAccess, home.path()));
+    }
+
+    #[test]
+    fn preseed_lists_the_trash() {
+        let access = FakeAccess::default();
+        preseed_access(&access, Path::new("/Users/me"));
+        assert_eq!(
+            *access.paths.lock().unwrap(),
+            [Path::new("/Users/me/.Trash")]
+        );
+    }
+
+    #[test]
+    fn onboarding_probes_never_touch_folders_with_their_own_prompt() {
+        let access = FakeAccess::default();
+        let home = Path::new("/Users/me");
+        full_disk_access(&access, home);
+        preseed_access(&access, home);
+        let prompting = ["Desktop", "Documents", "Downloads"].map(|d| home.join(d));
+        assert!(
+            !access
+                .paths
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| prompting.iter().any(|d| p.starts_with(d)))
+        );
     }
 
     #[test]

@@ -12,14 +12,14 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - v1 target UI; v2 target is `docs/mockup-v2.png` and `docs/mockup-v2-dark.png` (from `docs/mockup-v2/mockup.html`)
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8, design foundation and window shell, merged in two parts, 8a and 8b; Phase 9, Overview, merged; Phase 10, Explore and inspector, merged; Phase 11, Recommended, staging queue and cleanup sheet, built on `feat/phase-11-recommended`, QA passed, awaiting review); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8, design foundation and window shell, merged in two parts, 8a and 8b; Phase 9, Overview, merged; Phase 10, Explore and inspector, merged; Phase 11, Recommended, staging queue and cleanup sheet, merged; Phase 12, onboarding, built on `feat/phase-12-onboarding`, awaiting QA and the Full Disk Access spike); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
 ```bash
 cargo run                                   # run the app
 DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run   # run against the fixture sandbox
-DISKLENS_MOCK=1 cargo run                   # mock data (DISKLENS_MOCK=preselect also selects the mockup rows)
+DISKLENS_MOCK=1 cargo run                   # mock data (=preselect also selects the mockup rows, =onboarding starts as a first launch)
 cargo fmt --check                           # cargo fmt to fix
 cargo clippy --all-targets -- -D warnings
 cargo test                                  # all tests; tests/sandbox_rows.rs needs .sandbox current
@@ -28,7 +28,7 @@ scripts/make-fixture.sh                     # rebuild .sandbox/home (idempotent)
 cargo run --release --bin scan-bench -- <path>   # read-only scan, compares size with du (1% goal)
 scripts/make-perf-tree.sh                   # 2M empty files in .sandbox/perf for the memory target
 scripts/package.sh                          # universal DiskLens.app + DMG (+ update artifacts) in target/packager
-scripts/make-icon.sh                        # regenerate assets/icons/icon.icns from icon.svg
+scripts/make-icon.sh                        # regenerate assets/icons/icon-256(-light).png from the brand kit's icns files
 scripts/render-mockup.sh                    # docs/mockup-v2.png and -dark.png from docs/mockup-v2/mockup.html (headless Chrome)
 cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
 ```
@@ -42,7 +42,7 @@ Backend (`src/`):
 - `backend.rs`: plain functions on `&Arc<AppState>` (`start_scan`, `cancel_scan`, `load_last_snapshot`, `get_view`, `get_category_totals`, `get_recommendations`, `get_item_details`, `reveal_in_finder`). `start_scan` canonicalizes the scan root, runs `scanner::scan` on its own thread and reports `ScanEvent` (progress / finished / failed) through a callback. On success it saves the snapshot (zstd JSON, `scanner/snapshot.rs`), runs the analysis and swaps both into state as `Current`. `load_last_snapshot` does the same at startup.
 - `scanner/`: `walk.rs` (parallel lstat walk, no symlink following, same-device only), `hardlinks.rs` (each inode counted once), `tree.rs` (arena `Vec<DirNode>` with bottom-up sizes; also the contract types), `volume.rs` (capacity).
 - `rules/`: `rules/rules.toml` (repo root) embedded and validated at startup (`model`, `load`, `validate`), `matcher` (one DFS per snapshot, RULES.md 4.1), `category` (section 6, markers checked lazily on disk), `guards` (match-time, blocking, safety), `tools` (login-shell PATH; sandbox mode resolves only `git`).
-- `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes. `full_disk_access` probes `TCC.db` under the real home. `quick_look` opens `QLPreviewPanel` on the next run loop turn. `local_snapshot_count` runs `tmutil listlocalsnapshots /`.
+- `platform/`: `System` (processes, running apps), `Runner` (argv commands with timeout) and `Trash` (NSFileManager) traits with real and fake implementations; tests describe the machine with the fakes. `Access` opens paths for the Full Disk Access checks (`FakeAccess` records them): `full_disk_access` probes `TCC.db` under the real home, `preseed_access` lists `~/.Trash` so macOS lists the app. `drag.rs` drags the app bundle out of the window. `quick_look` opens `QLPreviewPanel` on the next run loop turn. `local_snapshot_count` runs `tmutil listlocalsnapshots /`.
 - `settings.rs`: `settings.json` in the data dir (only `onboarding_done`).
 - `update.rs`: one update check per launch against `latest.json` on GitHub Releases (`cargo-packager-updater`, minisign key `assets/update.pub`); off in debug, mock and sandboxed runs unless `DISKLENS_UPDATE_URL` is set. The UI shows it as a banner (install, then restart).
 - `providers/`: ollama, git worktrees, simctl and docker item enumeration.
@@ -51,11 +51,11 @@ Backend (`src/`):
 - `view.rs`: `get_view` builds the treemap model on demand from the snapshot: the requested folder and its direct children, at most 12 then one smaller-items tile (`merge_smaller`, shared with the mock), with category, tier, rule, `cleanable` bytes and `system_managed` filled from the analysis. Paths from the UI are resolved against the snapshot (`validated_path`); anything outside it is refused.
 
 UI (`src/ui/`, GPUI):
-- `mod.rs` opens the window (frame from `chrome.rs`: transparent titlebar, blurred background, sizes), registers the line icons (`assets.rs`, `assets/icons/ui/`), initialises gpui-component and wraps `AppModel` in its `Root`. `root.rs` renders `AppModel` by phase (loading / onboarding / idle / scanning / ready / error) and holds the menu bar, actions and shortcuts; Tab and Shift-Tab move focus, Esc goes back; `keymap.rs` holds the Explore keys (h/j/k/l, Space, Return, Backspace). Ready is the shell (`shell.rs`: sidebar, unified toolbar, inspector slot) around one page: Overview, Explore or Recommended.
+- `mod.rs` opens the window (frame from `chrome.rs`: transparent titlebar, blurred background, sizes), registers the line icons (`assets.rs`, `assets/icons/ui/`), initialises gpui-component and wraps `AppModel` in its `Root`. `root.rs` renders `AppModel` by phase (loading / onboarding / idle / scanning / ready / error; `onboarding.rs` draws Welcome, Full Disk Access and First scan; `fda_preview.rs` draws the System Settings pane it shows) and holds the menu bar, actions and shortcuts; Tab and Shift-Tab move focus, Esc goes back; `keymap.rs` holds the Explore keys (h/j/k/l, Space, Return, Backspace). Ready is the shell (`shell.rs`: sidebar, unified toolbar, inspector slot) around one page: Overview, Explore or Recommended.
 - `model.rs`: `AppModel`, the single GPUI entity (phase, page, sidebar and inspector visibility, running scan, snapshot meta, category totals, explorer path, forward history and mode, recommendations, selected item IDs (the staging queue), the row in the inspector, whether the queue is open, the cleanup sheet, Reduce Motion and Reduce Transparency). Backend calls run off the UI thread; recommendations refresh on window activation.
 - `source.rs`: `Source::Live` (calls `backend.rs`) or `Source::Mock` (`assets/mock/snapshot.mock.json`, chosen by `DISKLENS_MOCK`).
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3, label fitting, keyboard neighbours), `stats.rs`, `selection.rs`, `format.rs`, `motion.rs` (spring presets, Reduce Motion cross-fade), `theme.rs` (v2 tokens with a WCAG AA test over every text-on-fill pair; category colors from `rules.toml`; also drives gpui-component's theme).
-- Views stay presentational: `screens.rs`, `overview.rs`, `explorer.rs` (tiles, textures, zoom), `inspector.rs` (tile, recommendation row or queue), `recommendations.rs` (list and row menu), `cleanup.rs` (confirm, progress and results sheet, toast). When a cleanup finishes the model rescans the whole root.
+- Views stay presentational: `screens.rs` (idle, scanning, error, update banner), `overview.rs`, `explorer.rs` (tiles, textures, zoom), `inspector.rs` (tile, recommendation row or queue), `recommendations.rs` (list and row menu), `cleanup.rs` (confirm, progress and results sheet, toast). When a cleanup finishes the model rescans the whole root.
 
 ## Safety rules (non-negotiable)
 
@@ -83,7 +83,7 @@ UI (`src/ui/`, GPUI):
 | `DISKLENS_SCAN_ROOT` | Scan root override (dev only, absolute path to `.sandbox/home`)                                                                                                                    |
 | `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release                                                                         |
 | `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens`. The audit log follows the same rule: `<scan root>/../logs` when sandboxed, else `~/Library/Logs/DiskLens` |
-| `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows                                                                                       |
+| `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows; `onboarding` starts as a first launch (access granted 6 s after Open System Settings) |
 | `DISKLENS_UPDATE_URL` | Update endpoint override (dev and QA only); also turns the update check on in debug, mock and sandboxed runs |
 | `DISKLENS_SIGNING_IDENTITY` | `scripts/package.sh`: codesign identity, e.g. `Developer ID Application: … (TEAM)`. Unset = ad-hoc (`-`) |
 | `CARGO_PACKAGER_SIGN_PRIVATE_KEY`, `CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD` | `scripts/package.sh`: minisign key (file path or key text) and its password; when set, the update tarball, `.sig` and `latest.json` are produced |

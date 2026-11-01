@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
+use crate::rules::category::Live;
 use tree::{MediaExtensions, Snapshot, SnapshotMeta};
 pub use walk::Progress;
 
@@ -18,12 +19,15 @@ pub use walk::Progress;
 pub struct ScanOptions {
     /// Files with these extensions count towards `DirNode::media_bytes`.
     pub media: MediaExtensions,
+    /// Category guesses for the progress events.
+    pub live: Live,
 }
 
 impl ScanOptions {
     pub fn from_rules(rules: &crate::rules::model::Rules) -> Self {
         Self {
             media: MediaExtensions::new(&rules.media_extensions),
+            live: Live::new(rules),
         }
     }
 }
@@ -36,7 +40,7 @@ pub fn scan(
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<Snapshot> {
     let started = Instant::now();
-    let walked = walk::walk(root, &options.media, cancel, on_progress)?;
+    let walked = walk::walk(root, options, cancel, on_progress)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();

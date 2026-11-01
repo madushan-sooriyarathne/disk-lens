@@ -315,12 +315,12 @@ v2 also splits the product into a free tier and a Pro tier (section 13.6). Pro f
 - **FR-ONB-3a** The Full Disk Access step shows:
   - Why access is needed, in one sentence.
   - **Open System Settings.** Deep links to `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`. Right before opening it, the app makes one silent read of a TCC-protected path so that macOS lists DiskLens in the pane and the user doesn't have to click + and look for it in `/Applications`. `~/.Trash` is the first candidate. Phase 12 confirms on macOS 13, 14 and 15 which path adds the app to the list without showing a prompt.
-  - **Window placement.** When System Settings opens, DiskLens moves to the right half of its screen so the card stays visible next to System Settings (which opens on the left or in the centre). The window returns to its previous frame when the step ends.
+  - **Window placement.** DiskLens keeps its size and position when System Settings opens; it does not move or resize itself.
   - **Drag card.** A short looping animation of the toggle being switched on, and a draggable DiskLens icon with the line "Don't see DiskLens? Drag this icon into the list." The drag carries the `.app` bundle's file URL, which the Full Disk Access list accepts. With Reduce Motion the animation is a still image.
   - "Continue without", always available.
 - **FR-ONB-3b** While the step is on screen, a background timer polls the probe every 500 ms. It also rechecks on window activation. Once access is granted the step shows a check mark and advances after a short pause, even while System Settings is in front. Polling stops when the step is left.
 - **FR-ONB-7** Onboarding never asks for administrator rights. The app stays in user space. The only admin prompt in DiskLens is the opt-in snapshot action (section 13.10.5), which says that it needs admin rights before it asks.
-- **FR-ONB-4** First scan: starts automatically. A full-window progress view shows file count, bytes and the six categories filling in as their totals grow. Cancel returns to the idle screen.
+- **FR-ONB-4** First scan: starts automatically. A full-window progress view shows file count, bytes and the six categories filling in as their totals grow. Cancel returns to the idle screen. When it finishes, the step shows Scan complete with what is safe to clean and what is worth a look, and Go to Overview opens the Overview; Back and the page dots no longer move.
 - **FR-ONB-5** `onboarding_done` is written when the first scan finishes, not when the user leaves the access step, so an interrupted first run starts again at the welcome step.
 - **FR-ONB-6** Notification permission is never asked during onboarding. It is asked the first time a feature needs it (Pro alerts).
 

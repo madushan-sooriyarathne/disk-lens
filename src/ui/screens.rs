@@ -1,4 +1,4 @@
-//! Full-window states (onboarding, idle, scanning, error) and the update banner.
+//! Full-window states (idle, scanning, error) and the update banner.
 
 use std::time::Duration;
 
@@ -9,6 +9,7 @@ use gpui::{
 
 use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, UpdateState};
+use super::onboarding;
 use super::theme::{self, Theme};
 
 const CARD_WIDTH: f32 = 480.;
@@ -75,46 +76,6 @@ fn message(
             .child(title(heading))
             .child(body)
             .child(div().flex().child(go)),
-    )
-}
-
-/// Full Disk Access is missing (US-01, PRD 7.8). The user can continue without it.
-pub fn onboarding(
-    _model: &mut AppModel,
-    window: &mut Window,
-    cx: &mut Context<AppModel>,
-) -> impl IntoElement {
-    let t = theme::current(window);
-    let bg = t.content;
-    let open = button(&t, "open-fda", "Open System Settings")
-        .bg(t.label)
-        .text_color(t.widget)
-        .on_click(cx.listener(|this, _, _, cx| this.open_fda_settings(cx)));
-    let skip = button(&t, "skip-fda", "Continue without access")
-        .border_1()
-        .border_color(t.separator)
-        .hover(move |s| s.bg(bg))
-        .on_click(cx.listener(|this, _, _, cx| this.continue_without_access(cx)));
-    let body = div()
-        .mt(px(6.))
-        .text_size(px(13.))
-        .text_color(t.secondary)
-        .child(
-            "macOS hides folders such as Mail, Safari and other apps' data until you grant Full Disk Access. \
-             Without it, those folders count as unreadable and their sizes are missing. \
-             DiskLens only reads folder sizes and never asks for an administrator password.",
-        )
-        .child(
-            div()
-                .mt_2()
-                .child("In System Settings, turn on DiskLens under Privacy & Security, Full Disk Access, then come back."),
-        );
-    centered(
-        &t,
-        div()
-            .child(title("Allow Full Disk Access"))
-            .child(body)
-            .child(div().flex().gap_2().child(open).child(skip)),
     )
 }
 
@@ -215,6 +176,11 @@ pub fn scanning(
                     .text_xs()
                     .text_color(t.secondary)
                     .child(current),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .child(onboarding::category_rows(&t, &p.categories)),
             )
             .child(div().flex().child(cancel)),
     )

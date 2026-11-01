@@ -10,12 +10,14 @@ pub const SIDEBAR_WIDTH: f32 = 248.;
 /// Unified toolbar height; the traffic lights sit centred in it.
 pub const TOOLBAR_HEIGHT: f32 = 52.;
 pub const INSPECTOR_WIDTH: f32 = 320.;
+const MIN_WIDTH: f32 = 960.;
+const MIN_HEIGHT: f32 = 640.;
 
 pub fn window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(960.), px(640.))),
+        window_min_size: Some(size(px(MIN_WIDTH), px(MIN_HEIGHT))),
         titlebar: Some(TitlebarOptions {
             title: Some("DiskLens".into()),
             // The toolbar is drawn by the app; the titlebar stays draggable natively.

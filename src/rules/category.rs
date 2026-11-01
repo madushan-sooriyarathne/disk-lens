@@ -6,7 +6,7 @@
 //! memoised per node, so only folders that are actually shown cost a `stat`.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::model::Rules;
@@ -104,6 +104,96 @@ impl Categories {
                 .find(|(_, names)| names.iter().any(|m| dir.join(m).symlink_metadata().is_ok()))
                 .map(|&(c, _)| c)
         })
+    }
+}
+
+/// Category guesses while a scan walks, so the first scan can show totals growing
+/// (PRD FR-ONB-4). Each folder decides from its path and its child names with the
+/// same order as `Categories` (path, then marker, then the nearest folder above).
+/// The media share needs folder totals, so an unclaimed file counts as media by its
+/// own extension instead. The exact totals replace these when the scan finishes.
+#[derive(Debug, Clone, Default)]
+pub struct Live {
+    /// Category paths relative to the scan root.
+    paths: HashMap<PathBuf, u8>,
+    markers: Vec<(u8, Vec<String>)>,
+    media: u8,
+    other: u8,
+    len: usize,
+}
+
+impl Live {
+    pub fn new(rules: &Rules) -> Self {
+        let index = |id: &str| {
+            rules
+                .categories
+                .iter()
+                .position(|c| c.id == id)
+                .expect("validated rules declare fallback categories") as u8
+        };
+        let mut paths = HashMap::new();
+        for (i, c) in rules.categories.iter().enumerate() {
+            for p in &c.paths {
+                let rel = p.strip_prefix("~/").unwrap_or(p);
+                paths.entry(PathBuf::from(rel)).or_insert(i as u8);
+            }
+        }
+        Self {
+            paths,
+            markers: rules
+                .categories
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| !c.markers.is_empty())
+                .map(|(i, c)| (i as u8, c.markers.clone()))
+                .collect(),
+            media: index(MEDIA),
+            other: index(OTHER),
+            len: rules.categories.len(),
+        }
+    }
+
+    /// Number of categories, in rules order; zero when built without rules.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Category folder `dir` decides for itself and its contents, else `inherited`.
+    /// `names` are its children. Markers in the scan root are ignored, as in `Categories`.
+    pub fn dir<'a>(
+        &self,
+        root: &Path,
+        dir: &Path,
+        mut names: impl Iterator<Item = &'a str>,
+        inherited: Option<u8>,
+    ) -> Option<u8> {
+        if let Some(&c) = dir.strip_prefix(root).ok().and_then(|r| self.paths.get(r)) {
+            return Some(c);
+        }
+        if dir != root
+            && let Some(c) = names.find_map(|n| {
+                self.markers
+                    .iter()
+                    .find(|(_, m)| m.iter().any(|m| m == n))
+                    .map(|&(c, _)| c)
+            })
+        {
+            return Some(c);
+        }
+        inherited
+    }
+
+    /// Category of an entry in a folder that decided `dir`.
+    pub fn entry(&self, dir: Option<u8>, is_media: bool) -> u8 {
+        match dir {
+            Some(c) => c,
+            None if is_media => self.media,
+            None => self.other,
+        }
     }
 }
 
@@ -222,5 +312,67 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cat(&s, &c, "Desktop/a"), OTHER);
+    }
+
+    /// Category totals of the last progress event of a scan over `files`.
+    fn live(files: &[(&str, usize)]) -> HashMap<String, u64> {
+        let t = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(t.path()).unwrap();
+        for (rel, blocks) in files {
+            put(&root, rel, *blocks);
+        }
+        let rules = Rules::embedded();
+        let mut last = Vec::new();
+        scan(
+            &root,
+            &ScanOptions::from_rules(rules),
+            &Arc::new(AtomicBool::new(false)),
+            &mut |p| last.clone_from(&p.categories),
+        )
+        .unwrap();
+        rules
+            .categories
+            .iter()
+            .map(|c| c.id.clone())
+            .zip(last)
+            .collect()
+    }
+
+    const BLOCK: u64 = 4096;
+
+    #[test]
+    fn live_tally_counts_a_category_path() {
+        let totals = live(&[(".ollama/models/m", 3)]);
+        assert_eq!(totals["ai_models"], 3 * BLOCK);
+    }
+
+    #[test]
+    fn live_tally_lets_the_nearest_path_win() {
+        let totals = live(&[(".cache/huggingface/hub/m", 3), (".cache/pip/p", 1)]);
+        assert_eq!(totals["package_caches"], BLOCK);
+    }
+
+    #[test]
+    fn live_tally_counts_a_marked_folder_as_a_project() {
+        let totals = live(&[("Desktop/app/Cargo.toml", 1), ("Desktop/app/src/a.png", 4)]);
+        assert_eq!(totals["code_projects"], 5 * BLOCK);
+    }
+
+    #[test]
+    fn live_tally_ignores_markers_in_the_root() {
+        let totals = live(&[("package.json", 1), ("Desktop/a.txt", 2)]);
+        assert_eq!(totals["code_projects"], 0);
+    }
+
+    #[test]
+    fn live_tally_counts_a_loose_media_file_as_media() {
+        let totals = live(&[("Desktop/a.png", 2), ("Desktop/b.txt", 1)]);
+        assert_eq!(totals[MEDIA], 2 * BLOCK);
+    }
+
+    #[test]
+    fn live_tally_counts_the_rest_as_other() {
+        let totals = live(&[("Desktop/a.png", 2), ("Desktop/b.txt", 1)]);
+        assert_eq!(totals[OTHER], BLOCK);
     }
 }
