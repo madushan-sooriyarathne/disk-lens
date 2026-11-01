@@ -497,9 +497,9 @@ Rule: the free tier never stops someone from understanding their disk or cleanin
 - Safety never depends on the license. The free and Pro builds are one binary. Guards, revalidation and protections run the same with and without a license.
 - Pro scanners add recommendations only while Pro is active. Without a license, their rules are skipped by the matcher (`pro = true`, a new rule field added in Phase 15), so a free user never sees a result they can't act on. One quiet "More with Pro" entry at the end of Recommended says what the Pro scanners look for, without sizes.
 - A rule that is free in v1 stays free when a Pro scanner extends the same data (Ollama models, Docker, unavailable simulators, the pnpm store).
-- Licensing is checked offline: a license is a signed token verified against a public key in the app, the same approach as the update signature. No account is required.
+- Licensing is checked offline: a license is a signed token verified against a public key in the app (`assets/license.pub`, a key pair separate from the update key), the same approach as the update signature. No account is required. The app never calls the license server: Buy and Start Trial open the website, and a token gets into the app by pasting it in Settings or through a `disklens://activate?token=…` link that fills it in for the user to confirm.
 
-**Distribution:** direct download, as in v1 (the App Store sandbox blocks scanning). The payment provider and the price are open decisions (section 13.8).
+**Distribution:** direct download, as in v1 (the App Store sandbox blocks scanning). Payments go through payments.lk; the price is still open (section 13.8).
 
 ### 13.7 Platform direction
 
@@ -513,9 +513,9 @@ GPUI stays the UI stack because Windows and Linux builds are planned after v2. T
 
 | Decision | Options |
 |----------|---------|
-| Pro pricing | One-time purchase with paid major upgrades, or a low yearly price |
-| Payment and license provider | Paddle, Lemon Squeezy, or another merchant of record |
-| Trial | Pro features fully usable for 14 days, or no trial |
+| Pro pricing | **Decided (2026-11-01):** one-time purchase with paid major upgrades. A license token names the highest major version it unlocks. The price itself is still open |
+| Payment and license provider | **Decided (2026-11-01):** payments.lk takes the payment. It does not issue licenses, so our own license server (`server/`, Bun and TypeScript, separate from the marketing site in `site/`) signs the tokens. Built in Phase 15b |
+| Trial | **Decided (2026-11-01):** 7 days, fully usable. A trial is a signed token with an expiry, issued once per email by the license server. The app makes no network call for it |
 | Which Pro features ship with v2.0 | Recommended first set: snapshot inspector, containers and VMs, AI models hub, lockfile tags and orphaned stores, palette batch commands. They extend the main window and need no background process. Then the menu bar agent and auto-sweep (auto-sweep depends on the agent), then other volumes, history and the rest in point releases |
 | Privileged snapshot deletion mechanism | A one-shot `osascript` `do shell script … with administrator privileges` (works with ad-hoc signing, but goes through a shell), or an `SMAppService` privileged helper (needs Developer ID and user approval in System Settings). Decided by the Phase 17 spike |
 | Developer ID | Still needed from v1 (PLAN.md Phase 6); required before selling |

@@ -22,7 +22,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 12 Onboarding | Merged, awaiting QA and the spike | v2, PRD section 13.4.1 |
 | 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
-| 15 Pro licensing and gating | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
+| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side (branch `feat/phase-15a-licensing`), 15b website and license server. Decisions recorded in PRD section 13.8 on 2026-11-01 |
 | 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
 | 18 Containers and VMs | Not started | Pro, PRD section 13.10.3 |
@@ -428,7 +428,14 @@ pub struct CategoryTotal { pub category: String, pub size: u64, pub folders: u32
 
 pub struct ScanProgress { pub files: u64, pub bytes: u64, pub current: String } // UI model only
 
-pub struct LicenseStatus { pub pro: bool, pub licensee: Option<String>, pub expires_at: Option<i64> }
+// Phase 15: license token, shared by the app and the license server (server/)
+// token   = "DL1." b64url(payload_json) "." b64url(minisig_text)   (base64url, no padding)
+// payload = {"v":1,"id":"lic_…","kind":"pro"|"trial","issued":<unix s>,"max_major":<u32>,"expires":<unix s>|null}
+// minisig_text: a minisign signature (prehashed ED) over the exact payload_json bytes, trusted comment = id,
+// verified against assets/license.pub (not the update key). Valid when the signature verifies, v == 1,
+// the app's major version <= max_major, expires is null or in the future, and a trial has expires.
+pub enum LicenseStatus { Free, Pro { id: String }, Trial { id: String, ends: u64 },
+                         Ended { kind: String, id: String }, Invalid { reason: String } }
 
 // Phase 14 onward
 pub enum Badge { ActiveWork { reason: String }, Reproducible { lockfile: String }, NoLockfile }
@@ -471,6 +478,7 @@ Selections survive a new snapshot by matching `(rule_id, path)` from `RecItem`, 
 | `get_category_totals` | none | `Vec<CategoryTotal>` (sidebar and the Overview capacity bar) |
 | `license_status` | none | `LicenseStatus` (Phase 15) |
 | `activate_license` | `{ token: string }` | `LicenseStatus` or an error (Phase 15) |
+| `remove_license` | none | none (Phase 15) |
 | `find_folders` | `{ query, under: Option<path>, limit }` | `Vec<{ path, size }>` from the snapshot (palette, Phase 13) |
 | `list_local_snapshots` | none | `{ snapshots: Vec<LocalSnapshot>, purgeable: u64 }` (Phase 17) |
 | `thin_snapshots` / `delete_snapshot` | `{ bytes }` / `{ date }` | result; `delete_snapshot` asks for admin each time (Phase 17) |
@@ -737,16 +745,20 @@ Engine change. Free.
 
 ### Phase 15: Pro licensing and gating
 
-Starts only after the open decisions in PRD section 13.8 (price, provider, trial) are made.
+Decisions (2026-11-01, PRD section 13.8): one-time purchase with paid major upgrades, a 7-day trial issued as a signed token, payments through payments.lk, and our own license server that signs tokens. Split in two branches.
 
-1. `src/license.rs`: an offline-verified signed token (a public key in `assets/`, like `update.pub`), stored in the data dir. `license_status` and `activate_license` in `backend.rs`.
-2. Pro tags on the Pro entry points and the one explanation sheet with purchase and license entry (PRD 13.6 gate rules).
-3. The `pro = true` rule field: the matcher skips those rules without a license. The "More with Pro" entry at the end of Recommended.
-4. Palette batch commands and saved filters (PRD FR-KB-4), all of which only stage.
-5. A Settings window (⌘,) with the license, and the switches later Pro phases add (admin actions, agent, alerts).
+**15a: app side** (`feat/phase-15a-licensing`). The app makes no network call for licensing.
 
-**Acceptance:**
-- Tests: a valid token activates Pro; a tampered, expired or wrong-key token does not; no network call is made.
+1. `src/license.rs`: the token in section 3, verified offline against `assets/license.pub` with `minisign-verify`; stored in `settings.json`. `license_status`, `activate_license` and `remove_license` in `backend.rs`. `scripts/mint-license.sh` mints tokens for development and QA from `DISKLENS_LICENSE_KEY_PATH`.
+2. The `pro = true` rule field: the matcher skips those rules without a license (`Env.pro`). A license change starts a background rescan.
+3. The Pro sheet: the feature's explanation, Buy DiskLens Pro (`<site>/buy`), Start 7-Day Trial (`<site>/trial`) and Enter License…. Pro status in the sidebar footer. "More with Pro" at the end of Recommended while any `pro = true` rule exists.
+4. A Settings window (⌘,) with the license. `disklens://activate?token=…` opens it with the token filled in; activating always takes a click. Closing it does not quit the app.
+5. Palette batch commands (stage a rule, stage by filter) and saved filters (PRD FR-KB-4), all of which only stage. Run Sweep Rule Now stays an explanation until Phase 22.
+
+**15b: website and license server.** Two separate deployables beside the crate: `site/` (Next.js marketing site on Bun, no secrets) and `server/` (Bun and TypeScript license server: payments.lk checkout and webhook, token signing, one trial per email, order lookup). Planned in detail after 15a is reviewed.
+
+**Acceptance (15a):**
+- Tests: a valid token activates Pro; a tampered, ended, wrong-key or older-major token does not; no network call is made.
 - A test proves that scanning, recommendations of free rules, guards, plan building, execution and script export behave the same with and without a license.
 - A test that a `pro = true` rule produces no rows without a license and does with one.
 
