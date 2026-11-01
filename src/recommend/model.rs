@@ -29,6 +29,9 @@ pub struct RecItem {
     pub size: u64,
     pub status: ItemStatus,
     pub method: MethodView,
+    /// Whole days since the item's project last changed, when its rule measures it.
+    #[serde(default)]
+    pub idle_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

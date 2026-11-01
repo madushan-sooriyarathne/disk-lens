@@ -633,9 +633,13 @@ fn tile(
         |s| text_width(window, s, theme::T_BODY, FontWeight::SEMIBOLD),
         |s| text_width(window, s, 12., FontWeight::NORMAL),
     );
-    let dim = model.highlight_cleanable
+    let dim = (model.highlight_cleanable
         && matches!(texture, Texture::Kept | Texture::System)
-        && node.cleanable == 0;
+        && node.cleanable == 0)
+        || model
+            .filter
+            .as_ref()
+            .is_some_and(|f| !f.matches_tile(node, model.idle_at(&node.path)));
     let aria = format!(
         "{}, {size}, {}",
         node.name,
@@ -940,6 +944,7 @@ mod tests {
                 size: 1,
                 status,
                 method: MethodView::Delete,
+                idle_days: None,
             }],
         }
     }

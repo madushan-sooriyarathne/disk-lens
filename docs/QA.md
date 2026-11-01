@@ -176,6 +176,21 @@ Each run starts with DiskLens not in the Full Disk Access list (`tccutil reset S
 | After the drag, DiskLens still responds to clicks | | untested | untested | untested |
 | Turning DiskLens on advances the step within a second, System Settings in front | | untested | untested | untested |
 
+## Phase 13: Command palette
+
+Run with `DISKLENS_MOCK=1 cargo run`, then `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`, in light and dark appearance.
+
+- [ ] ⌘K and View › Command Palette open the palette on Overview, Explore and Recommended; nothing happens during onboarding or with the cleanup sheet open. Esc clears the field, then closes; a click outside closes.
+- [ ] Look: a floating panel in the upper third of the window, with no dimmed background. The 52 pt search bar has a search icon and large text. An empty field shows four suggestions (Overview, Explore, Recommended, Rescan). Typing shows grouped rows with an icon and, on the right, a shortcut, kind, size or Pro tag; the footer names what Return does. The panel ends below its list, with no empty space. Light and dark both read well.
+- [ ] ↑/↓ and ⌃N/⌃P move the highlight and keep it in view; Return runs it. Hovering a row highlights it; a click runs it. Commands show their shortcuts; the four Pro entries show "Pro" and open the explanation sheet.
+- [ ] Typing a folder name (sandbox: `atlas`) lists "Go to ~/…" rows with sizes; Return opens that folder in Explore.
+- [ ] "Show <row>" opens Recommended with the row in the inspector; "Stage <row>" stages it and the next open offers "Unstage <row>".
+- [ ] `>` lists commands only. `> filter size>1GB tier:safe` shows one Filter entry; Return sets the toolbar token. Explore dims non-matching tiles, Recommended hides non-matching rows; the token's x clears it. `> filter tier:all` shows the error and does nothing on Return.
+- [ ] Sandbox: `> filter idle>30d` keeps the idle `node_modules` rows and hides the rest.
+- [ ] `/` on Explore searches only below the open folder.
+- [ ] Help › Keyboard Shortcuts lists every shortcut; Esc and Close dismiss it.
+- [ ] Real home snapshot: the palette opens at once, and folder results appear while typing with no visible lag.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

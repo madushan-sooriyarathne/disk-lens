@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, inspector, keymap, onboarding, screens, shell, theme};
+use super::{cleanup, inspector, keymap, onboarding, palette, screens, shell, theme};
 use crate::view::ViewKind;
 
 actions!(
@@ -36,7 +36,7 @@ actions!(
     ]
 );
 
-const CONTEXT: &str = "DiskLens";
+pub(super) const CONTEXT: &str = "DiskLens";
 
 pub fn bind_keys(cx: &mut App) {
     keymap::bind_keys(cx);
@@ -61,16 +61,8 @@ pub fn bind_keys(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
-/// The menu bar in PRD FR-WIN-4. Items whose feature arrives in a later phase
-/// are shown disabled, so the layout and shortcuts are learnable now.
+/// The menu bar in PRD FR-WIN-4.
 pub fn set_menus(cx: &mut App) {
-    let later = |name: &'static str, action: Box<dyn gpui::Action>| MenuItem::Action {
-        name: name.into(),
-        action,
-        os_action: None,
-        checked: false,
-        disabled: true,
-    };
     cx.set_menus([
         Menu::new("DiskLens").items([
             MenuItem::os_submenu("Services", SystemMenuType::Services),
@@ -88,7 +80,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Clear Queue", ClearQueue),
         ]),
         Menu::new("View").items([
-            later("Command Palette", Box::new(CommandPalette)),
+            MenuItem::action("Command Palette", CommandPalette),
             MenuItem::separator(),
             MenuItem::action("Overview", ShowOverview),
             MenuItem::action("Explore", ShowExplore),
@@ -105,7 +97,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Minimize", Minimize),
             MenuItem::action("Zoom", Zoom),
         ]),
-        Menu::new("Help").items([later("Keyboard Shortcuts", Box::new(KeyboardShortcuts))]),
+        Menu::new("Help").items([MenuItem::action("Keyboard Shortcuts", KeyboardShortcuts)]),
     ]);
 }
 
@@ -168,8 +160,12 @@ impl Render for AppModel {
         };
         let dialog = cleanup::render(self, window, cx);
         let toast = cleanup::toast(self, window);
+        let palette = palette::render(self, window, cx);
+        let notice = palette::notice(self, window, cx);
         body.children(dialog)
             .children(toast)
+            .children(palette)
+            .children(notice)
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
@@ -219,11 +215,32 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &ExportScript, _, cx| this.export_script(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
-            // Esc goes back a step in onboarding. Otherwise it closes the cleanup
-            // dialog (not while it runs), then the context menu, then the queue, then
-            // clears the inspected row on Recommended, otherwise goes up.
-            .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if matches!(this.phase, Phase::Onboarding(_)) {
+            .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
+                if this.palette.is_some() {
+                    this.close_palette(cx);
+                } else {
+                    this.open_palette(None, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &keymap::PaletteHere, window, cx| {
+                if this.page == Page::Explore {
+                    let here = this.path.clone();
+                    this.open_palette(Some(here), window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &KeyboardShortcuts, _, cx| {
+                this.show_notice(palette::Notice::Shortcuts, cx)
+            }))
+            // Esc goes back a step in onboarding. Otherwise it closes a notice, then clears
+            // the palette's field, then closes the palette, then the cleanup dialog (not
+            // while it runs), then the context menu, then the queue, then clears the
+            // inspected row on Recommended, otherwise goes up.
+            .on_action(cx.listener(|this, _: &Back, window, cx| {
+                if this.notice.is_some() {
+                    this.close_notice(cx);
+                } else if this.palette.is_some() {
+                    this.palette_escape(window, cx);
+                } else if matches!(this.phase, Phase::Onboarding(_)) {
                     this.onboarding_back(cx);
                 } else if let Some(stage) = &this.cleanup {
                     if !matches!(stage, Cleanup::Running { .. }) {

@@ -35,6 +35,8 @@ pub struct Item {
     pub node: Option<u32>,
     pub main_repo: Option<PathBuf>,
     pub project: Option<String>,
+    /// Whole days since the project last changed, for rules with `project_idle_days`.
+    pub idle_days: Option<u32>,
 }
 
 pub struct Analysis {
@@ -78,6 +80,13 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 continue;
             }
             marks.insert(f.node.unwrap_or(m.node), m.rule);
+            // ponytail: the matcher already ran this check; a second `git log` per
+            // idle-rule item, once per snapshot and off the UI thread. Carry the age
+            // out of `match_time_ok` if it ever shows in profiles.
+            let idle_days = rule.guards.project_idle_days.and_then(|_| {
+                guards::project_age(&f.path, Path::new(&snap.meta.root), env)
+                    .map(|a| u32::try_from(a.as_secs() / 86_400).unwrap_or(u32::MAX))
+            });
             items.push(Item {
                 id: format!("{}:{}", rule.id, f.key),
                 rule: m.rule,
@@ -88,6 +97,7 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 node: f.node,
                 main_repo: f.main_repo,
                 project: f.project,
+                idle_days,
             });
         }
     }
@@ -145,6 +155,7 @@ impl Analysis {
                 size: item.size,
                 status: self.status(rule, item, env),
                 method: self.method(rule, item, env),
+                idle_days: item.idle_days,
             });
         }
         for row in &mut rows {
@@ -415,6 +426,23 @@ mod tests {
             "trash-bin deletes"
         );
         assert_eq!(rows[3].items[0].method, MethodView::Trash);
+    }
+
+    #[test]
+    fn idle_project_items_carry_their_idle_age() {
+        let w = World::new();
+        w.put("p/node_modules", 2);
+        let pkg = w.home.join("p/package.json");
+        fs::write(&pkg, "{}").unwrap();
+        age(&pkg);
+        w.put(".npm/_cacache", 1);
+        let (a, _) = rows(&w, &Facts::default());
+        let ages: Vec<(&str, Option<u32>)> = a
+            .items
+            .iter()
+            .map(|i| (i.name.as_str(), i.idle_days))
+            .collect();
+        assert_eq!(ages, [("node_modules", Some(90)), ("_cacache", None)]);
     }
 
     #[test]
