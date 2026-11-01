@@ -29,6 +29,9 @@ pub struct RecItem {
     pub size: u64,
     pub status: ItemStatus,
     pub method: MethodView,
+    /// Why the item's project counts as active work (git_active), shown as the "Active work" badge.
+    #[serde(default)]
+    pub active_work: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

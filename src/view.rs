@@ -86,7 +86,7 @@ fn look(snap: &Snapshot, id: u32, ann: Annotate) -> Look {
             let rule = &rules.rules[r];
             Look {
                 category: rule.category.clone(),
-                tier: Some(rule.tier),
+                tier: analysis.tier_of(snap, id),
                 rule_id: Some(rule.id.clone()),
             }
         }

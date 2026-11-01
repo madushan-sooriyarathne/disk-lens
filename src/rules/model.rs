@@ -99,6 +99,8 @@ pub struct Guards {
     pub requires_running: Vec<String>,
     // safety
     pub git_clean: bool,
+    // demoting
+    pub git_active: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

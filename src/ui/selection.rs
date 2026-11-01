@@ -233,6 +233,7 @@ mod tests {
                         None => ItemStatus::Ready,
                     },
                     method: MethodView::Delete,
+                    active_work: None,
                 })
                 .collect(),
         }

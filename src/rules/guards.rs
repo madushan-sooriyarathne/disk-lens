@@ -3,7 +3,8 @@
 //! Match-time guards decide whether a rule matches at all. Blocking and safety
 //! guards keep a matched item visible but unselectable, with a short reason.
 //! Every check here is read-only. When a check cannot be completed the item is
-//! treated as blocked or not matched, never as ready.
+//! treated as blocked or not matched, never as ready. Demoting guards
+//! (`git_active`) move an item to review and live in `recommend::build`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -175,7 +176,7 @@ fn changed_within(path: &Path, window: Duration, now: SystemTime) -> bool {
 }
 
 /// The nearest folder from `dir` upwards, strictly below `root`, holding `.git`.
-fn repo_below(dir: &Path, root: &Path) -> Option<PathBuf> {
+pub(crate) fn repo_below(dir: &Path, root: &Path) -> Option<PathBuf> {
     dir.ancestors()
         .take_while(|d| *d != root && d.starts_with(root))
         .find(|d| d.join(".git").symlink_metadata().is_ok())

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use super::model::{ItemDetails, ItemStatus, MethodView, RecItem, Recommendation, Subfolder, Tier};
 use crate::providers::{self, Found, ProviderItem};
 use crate::rules::category::Categories;
+use crate::rules::git_state::{self, RepoState};
 use crate::rules::guards::{self, Env};
 use crate::rules::matcher::Matcher;
 use crate::rules::model::{FallbackMethod, Method, Rule, Rules, SplitBy};
@@ -35,14 +36,16 @@ pub struct Item {
     pub node: Option<u32>,
     pub main_repo: Option<PathBuf>,
     pub project: Option<String>,
+    /// Reason from the `git_active` guard; such items stay cleanable but move to review.
+    pub active_work: Option<String>,
 }
 
 pub struct Analysis {
     pub snapshot_id: String,
     pub root: String,
     pub items: Vec<Item>,
-    /// Snapshot nodes covered by an item -> rule index; their subtrees are hatched.
-    marks: HashMap<u32, usize>,
+    /// Snapshot nodes covered by an item -> (rule index, effective tier); their subtrees are hatched.
+    marks: HashMap<u32, (usize, Tier)>,
     pub categories: Categories,
 }
 
@@ -50,6 +53,8 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
     let matcher = Matcher::new(rules, &snap.meta.root);
     let mut items = Vec::new();
     let mut marks = HashMap::new();
+    // `None` is a repository that could not be read; each one is read once per snapshot.
+    let mut repos: HashMap<PathBuf, Option<RepoState>> = HashMap::new();
     for m in matcher.run(rules, snap, env) {
         let rule = &rules.rules[m.rule];
         let path = dir_path(snap, m.node);
@@ -77,7 +82,17 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
             if f.size < rule.min_size_mb * MB {
                 continue;
             }
-            marks.insert(f.node.unwrap_or(m.node), m.rule);
+            let active_work = rule
+                .guards
+                .git_active
+                .then(|| active_work(&f.path, Path::new(&snap.meta.root), &mut repos))
+                .flatten();
+            let tier = if active_work.is_some() {
+                Tier::Review
+            } else {
+                rule.tier
+            };
+            marks.insert(f.node.unwrap_or(m.node), (m.rule, tier));
             items.push(Item {
                 id: format!("{}:{}", rule.id, f.key),
                 rule: m.rule,
@@ -88,6 +103,7 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 node: f.node,
                 main_repo: f.main_repo,
                 project: f.project,
+                active_work,
             });
         }
     }
@@ -105,8 +121,20 @@ impl Analysis {
     pub fn rule_of(&self, snap: &Snapshot, id: u32) -> Option<usize> {
         let mut cur = Some(id);
         while let Some(n) = cur {
-            if let Some(&r) = self.marks.get(&n) {
+            if let Some(&(r, _)) = self.marks.get(&n) {
                 return Some(r);
+            }
+            cur = snap.nodes[n as usize].parent;
+        }
+        None
+    }
+
+    /// The effective tier of the item covering node `id` (the node or an ancestor): git_active demotes to review.
+    pub fn tier_of(&self, snap: &Snapshot, id: u32) -> Option<Tier> {
+        let mut cur = Some(id);
+        while let Some(n) = cur {
+            if let Some(&(_, t)) = self.marks.get(&n) {
+                return Some(t);
             }
             cur = snap.nodes[n as usize].parent;
         }
@@ -115,7 +143,7 @@ impl Analysis {
 
     /// The rule whose item is rooted exactly at node `id`.
     pub fn mark_rule(&self, id: u32) -> Option<usize> {
-        self.marks.get(&id).copied()
+        self.marks.get(&id).map(|&(r, _)| r)
     }
 
     /// Rows grouped per rule (or per project), sorted by size within each tier.
@@ -124,14 +152,20 @@ impl Analysis {
         let mut index: HashMap<String, usize> = HashMap::new();
         for item in &self.items {
             let rule = &rules.rules[item.rule];
-            let (row_id, label) = row_of(rule, item);
+            let (mut row_id, mut label) = row_of(rule, item);
+            let mut tier = rule.tier;
+            if item.active_work.is_some() {
+                row_id.push_str(":active");
+                label.push_str(" (active work)");
+                tier = Tier::Review;
+            }
             let i = *index.entry(row_id.clone()).or_insert_with(|| {
                 rows.push(Recommendation {
                     row_id,
                     rule_id: rule.id.clone(),
                     label,
                     paths_hint: String::new(),
-                    tier: rule.tier,
+                    tier,
                     size: 0,
                     size_is_estimate: rule.size_is_estimate,
                     items: Vec::new(),
@@ -145,6 +179,7 @@ impl Analysis {
                 size: item.size,
                 status: self.status(rule, item, env),
                 method: self.method(rule, item, env),
+                active_work: item.active_work.clone(),
             });
         }
         for row in &mut rows {
@@ -248,6 +283,29 @@ impl Analysis {
         arg.replace("{path}", &tilde(&self.root, &item.path))
             .replace("{name}", &item.name)
             .replace("{main_repo}", &main)
+    }
+}
+
+/// Why the project holding `item` counts as active work, if it does. A repository
+/// that cannot be read counts as active: the check never reports "fine" by default.
+fn active_work(
+    item: &Path,
+    root: &Path,
+    repos: &mut HashMap<PathBuf, Option<RepoState>>,
+) -> Option<String> {
+    let unreadable = || Some("Could not check git status".to_owned());
+    let repo = guards::repo_below(item.parent()?, root)?;
+    let state = repos.entry(repo.clone()).or_insert_with(|| {
+        git_state::read(&repo)
+            .inspect_err(|e| tracing::warn!("git check failed for {}: {e}", repo.display()))
+            .ok()
+    });
+    let Some(state) = state else {
+        return unreadable();
+    };
+    match item.strip_prefix(&repo) {
+        Ok(rel) => git_state::active_reason(state, rel),
+        Err(_) => unreadable(),
     }
 }
 
@@ -584,6 +642,170 @@ mod tests {
         assert_eq!(a.rule_of(&snap, id(".npm/_cacache/sub")), npm);
         assert_eq!(a.rule_of(&snap, id(".npm/other")), None);
         assert_eq!(a.rule_of(&snap, id(".npm")), None);
+    }
+
+    const ACTIVE_RULES: &str = r#"
+[[rule]]
+id = "active-safe"
+label = "Build output"
+description = "Test rule."
+regenerates = "Rebuild."
+category = "code_projects"
+tier = "safe"
+paths = ["~/**/build-out"]
+method = "delete"
+guards = { git_active = true }
+
+[[rule]]
+id = "active-review"
+label = "Review output"
+description = "Test rule."
+regenerates = "Rebuild."
+category = "code_projects"
+tier = "review"
+paths = ["~/**/review-out"]
+method = "delete"
+guards = { git_active = true }
+"#;
+
+    /// A repository at `rel` whose only commit is on `main` and already on origin.
+    fn pushed_repo(w: &World, rel: &str) -> PathBuf {
+        let dir = w.home.join(rel);
+        fs::create_dir_all(&dir).unwrap();
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("main");
+        let repo = git2::Repository::init_opts(&dir, &options).unwrap();
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("fixture", "fixture@example.com").unwrap();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+            .unwrap();
+        repo.reference("refs/remotes/origin/main", oid, true, "fixture")
+            .unwrap();
+        dir
+    }
+
+    /// Rows and analysis under `ACTIVE_RULES` on top of the embedded rules' categories.
+    fn active_rows(w: &World) -> (Snapshot, Analysis, Vec<Recommendation>) {
+        let text = format!("{}\n{ACTIVE_RULES}", include_str!("../../rules/rules.toml"));
+        let rules = Rules::parse(&text).unwrap();
+        let snap = w.snap();
+        let facts = Facts::default();
+        let tools = w.tools();
+        let runner = FakeRunner::default();
+        let env = Env {
+            facts: &facts,
+            runner: &runner,
+            tools: &tools,
+            now: SystemTime::now(),
+        };
+        let a = analyze(&rules, &snap, &env);
+        let rows = a.recommendations(&rules, &env);
+        (snap, a, rows)
+    }
+
+    fn only_row<'a>(rows: &'a [Recommendation], rule_id: &str) -> &'a Recommendation {
+        let mut found = rows.iter().filter(|r| r.rule_id == rule_id);
+        let row = found.next().unwrap();
+        assert!(found.next().is_none());
+        row
+    }
+
+    #[test]
+    fn dirty_repo_moves_a_safe_item_to_an_active_work_review_row() {
+        let w = World::new();
+        w.put("proj/build-out", 2);
+        let repo = pushed_repo(&w, "proj");
+        fs::write(repo.join("notes.txt"), "wip").unwrap();
+        let (_, _, rows) = active_rows(&w);
+        let row = only_row(&rows, "active-safe");
+        assert_eq!(
+            (row.row_id.as_str(), row.label.as_str(), row.tier),
+            (
+                "active-safe:active",
+                "Build output (active work)",
+                Tier::Review
+            )
+        );
+        assert_eq!(
+            row.items[0].active_work.as_deref(),
+            Some("1 uncommitted file")
+        );
+    }
+
+    #[test]
+    fn clean_pushed_repo_keeps_the_base_row_and_tier() {
+        let w = World::new();
+        w.put("proj/build-out", 2);
+        pushed_repo(&w, "proj");
+        let (_, _, rows) = active_rows(&w);
+        let row = only_row(&rows, "active-safe");
+        assert_eq!(
+            (row.row_id.as_str(), row.tier, &row.items[0].active_work),
+            ("active-safe", Tier::Safe, &None)
+        );
+    }
+
+    #[test]
+    fn dirty_repo_marks_a_review_item_with_the_badge() {
+        let w = World::new();
+        w.put("proj/review-out", 2);
+        let repo = pushed_repo(&w, "proj");
+        fs::write(repo.join("notes.txt"), "wip").unwrap();
+        let (_, _, rows) = active_rows(&w);
+        let row = only_row(&rows, "active-review");
+        assert_eq!(
+            (
+                row.row_id.as_str(),
+                row.tier,
+                row.items[0].active_work.is_some()
+            ),
+            ("active-review:active", Tier::Review, true)
+        );
+    }
+
+    #[test]
+    fn project_without_a_repository_keeps_its_tier() {
+        let w = World::new();
+        w.put("proj/build-out", 2);
+        let (_, _, rows) = active_rows(&w);
+        let row = only_row(&rows, "active-safe");
+        assert_eq!((row.tier, &row.items[0].active_work), (Tier::Safe, &None));
+    }
+
+    #[test]
+    fn unreadable_repository_counts_as_active_work() {
+        let w = World::new();
+        w.put("proj/build-out", 2);
+        fs::create_dir_all(w.home.join("proj/.git")).unwrap();
+        fs::write(w.home.join("proj/.git/HEAD"), "garbage").unwrap();
+        let (_, _, rows) = active_rows(&w);
+        let row = only_row(&rows, "active-safe");
+        assert_eq!(
+            row.items[0].active_work.as_deref(),
+            Some("Could not check git status")
+        );
+    }
+
+    #[test]
+    fn demoted_item_and_its_children_resolve_to_review() {
+        let w = World::new();
+        w.put("proj/build-out/sub", 2);
+        let repo = pushed_repo(&w, "proj");
+        fs::write(repo.join("notes.txt"), "wip").unwrap();
+        let (snap, a, _) = active_rows(&w);
+        let id = |rel: &str| crate::view::dir_id(&snap, &w.home.join(rel)).unwrap();
+        assert_eq!(
+            (
+                a.tier_of(&snap, id("proj/build-out")),
+                a.tier_of(&snap, id("proj/build-out/sub"))
+            ),
+            (Some(Tier::Review), Some(Tier::Review))
+        );
     }
 
     #[test]
