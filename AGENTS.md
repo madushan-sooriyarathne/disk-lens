@@ -28,7 +28,7 @@ scripts/make-fixture.sh                     # rebuild .sandbox/home (idempotent)
 cargo run --release --bin scan-bench -- <path>   # read-only scan, compares size with du (1% goal)
 scripts/make-perf-tree.sh                   # 2M empty files in .sandbox/perf for the memory target
 scripts/package.sh                          # universal DiskLens.app + DMG (+ update artifacts) in target/packager
-scripts/make-icon.sh                        # regenerate assets/icons/icon.icns from icon.svg
+scripts/make-icon.sh                        # regenerate assets/icons/icon.icns and icon-256.png from icon.svg
 scripts/render-mockup.sh                    # docs/mockup-v2.png and -dark.png from docs/mockup-v2/mockup.html (headless Chrome)
 cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
 ```

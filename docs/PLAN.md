@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (481 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (489 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -74,7 +74,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
 - Built:
   - Version 1.0.0. `[package.metadata.packager]` in `Cargo.toml` (cargo-packager 0.11.8), the x86_64 target in `rust-toolchain.toml`, and `MACOSX_DEPLOYMENT_TARGET = 13.0` in `.cargo/config.toml`.
   - `scripts/package.sh`: builds both slices, joins them with `lipo`, and runs `cargo packager` for `DiskLens.app` and `DiskLens_<version>_universal.dmg` in `target/packager`. Hardened runtime, ad-hoc unless `DISKLENS_SIGNING_IDENTITY` is set; cargo-packager notarizes and staples when the `APPLE_API_*` variables are set. With the minisign key set it also writes `DiskLens.app.tar.gz`, its `.sig` and `latest.json`, then prints the `gh release create --draft` command without running it.
-  - `scripts/make-icon.sh` regenerates `icon.icns` from `icon.svg` with tools that ship with macOS.
+  - `scripts/make-icon.sh` regenerates `icon.icns` and `icon-256.png` (drawn by the onboarding) from `icon.svg` with tools that ship with macOS.
   - `src/update.rs` and an update banner: one check per launch against `releases/latest/download/latest.json`, Install, then Restart. Not offered during a scan or cleanup.
 - Measured (2026-10-25): DMG 9.0 MB with the updater (target 25 MB); universal binary 15.3 MB; the updater adds about 0.9 MB to the arm64 binary.
 - Open:
@@ -205,7 +205,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
 
 **Phase 12: Onboarding**
 - Built:
-  - `onboarding.rs`: Welcome, Full Disk Access and First scan (`Phase::Onboarding(Step)`), centred on the window over a warm gradient from the top and film grain (`assets/onboarding/noise.png` from `scripts/make-noise.py`), with the page indicator at the bottom. It shows when no last snapshot loads and `onboarding_done` is false.
+  - `onboarding.rs`: Welcome, Full Disk Access and First scan (`Phase::Onboarding(Step)`), centred on the window over a warm gradient from the top and film grain (`assets/onboarding/noise.png` from `scripts/make-noise.py`), with Back at the bottom left and the page dots at the bottom right. A dot goes to any step reached before, Esc goes back, and each step slides in from the side it comes from (a cross-fade under Reduce Motion). It shows when no last snapshot loads and `onboarding_done` is false.
   - `fda_preview.rs`: a drawn copy of the macOS 26 Full Disk Access pane (from the user's screenshot) with DiskLens switching on, in light or dark with the app. The other rows are neutral placeholders, so no other app's name or icon is shown. In a short window the pane is cropped below the DiskLens row.
   - The access step checks the probe at once and every 500 ms (`ACCESS_POLL`) while it is on screen, and on window activation; a grant shows a check mark and moves on after 400 ms. Leaving the step drops the poll.
   - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. During onboarding the window moves to the right half of its screen and returns when the step ends (`chrome::dock_right`, `platform/window.rs`, through the NSWindow behind GPUI's AppKit handle).
@@ -220,6 +220,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
   - Onboarding shows only without a last snapshot, so an upgraded v1 user with a snapshot skips it. Continue Without no longer marks it done; the first finished scan does, from onboarding or the idle screen.
   - Cancel during the first scan goes to the idle screen; the next launch starts again at Welcome.
   - Redesign after the first review (2026-11-01): no card, content on the window like Raycast's onboarding; the animated toggle became the drawn System Settings pane; the drag icon is always shown.
+  - Second review (2026-11-01): the app icon is a pre-rendered PNG (`icon-256.png`), decoded when the window opens, because GPUI rasterized the SVG on first draw. Window moves run on the next main-loop turn: AppKit resizes synchronously and GPUI's resize handler cannot borrow the app inside an update, which left part of the window undrawn. Back from the first scan cancels it and returns to Full Disk Access; the first scan cannot restart until the cancelled one stops. Only the incoming step animates.
 - Open:
   - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
   - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
@@ -291,7 +292,7 @@ disklens/
     make-fixture.sh     builds .sandbox/home with realistic and adversarial cases
     make-perf-tree.sh   2M empty files in .sandbox/perf
     package.sh          universal .app, DMG and update artifacts in target/packager
-    make-icon.sh        assets/icons/icon.icns from icon.svg
+    make-icon.sh        assets/icons/icon.icns and icon-256.png from icon.svg
   rules/rules.toml
   assets/
     mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
