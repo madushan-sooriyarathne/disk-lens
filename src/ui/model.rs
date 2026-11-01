@@ -550,11 +550,20 @@ impl AppModel {
     }
 
     /// Whether the page dots can go to `to`: a step reached before, other than the
-    /// current one, and the first scan only once a cancelled one has stopped.
+    /// current one, and the first scan only once a cancelled one has stopped. Nothing
+    /// once the first scan finished: onboarding is done.
     pub fn can_go(&self, to: Step) -> bool {
         to <= self.furthest
             && self.phase != Phase::Onboarding(to)
             && !(to == Step::FirstScan && self.scan.is_some())
+            && self.meta.is_none()
+    }
+
+    /// Leaves the first scan's summary for the Overview.
+    pub fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+        self.page = Page::Overview;
+        self.phase = Phase::Ready;
+        cx.notify();
     }
 
     /// Moves to an onboarding step reached before (the page dots, Back and Esc).
@@ -739,7 +748,13 @@ impl AppModel {
                             this.focus_row(inspected, cx);
                         }
                         this.error = None;
-                        this.phase = Phase::Ready;
+                        // The first scan's step stays and shows what was found; replaying
+                        // its entrance brings the summary in.
+                        if this.phase == Phase::Onboarding(Step::FirstScan) {
+                            this.step_seq += 1;
+                        } else {
+                            this.phase = Phase::Ready;
+                        }
                     }
                     Err(e) => {
                         if first {
@@ -1852,8 +1867,40 @@ mod tests {
     fn finishing_the_first_scan_finishes_onboarding(cx: &mut TestAppContext) {
         let (model, cx) = at_access_step(cx);
         model.update(cx, |m, cx| m.continue_without_access(cx));
-        settle(cx, &model, |m| m.phase == Phase::Ready);
+        settle(cx, &model, |m| m.meta.is_some());
         assert!(model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn a_finished_first_scan_shows_its_summary(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        settle(cx, &model, |m| m.meta.is_some());
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
+    fn back_does_nothing_after_the_first_scan(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        settle(cx, &model, |m| m.meta.is_some());
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::FirstScan)
+        );
+    }
+
+    #[gpui::test]
+    fn go_to_overview_leaves_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.continue_without_access(cx));
+        settle(cx, &model, |m| m.meta.is_some());
+        model.update(cx, |m, cx| m.finish_onboarding(cx));
+        assert_eq!(model.read_with(cx, |m, _| m.phase), Phase::Ready);
     }
 
     #[gpui::test]
