@@ -18,7 +18,7 @@ use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::settings;
 use crate::state::AppState;
-use crate::view::{self, CategoryTotal, ViewKind, ViewNode};
+use crate::view::{self, CategoryTotal, FolderHit, Fuzzy, ViewKind, ViewNode};
 
 use super::selection::within;
 
@@ -141,6 +141,18 @@ impl MockData {
             has_snapshot.store(true, Ordering::Relaxed);
             on_event(ScanEvent::Finished { meta });
         });
+    }
+
+    fn find_folders(&self, query: &str, under: Option<&str>) -> Result<Vec<FolderHit>> {
+        let root = &self.file.view;
+        let scope = match under {
+            Some(p) => find(root, p).ok_or_else(|| Error::NotInSnapshot(p.into()))?,
+            None => root,
+        };
+        let mut hits = Vec::new();
+        collect(scope, &mut Fuzzy::new(query), &mut hits);
+        hits.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.size.cmp(&a.1.size)));
+        Ok(hits.into_iter().map(|(_, h)| h).collect())
     }
 
     fn view(&self, path: &str) -> Result<ViewNode> {
@@ -341,6 +353,23 @@ fn find<'a>(node: &'a ViewNode, path: &str) -> Option<&'a ViewNode> {
         .find_map(|c| find(c, path))
 }
 
+/// Mock folders under `node` whose name matches, collected depth first.
+fn collect(node: &ViewNode, fuzzy: &mut Fuzzy, hits: &mut Vec<(u32, FolderHit)>) {
+    for c in node.children.iter().filter(|c| c.kind == ViewKind::Dir) {
+        if let Some(score) = fuzzy.score(&c.name) {
+            hits.push((
+                score,
+                FolderHit {
+                    path: c.path.clone(),
+                    name: c.name.clone(),
+                    size: c.size,
+                },
+            ));
+        }
+        collect(c, fuzzy, hits);
+    }
+}
+
 impl Source {
     /// `DISKLENS_MOCK=1` serves the mock, `DISKLENS_MOCK=preselect` also selects the
     /// mockup's rows, `DISKLENS_MOCK=onboarding` starts it as a first launch; otherwise
@@ -389,6 +418,13 @@ impl Source {
         match self {
             Self::Live(state) => backend::get_view(state, path.to_owned()),
             Self::Mock(m) => m.view(path),
+        }
+    }
+
+    pub fn find_folders(&self, query: &str, under: Option<&str>) -> Result<Vec<FolderHit>> {
+        match self {
+            Self::Live(state) => backend::find_folders(state, query, under),
+            Self::Mock(m) => m.find_folders(query, under),
         }
     }
 
@@ -627,6 +663,13 @@ mod tests {
 
     fn depth(n: &ViewNode) -> usize {
         n.children.iter().map(|c| 1 + depth(c)).max().unwrap_or(0)
+    }
+
+    #[test]
+    fn mock_folder_search_finds_nested_folders() {
+        let m = MockData::new(false);
+        let hits = m.find_folders("atlas", None).unwrap();
+        assert_eq!(hits[0].path, "~/Desktop/atlas");
     }
 
     #[test]

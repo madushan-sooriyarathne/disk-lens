@@ -17,7 +17,10 @@ use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, Snapshot, SnapshotMeta};
 use crate::scanner::{self, ScanOptions, snapshot, volume};
 use crate::state::{AppState, Current};
-use crate::view::{self, CategoryTotal, ViewNode};
+use crate::view::{self, CategoryTotal, FolderHit, ViewNode};
+
+/// Folder results the palette lists at most.
+const FOLDER_HITS: usize = 50;
 
 /// System Settings, Privacy & Security, Full Disk Access (PRD 7.8).
 const FDA_SETTINGS: &str =
@@ -142,6 +145,16 @@ pub fn get_view(state: &Arc<AppState>, node_path: String) -> Result<ViewNode> {
 pub fn quick_look(state: &Arc<AppState>, node_path: String) -> Result<std::path::PathBuf> {
     let cur = current(state)?;
     view::validated_path(&cur.snapshot, Path::new(&node_path))
+}
+
+/// Folders whose name matches `query`, below `under` or the scan root (PRD FR-KB-2).
+pub fn find_folders(
+    state: &Arc<AppState>,
+    query: &str,
+    under: Option<&str>,
+) -> Result<Vec<FolderHit>> {
+    let cur = current(state)?;
+    view::find_folders(&cur.snapshot, query, under.map(Path::new), FOLDER_HITS)
 }
 
 /// Bytes and folder counts per category for the sidebar.
