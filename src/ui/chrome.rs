@@ -2,11 +2,9 @@
 //! frame lives here, so a later Windows or Linux build changes only this file.
 
 use gpui::{
-    App, Bounds, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions,
-    point, px, size,
+    App, Bounds, TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions, point,
+    px, size,
 };
-
-use crate::platform::window::{self, Frame, Moved};
 
 pub const SIDEBAR_WIDTH: f32 = 248.;
 /// Unified toolbar height; the traffic lights sit centred in it.
@@ -38,81 +36,5 @@ fn background() -> WindowBackgroundAppearance {
         WindowBackgroundAppearance::Blurred
     } else {
         WindowBackgroundAppearance::Opaque
-    }
-}
-
-/// Moves the window to the right half of its screen, so the onboarding card stays
-/// beside System Settings (PRD FR-ONB-3a). `undock` puts it back.
-pub fn dock_right(window: &Window, animate: bool, cx: &mut App) -> Option<Moved> {
-    let moved = window::move_window(window, right_half)?;
-    let apply = moved.clone();
-    later(cx, move || apply.apply(animate));
-    Some(moved)
-}
-
-pub fn undock(moved: Moved, animate: bool, cx: &mut App) {
-    later(cx, move || moved.restore(animate));
-}
-
-/// NOTE: AppKit resizes synchronously, and GPUI's resize handler borrows the app,
-/// which the caller's update already holds; the handler then fails and GPUI keeps
-/// the old viewport size. On the next main-loop turn the app is free.
-fn later(cx: &mut App, f: impl FnOnce() + 'static) {
-    cx.spawn(async move |_| f()).detach();
-}
-
-/// The right half of a screen's visible frame, never below the minimum width.
-fn right_half(screen: Frame) -> Frame {
-    let width = (screen.width / 2.)
-        .max(f64::from(MIN_WIDTH))
-        .min(screen.width);
-    Frame {
-        x: screen.x + screen.width - width,
-        y: screen.y,
-        width,
-        height: screen.height,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const SCREEN: Frame = Frame {
-        x: 0.,
-        y: 25.,
-        width: 2560.,
-        height: 1415.,
-    };
-
-    #[test]
-    fn right_half_takes_the_right_half() {
-        assert_eq!(
-            right_half(SCREEN),
-            Frame {
-                x: 1280.,
-                y: 25.,
-                width: 1280.,
-                height: 1415.
-            }
-        );
-    }
-
-    #[test]
-    fn right_half_keeps_the_minimum_width_on_a_small_screen() {
-        let small = Frame {
-            width: 1440.,
-            ..SCREEN
-        };
-        assert_eq!(right_half(small).x, 480.);
-    }
-
-    #[test]
-    fn right_half_never_leaves_a_screen_narrower_than_the_minimum() {
-        let tiny = Frame {
-            width: 800.,
-            ..SCREEN
-        };
-        assert_eq!(right_half(tiny).x, 0.);
     }
 }

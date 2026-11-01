@@ -154,7 +154,7 @@ Run with `DISKLENS_MOCK=onboarding cargo run` (access is granted 6 s after Open 
 - [ ] The app icon shows on the first frame of Welcome and on the drag card, with no pop-in.
 - [ ] Welcome: app icon, "Welcome to DiskLens", the subtitle, three feature rows, Continue; VoiceOver reads "Step 1 of 3".
 - [ ] Full Disk Access: the System Settings pane matches the real one in the current appearance (capsule, title, description, rows, switches) and DiskLens's switch turns on in a loop (still with Reduce Motion). At 960×640 the pane is cropped below the DiskLens row and nothing overlaps the page dots.
-- [ ] Open System Settings moves the window to the right half of its screen; within about a second of the simulated grant "Full Disk Access is on" shows and the first scan starts without clicking DiskLens; the window returns to its frame. Both moves draw the whole window, during and after the move, without moving it by hand.
+- [ ] Open System Settings leaves the window's size and position alone; within about a second of the simulated grant "Full Disk Access is on" shows and the first scan starts without clicking DiskLens.
 - [ ] The DiskLens card: dragging the icon starts a drag of the app (under `cargo run`, the binary); Show in Finder selects it in Finder.
 - [ ] Continue Without goes straight to the first scan.
 - [ ] First scan: the large byte count and file count grow, the stacked bar and the legend fill in. Cancel goes to the idle screen. Quit and relaunch with the same mode: Welcome again.

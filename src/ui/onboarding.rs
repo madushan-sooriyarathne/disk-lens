@@ -400,7 +400,7 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
             t.accent,
             gpui::white(),
         )
-        .on_click(cx.listener(|m, _, window, cx| m.open_fda_settings(window, cx)))
+        .on_click(cx.listener(|m, _, _, cx| m.open_fda_settings(cx)))
         .into_any_element()
     };
     div()

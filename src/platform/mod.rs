@@ -14,7 +14,6 @@ use wait_timeout::ChildExt;
 pub mod drag;
 mod quick_look;
 mod snapshots;
-pub mod window;
 pub use quick_look::quick_look;
 pub use snapshots::local_snapshot_count;
 

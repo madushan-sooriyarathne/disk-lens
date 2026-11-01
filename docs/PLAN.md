@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (489 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (486 tests, 1 release-only test ignored) all pass.
 
 ### What is left
 
@@ -208,7 +208,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
   - `onboarding.rs`: Welcome, Full Disk Access and First scan (`Phase::Onboarding(Step)`), centred on the window over a warm gradient from the top and film grain (`assets/onboarding/noise.png` from `scripts/make-noise.py`), with Back at the bottom left and the page dots at the bottom right. A dot goes to any step reached before, Esc goes back, and each step slides in from the side it comes from (a cross-fade under Reduce Motion). It shows when no last snapshot loads and `onboarding_done` is false.
   - `fda_preview.rs`: a drawn copy of the macOS 26 Full Disk Access pane (from the user's screenshot) with DiskLens switching on, in light or dark with the app. The other rows are neutral placeholders, so no other app's name or icon is shown. In a short window the pane is cropped below the DiskLens row.
   - The access step checks the probe at once and every 500 ms (`ACCESS_POLL`) while it is on screen, and on window activation; a grant shows a check mark and moves on after 400 ms. Leaving the step drops the poll.
-  - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. During onboarding the window moves to the right half of its screen and returns when the step ends (`chrome::dock_right`, `platform/window.rs`, through the NSWindow behind GPUI's AppKit handle).
+  - Open System Settings: `platform::preseed_access` lists `~/.Trash` (one silent protected read), then the deep link. The window keeps its size and position.
   - Drag card: the app icon as an AppKit drag source carrying the bundle URL (`platform/drag.rs`; under `cargo run`, the binary), with Show in Finder as the fallback.
   - First scan: `category::Live` tallies bytes per category during the walk (path, marker in the folder, media extension); `ScanEvent::Progress` carries the totals. The step shows the bytes so far large, a stacked category bar and a legend. The exact totals replace them at finish.
   - Full Disk Access checks go through the `platform::Access` trait; `FakeAccess` records paths, and a test proves the onboarding probes never touch Desktop, Documents or Downloads.
@@ -220,7 +220,7 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
   - Onboarding shows only without a last snapshot, so an upgraded v1 user with a snapshot skips it. Continue Without no longer marks it done; the first finished scan does, from onboarding or the idle screen.
   - Cancel during the first scan goes to the idle screen; the next launch starts again at Welcome.
   - Redesign after the first review (2026-11-01): no card, content on the window like Raycast's onboarding; the animated toggle became the drawn System Settings pane; the drag icon is always shown.
-  - Second review (2026-11-01): the app icon is a pre-rendered PNG (`icon-256.png`), decoded when the window opens, because GPUI rasterized the SVG on first draw. Window moves run on the next main-loop turn: AppKit resizes synchronously and GPUI's resize handler cannot borrow the app inside an update, which left part of the window undrawn. Back from the first scan cancels it and returns to Full Disk Access; the first scan cannot restart until the cancelled one stops. Only the incoming step animates.
+  - Second review (2026-11-01): the app icon is a pre-rendered PNG (`icon-256.png`), decoded when the window opens, because GPUI rasterized the SVG on first draw. Moving the window beside System Settings was dropped at the user's request (it resized the window); `platform/window.rs` is gone. If a window frame change comes back, make it outside GPUI's update: AppKit resizes synchronously and GPUI's resize handler cannot borrow the app inside an update, which leaves part of the window undrawn. Back from the first scan cancels it and returns to Full Disk Access; the first scan cannot restart until the cancelled one stops. Only the incoming step animates.
 - Open:
   - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
   - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
@@ -671,7 +671,7 @@ Logic first, on the current UI, because it is independent of the redesign.
 
 1. The three-step flow in PRD 13.4.1 with a page indicator.
 2. Spike first, on macOS 13, 14 and 15 with a fresh user account: which silent protected read (`~/.Trash` first) adds DiskLens to the Full Disk Access list without any prompt, and whether the list accepts a dragged `.app` URL. Record the results in `docs/QA.md`; anything that shows a prompt is dropped.
-3. Open System Settings: the pre-seed read, the deep link, and moving the window to the right half of its screen (restored when the step ends). Window frame changes go in `chrome.rs`.
+3. Open System Settings: the pre-seed read and the deep link. The window keeps its frame.
 4. Drag card: toggle animation (still image with Reduce Motion) and a draggable app icon. The drag source is native (`NSDraggingSource` with the bundle's file URL, in `platform/`), because GPUI drags stay inside the window. Fallback if that fails: "Show DiskLens in Finder".
 5. A 500 ms background timer on the FDA probe while the step is visible, plus the activation recheck; it stops when the step is left.
 6. The first-scan view with categories filling in.
