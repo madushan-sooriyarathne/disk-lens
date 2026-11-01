@@ -22,7 +22,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 12 Onboarding | Merged, awaiting QA and the spike | v2, PRD section 13.4.1 |
 | 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
-| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side built on branch `feat/phase-15a-licensing`, manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01, awaiting code review; 15b website and license server not started. Decisions recorded in PRD section 13.8 on 2026-11-01 |
+| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side merged (manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01); 15b website (`site/`) and license server (`server/`) built on branch `feat/phase-15b-web`, awaiting QA (`docs/QA.md` Phase 15b) and review. Decisions recorded in PRD section 13.8 on 2026-11-01 |
 | 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
 | 18 Containers and VMs | Not started | Pro, PRD section 13.10.3 |
@@ -292,6 +292,7 @@ Decisions (2026-10-29): the active-work guard, staging queue and Copy as Shell S
 | Motion (v2) | GPUI's `spring.rs` and `with_animation`; no extra crate |
 | Tooling | cargo (`fmt`, `clippy`, `test`) |
 | Packaging | `cargo-packager` CLI 0.11.8 (`.app`, DMG, codesign, notarization, minisign update signatures) |
+| Web (Phase 15b) | Bun. `server/`: TypeScript, `Bun.serve`, `bun:sqlite`, `@payments-lk/node`, AWS SES (`@aws-sdk/client-sesv2`) with React Email. `site/`: Next.js App Router, React, MDX, plain CSS |
 
 **Rust crates**
 
@@ -331,6 +332,7 @@ disklens/
     mock/snapshot.mock.json   matches the mockup numbers (DISKLENS_MOCK)
     icons/              icon.icns, icon-light.icns (sources, from the brand kit), icon-256*.png (generated), ui/*.svg (line icons)
     update.pub          minisign public key for updates
+    license.pub         minisign public key for license tokens (Phase 15a)
   src/
     main.rs, lib.rs, backend.rs, state.rs, error.rs, config.rs, view.rs, settings.rs, update.rs
     scanner/  walk.rs, tree.rs, hardlinks.rs, volume.rs, snapshot.rs
@@ -349,6 +351,9 @@ disklens/
   tests/      scanner.rs, rules.rs, rules_doc_sync.rs, sandbox_rows.rs, view.rs,
               cleanup_adversarial.rs, cleanup_engine.rs, cleanup_backend.rs, script.rs,
               support/mod.rs (temporary scan roots under target/tmp)
+  server/     license server (Bun): src/{index,app,license,db,orders,trials,mail,limit}.ts,
+              emails/LicenseEmail.tsx, test/ (fixtures/contract.json is shared with tests/license_contract.rs)
+  site/       marketing site (Next.js): app/, components/, content/features.ts, public/
 ```
 
 ## 3. Data contracts

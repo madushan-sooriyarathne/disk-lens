@@ -220,6 +220,21 @@ Mint tokens with `DISKLENS_LICENSE_KEY_PATH=~/.config/disklens/license.key scrip
 
 Result (2026-11-01, macOS 26.6): all Phase 15a checks passed, including the packaged `disklens://` link; checked by the user.
 
+## Phase 15b: website and license server
+
+Setup: copy `server/.env.example` to `server/.env.local` and fill in the payments.lk sandbox key (`sk_test_…`), a webhook secret, `LICENSE_SECRET_KEY` (the text of `~/.config/disklens/license.key`), `PRO_PRICE_CENTS` and `MAIL_DRY_RUN=1` (or SES credentials and a verified recipient). Run `cd server && bun run dev` and `cd site && bun run dev`. Sandbox cards: expiry `01/39` approves, `05/39` declines.
+
+- [ ] The server log and `curl localhost:8787/health` show mode `test` and key ID `D0E563203A52E5F9` (the key in `assets/license.pub`).
+- [ ] `/`, `/features`, `/pricing`, `/download`, `/docs/*`, `/faq`, `/changelog`, `/privacy` and `/terms` render in light and dark, at desktop and phone width, with no console errors. `/pricing` shows the price from the server. Only palette batch commands and saved filters are shown as available Pro features; the rest say "Coming in 2.x".
+- [ ] Buy: `/buy` with an email, then the sandbox checkout with `01/39`, then `/success` shows the token. Open in DiskLens opens the packaged app's Settings with the token filled in, and Activate shows DiskLens Pro.
+- [ ] The purchase email (a file in `server/.mail/` with dry run) shows the same token and links to `/activate#…`, which shows it too.
+- [ ] Decline with `05/39`, and cancel a checkout: no token anywhere; cancel lands on `/cancel`.
+- [ ] Trial: `/trial` only says to check the inbox. The trial email's link opens `/activate`, and the token activates "Trial: 7 days left". A second request with the same email (in other case) sends the same token.
+- [ ] `/recover` with the buyer's email sends one email with the Pro and trial tokens; an unknown email gets the same answer and no email.
+- [ ] Webhook: a sandbox `payment.succeeded` delivery (payments.lk test inbox or a tunnel to `/webhooks/payments-lk`) settles the order once; a replayed delivery sends no second email.
+- [ ] The server log has no token, key or full email address.
+- [ ] Owner review of `/privacy` and `/terms` before launch.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
