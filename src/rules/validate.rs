@@ -74,6 +74,9 @@ pub fn validate(r: &Rules) -> Vec<String> {
         if !category_ids.contains(rule.category.as_str()) {
             errors.push(format!("{at}: unknown category `{}`", rule.category));
         }
+        if rule.keywords.is_empty() || rule.keywords.iter().any(|k| k.trim().is_empty()) {
+            errors.push(format!("{at}: keywords is empty"));
+        }
         if rule.paths.is_empty() {
             errors.push(format!("{at}: paths is empty"));
         }
@@ -186,6 +189,7 @@ id = "npm-cache"
 label = "npm cache"
 description = "d"
 regenerates = "r"
+keywords = ["k"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.npm/_cacache"]
@@ -211,6 +215,7 @@ id = "other"
 label = "l"
 description = "d"
 regenerates = "r"
+keywords = ["k"]
 category = "package_caches"
 tier = "review"
 paths = ["~/x"]
@@ -222,6 +227,22 @@ method = "trash"
         let r = parse_with("").unwrap();
         assert_eq!(r.rules.len(), 1);
         assert!(parse_with(SECOND_RULE).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_keywords() {
+        let empty = BASE.replace("keywords = [\"k\"]", "keywords = []");
+        assert!(
+            Rules::parse(&empty)
+                .unwrap_err()
+                .contains("keywords is empty")
+        );
+        let blank = BASE.replace("keywords = [\"k\"]", "keywords = [\" \"]");
+        assert!(
+            Rules::parse(&blank)
+                .unwrap_err()
+                .contains("keywords is empty")
+        );
     }
 
     #[test]

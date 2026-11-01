@@ -30,6 +30,7 @@ Each `[[rule]]` table supports these fields:
 | `label` | string | yes | Row title |
 | `description` | string | yes | "What it is" |
 | `regenerates` | string | yes | "What happens if removed" |
+| `keywords` | string array | yes | Extra words the command palette matches (PRD FR-KB-2). Must not be empty |
 | `category` | string | yes | One of the category IDs in section 6 |
 | `tier` | `"safe"` or `"review"` | yes | |
 | `paths` | string array | yes | Globs. `~` expands to the scan root. `**` matches zero or more segments |
@@ -54,6 +55,7 @@ Validation runs at startup and in tests, and fails on any of these:
 - `command` missing when `method = "command"`, or present otherwise
 - unknown guard names or providers
 - a glob that doesn't compile
+- an empty `keywords` list
 
 ## 4. Matching
 
@@ -81,12 +83,12 @@ Inaccessible folders, symlinks and mount points also stop the walk, like protect
 
 ### 4.2 Guards
 
-Guards fall into three classes, and each class changes the outcome differently.
+Guards fall into four classes, and each class changes the outcome differently.
 
 | Guard | Value | Class | Behavior |
 |-------|-------|-------|----------|
 | `sibling_exists` | string array | match-time | Any of these names must exist in the parent folder, otherwise no match |
-| `project_idle_days` | integer | match-time | The parent project must be idle this many days, otherwise no match. Idle means the newest of the last commit time, `package.json` mtime and lockfile mtime. Only a git repository below the scan root counts: a repository enclosing the root (a dotfiles repo in home) is ignored. With no evidence at all the project is not idle |
+| `project_idle_days` | integer | match-time | The parent project must be idle this many days, otherwise no match. Idle means the newest of the last commit time and the mtime of the project's manifests and lockfiles (`package.json`, JS lockfiles, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `requirements.txt`, `uv.lock`, `poetry.lock`). Only a git repository below the scan root counts: a repository enclosing the root (a dotfiles repo in home) is ignored. With no evidence at all the project is not idle |
 | `requires_tool` | string | match-time | The tool must resolve to a binary. Otherwise `fallback_method` is used, or the rule is hidden |
 | `quiet_minutes` | integer | blocking | Blocked if the target or any immediate child was modified within N minutes |
 | `process_not_running` | string array | blocking | Blocked if any process command line contains one of these substrings |
@@ -94,8 +96,11 @@ Guards fall into three classes, and each class changes the outcome differently.
 | `owner_app_not_running` | bool | blocking | Treats the folder name as a bundle ID or process name and blocks while it runs |
 | `requires_running` | string array | blocking | Blocked unless a process containing one of these substrings is running |
 | `git_clean` | bool | safety | Blocked if a worktree has uncommitted or untracked changes, or commits on no branch (a detached HEAD ahead of every local and remote branch). Commits on a local branch do not block: `git worktree remove` keeps the branch |
+| `git_active` | bool | demoting | Moves a safe item to review, in a row "<label> (active work)" with the "Active work" badge and a reason, when the item's repository (below the scan root) has uncommitted or untracked changes outside the item, or commits on no remote branch (a branch ahead of its upstream, a branch never pushed, or a repository with no remote). Read in process with libgit2, once per snapshot. Never blocks: the item stays cleanable after review |
 
 Blocked items appear in the list with a disabled checkbox and a reason, for example "Quit Xcode to clean", "Start Docker Desktop to clean" or "Has uncommitted changes". A check that cannot complete (git fails, for example) blocks the item rather than allowing it.
+
+Demoting guards change the tier, not whether an item can be cleaned. A check that cannot complete (a corrupt repository, for example) counts as active work. Changes inside the item itself (untracked build output) and ignored files do not count, and an old modification time does not override it.
 
 ### 4.3 Providers
 
@@ -306,6 +311,7 @@ id = "npm-cache"
 label = "npm cache"
 description = "Package tarballs and metadata npm keeps to speed up installs."
 regenerates = "npm downloads packages again on the next install."
+keywords = ["npm", "cache", "node", "javascript", "packages"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.npm/_cacache", "~/.npm/_npx", "~/.npm/_logs"]
@@ -317,6 +323,7 @@ id = "pnpm-store"
 label = "pnpm store (unused packages)"
 description = "pnpm's shared package store. Packages no project references any more can be pruned."
 regenerates = "Pruned packages are downloaded again only if a project needs them."
+keywords = ["pnpm", "store", "cache", "node", "packages"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/pnpm/store"]
@@ -330,6 +337,7 @@ id = "bun-cache"
 label = "Bun install cache"
 description = "Packages Bun downloaded for installs."
 regenerates = "Bun downloads packages again on the next install."
+keywords = ["bun", "cache", "javascript", "packages"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.bun/install/cache"]
@@ -341,6 +349,7 @@ id = "yarn-cache"
 label = "Yarn cache"
 description = "Package archives Yarn keeps between installs."
 regenerates = "Yarn downloads packages again on the next install."
+keywords = ["yarn", "cache", "node", "packages"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/Yarn", "~/.yarn/berry/cache"]
@@ -352,18 +361,46 @@ id = "next-turbo-build"
 label = "Next.js & Turbo build output"
 description = "Compiled output and build caches from Next.js (.next) and Turborepo (.turbo) in your projects."
 regenerates = "Rebuilt on the next dev or build run. The first build afterwards is slower."
+keywords = ["next", "nextjs", "turbo", "turborepo", "build", "cache"]
 category = "code_projects"
 tier = "safe"
 paths = ["~/**/.next", "~/**/.turbo"]
 exclude = ["~/Library/**", "~/.Trash/**", "**/node_modules/**"]
 method = "delete"
-guards = { sibling_exists = ["package.json", "turbo.json"], quiet_minutes = 15 }
+guards = { sibling_exists = ["package.json", "turbo.json"], quiet_minutes = 15, git_active = true }
+
+[[rule]]
+id = "rust-target-idle"
+label = "Rust build output in idle projects"
+description = "Compiled output in Rust projects untouched for 30 days or more."
+regenerates = "Rebuilt by cargo build. The first build afterwards takes longer."
+keywords = ["dormant", "stale", "idle", "rust", "cargo", "target", "build"]
+category = "code_projects"
+tier = "safe"
+paths = ["~/**/target"]
+exclude = ["~/Library/**", "~/.Trash/**", "**/node_modules/**", "**/target/**", "~/.cargo/**", "~/.rustup/**"]
+method = "delete"
+guards = { sibling_exists = ["Cargo.toml"], project_idle_days = 30, quiet_minutes = 60, git_active = true }
+
+[[rule]]
+id = "python-venv-idle"
+label = "Python virtual environments in idle projects"
+description = "Virtual environments in Python projects untouched for 30 days or more."
+regenerates = "Recreate it and reinstall dependencies, for example with uv sync or pip install -r requirements.txt."
+keywords = ["dormant", "stale", "idle", "python", "venv", "virtualenv"]
+category = "code_projects"
+tier = "safe"
+paths = ["~/**/.venv", "~/**/venv"]
+exclude = ["~/Library/**", "~/.Trash/**", "**/node_modules/**", "**/.venv/**", "**/venv/**", "~/.pyenv/**", "~/.local/**"]
+method = "delete"
+guards = { sibling_exists = ["pyproject.toml", "requirements.txt", "uv.lock"], project_idle_days = 30, quiet_minutes = 60, git_active = true }
 
 [[rule]]
 id = "gradle-caches"
 label = "Gradle caches"
 description = "Dependencies, build caches and wrapper distributions downloaded by Gradle."
 regenerates = "Gradle downloads what it needs on the next build."
+keywords = ["gradle", "cache", "java", "android", "build"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.gradle/caches", "~/.gradle/wrapper/dists", "~/.gradle/daemon"]
@@ -375,6 +412,7 @@ id = "xcode-derived-data"
 label = "Xcode DerivedData"
 description = "Intermediate build products and indexes Xcode generates for each project."
 regenerates = "Xcode rebuilds it on the next build. The first build and indexing are slower."
+keywords = ["xcode", "derived", "data", "build", "cache", "ios"]
 category = "mobile_sdks"
 tier = "safe"
 paths = ["~/Library/Developer/Xcode/DerivedData"]
@@ -387,6 +425,7 @@ id = "uv-puppeteer"
 label = "uv & Puppeteer caches"
 description = "Python packages cached by uv and browser builds downloaded by Puppeteer."
 regenerates = "Downloaded again the next time uv installs packages or Puppeteer launches."
+keywords = ["uv", "puppeteer", "python", "cache", "chrome"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.cache/uv", "~/.cache/puppeteer"]
@@ -398,6 +437,7 @@ id = "playwright-browsers"
 label = "Playwright browsers"
 description = "Browser builds downloaded by Playwright for testing."
 regenerates = "Run `npx playwright install` to download them again."
+keywords = ["playwright", "browsers", "cache", "testing", "chromium"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/ms-playwright"]
@@ -409,6 +449,7 @@ id = "pip-cache"
 label = "pip cache"
 description = "Python packages cached by pip."
 regenerates = "pip downloads packages again on the next install."
+keywords = ["pip", "python", "cache", "packages"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/pip"]
@@ -419,6 +460,7 @@ id = "homebrew-cache"
 label = "Homebrew downloads"
 description = "Installers and old versions Homebrew keeps after upgrades."
 regenerates = "Homebrew downloads installers again only when needed."
+keywords = ["homebrew", "brew", "cache", "downloads"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/Homebrew"]
@@ -434,6 +476,7 @@ id = "cocoapods-cache"
 label = "CocoaPods cache"
 description = "Pod sources CocoaPods downloaded for iOS projects."
 regenerates = "Downloaded again on the next `pod install`."
+keywords = ["cocoapods", "pods", "ios", "cache"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/CocoaPods"]
@@ -444,6 +487,7 @@ id = "go-build-cache"
 label = "Go build cache"
 description = "Compiled package objects the Go toolchain caches."
 regenerates = "Rebuilt on the next `go build`."
+keywords = ["go", "golang", "build", "cache"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/go-build"]
@@ -454,6 +498,7 @@ id = "cargo-registry"
 label = "Cargo registry cache"
 description = "Crate archives and extracted sources downloaded by Cargo."
 regenerates = "Cargo downloads crates again on the next build."
+keywords = ["cargo", "rust", "registry", "cache", "crates"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/.cargo/registry/cache", "~/.cargo/registry/src"]
@@ -465,6 +510,7 @@ id = "app-caches"
 label = "App caches"
 description = "Caches apps keep in ~/Library/Caches. Apps recreate them as needed."
 regenerates = "Apps rebuild their caches on next launch, which may be slower the first time."
+keywords = ["app", "apps", "cache", "caches", "library"]
 category = "package_caches"
 tier = "safe"
 paths = ["~/Library/Caches/*"]
@@ -483,6 +529,7 @@ id = "android-sdk-emulators"
 label = "Android SDK & emulators"
 description = "The Android SDK, emulator system images and virtual devices."
 regenerates = "Reinstall from Android Studio's SDK Manager and recreate virtual devices. Emulator data is lost."
+keywords = ["android", "sdk", "emulator", "avd", "cache"]
 category = "mobile_sdks"
 tier = "review"
 paths = ["~/Library/Android/sdk", "~/.android/avd", "~/.android/cache"]
@@ -494,6 +541,7 @@ id = "ollama-models"
 label = "Ollama models"
 description = "Local language models downloaded with Ollama."
 regenerates = "Run `ollama pull <model>` to download a model again."
+keywords = ["ollama", "llm", "models", "ai"]
 category = "ai_models"
 tier = "review"
 paths = ["~/.ollama/models"]
@@ -507,6 +555,7 @@ id = "huggingface-cache"
 label = "Hugging Face models"
 description = "Models and datasets cached by Hugging Face libraries."
 regenerates = "Downloaded again the next time code loads them."
+keywords = ["huggingface", "hugging", "face", "models", "ai", "cache"]
 category = "ai_models"
 tier = "review"
 paths = ["~/.cache/huggingface/hub"]
@@ -518,6 +567,7 @@ id = "lmstudio-models"
 label = "LM Studio models"
 description = "Local models downloaded in LM Studio."
 regenerates = "Download them again from LM Studio's model browser."
+keywords = ["lm", "studio", "lmstudio", "llm", "models", "ai"]
 category = "ai_models"
 tier = "review"
 paths = ["~/.lmstudio/models", "~/.cache/lm-studio/models"]
@@ -529,18 +579,33 @@ id = "node-modules-idle"
 label = "node_modules in idle projects"
 description = "Installed dependencies in projects untouched for 30 days or more."
 regenerates = "Run your package manager's install command in the project to restore them."
+keywords = ["dormant", "stale", "idle", "node", "modules", "javascript"]
 category = "code_projects"
 tier = "review"
 paths = ["~/**/node_modules"]
 exclude = ["~/Library/**", "~/.Trash/**", "**/node_modules/**", "~/.npm/**", "~/.bun/**", "~/.nvm/**", "~/.vscode/**", "~/.cursor/**", "~/.local/**"]
 method = "delete"
-guards = { sibling_exists = ["package.json"], project_idle_days = 30, quiet_minutes = 60 }
+guards = { sibling_exists = ["package.json"], project_idle_days = 30, quiet_minutes = 60, git_active = true }
+
+[[rule]]
+id = "dist-idle"
+label = "dist build output in idle projects"
+description = "Build output in JavaScript projects untouched for 30 days or more. Some projects commit or publish from it."
+regenerates = "Rebuilt by the project's build script."
+keywords = ["dormant", "stale", "idle", "dist", "build", "javascript"]
+category = "code_projects"
+tier = "review"
+paths = ["~/**/dist"]
+exclude = ["~/Library/**", "~/.Trash/**", "**/node_modules/**", "**/dist/**"]
+method = "delete"
+guards = { sibling_exists = ["package.json"], project_idle_days = 30, quiet_minutes = 60, git_active = true }
 
 [[rule]]
 id = "agent-worktrees"
 label = "Agent worktrees"
 description = "Git worktrees created by coding agents for parallel tasks."
 regenerates = "Removed with `git worktree remove`. Branches stay in the main repository."
+keywords = ["agent", "worktree", "worktrees", "git", "claude"]
 category = "code_projects"
 tier = "review"
 paths = ["~/**/.claude/worktrees", "~/**/.worktrees"]
@@ -557,6 +622,7 @@ id = "xcode-archives"
 label = "Xcode archives"
 description = "App builds archived for distribution. Needed to symbolicate crash reports for those versions."
 regenerates = "Cannot be regenerated exactly. Keep archives for versions you still support."
+keywords = ["xcode", "archives", "ios", "builds"]
 category = "mobile_sdks"
 tier = "review"
 paths = ["~/Library/Developer/Xcode/Archives"]
@@ -569,6 +635,7 @@ id = "ios-device-support"
 label = "Device support files"
 description = "Debug symbols Xcode copies from each iOS, watchOS, tvOS and visionOS version you connect."
 regenerates = "Xcode copies them again the next time that device version is connected."
+keywords = ["ios", "device", "support", "xcode", "symbols"]
 category = "mobile_sdks"
 tier = "review"
 paths = ["~/Library/Developer/Xcode/iOS DeviceSupport", "~/Library/Developer/Xcode/watchOS DeviceSupport", "~/Library/Developer/Xcode/tvOS DeviceSupport", "~/Library/Developer/Xcode/visionOS DeviceSupport"]
@@ -581,6 +648,7 @@ id = "simulators-unavailable"
 label = "Unavailable simulators"
 description = "Simulator devices for runtimes that are no longer installed."
 regenerates = "These simulators can't run any more. Create new ones in Xcode if needed."
+keywords = ["simulator", "simulators", "ios", "xcode", "unavailable"]
 category = "mobile_sdks"
 tier = "review"
 paths = ["~/Library/Developer/CoreSimulator/Devices"]
@@ -594,6 +662,7 @@ id = "docker-unused"
 label = "Docker unused images & cache"
 description = "Stopped containers, unused images, networks and build cache in Docker Desktop. Volumes are kept."
 regenerates = "Images are pulled or rebuilt again when needed."
+keywords = ["docker", "containers", "images", "vm"]
 category = "dev_tools"
 tier = "review"
 paths = ["~/Library/Containers/com.docker.docker/Data/vms"]
@@ -608,6 +677,7 @@ id = "ios-backups"
 label = "iPhone & iPad backups"
 description = "Local device backups made by Finder."
 regenerates = "Cannot be regenerated. Make a new backup from Finder if needed."
+keywords = ["ios", "iphone", "ipad", "backup", "backups"]
 category = "documents_media"
 tier = "review"
 paths = ["~/Library/Application Support/MobileSync/Backup/*"]
@@ -619,6 +689,7 @@ id = "trash-bin"
 label = "Trash"
 description = "Files you already moved to the Trash."
 regenerates = "Permanently deleted. This cannot be undone."
+keywords = ["trash", "bin", "deleted", "empty"]
 category = "documents_media"
 tier = "review"
 paths = ["~/.Trash"]

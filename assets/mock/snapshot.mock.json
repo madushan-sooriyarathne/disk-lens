@@ -673,7 +673,8 @@
      "name": "old-saas/node_modules",
      "size": 6600000000,
      "status": "Ready",
-     "method": "Delete"
+     "method": "Delete",
+     "active_work": "2 unpushed commits on feat/search"
     }
    ]
   },

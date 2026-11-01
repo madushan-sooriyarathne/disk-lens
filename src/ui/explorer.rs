@@ -944,6 +944,7 @@ mod tests {
                 size: 1,
                 status,
                 method: MethodView::Delete,
+                active_work: None,
                 idle_days: None,
             }],
         }

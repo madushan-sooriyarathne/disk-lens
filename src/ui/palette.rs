@@ -406,12 +406,21 @@ fn ranked(query: &str, entries: Vec<Entry>) -> Vec<Entry> {
         .into_iter()
         .filter_map(|e| {
             let by_label = fuzzy.score(&e.label());
-            let by_rule = e.rule_id().and_then(|id| fuzzy.score(id));
+            let by_rule = e.rule_id().and_then(|id| fuzzy.score(&rule_text(id)));
             by_label.max(by_rule).map(|s| (s, e))
         })
         .collect();
     scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
     scored.into_iter().map(|(_, e)| e).collect()
+}
+
+/// A rule's ID and its `keywords` as one text, so "dormant rust targets" finds
+/// `rust-target-idle` (FR-KB-2). IDs outside `rules.toml` match on the ID alone.
+fn rule_text(id: &str) -> String {
+    match Rules::embedded().rule(id) {
+        Some(rule) => format!("{id} {}", rule.keywords.join(" ")),
+        None => id.to_owned(),
+    }
 }
 
 /// The palette over the window, or `None` while closed.
@@ -845,6 +854,7 @@ mod tests {
                 },
                 method: MethodView::Delete,
                 idle_days: None,
+                active_work: None,
             }],
         }
     }
@@ -893,6 +903,24 @@ mod tests {
     #[test]
     fn rows_match_on_their_rule_id() {
         assert!(labels(&list("xcode-rule")).contains(&"Show Xcode DerivedData".to_owned()));
+    }
+
+    #[test]
+    fn rows_match_on_their_rule_keywords() {
+        let recs = [Recommendation {
+            rule_id: "rust-target-idle".into(),
+            ..rec("rust", "Rust build output in idle projects", false)
+        }];
+        let groups = groups(
+            "dormant rust targets",
+            false,
+            &recs,
+            &HashSet::new(),
+            &[],
+            false,
+            "/r",
+        );
+        assert_eq!(labels(&groups), ["Show Rust build output in idle projects"]);
     }
 
     #[test]

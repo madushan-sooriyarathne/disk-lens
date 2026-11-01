@@ -3,7 +3,8 @@
 //! Match-time guards decide whether a rule matches at all. Blocking and safety
 //! guards keep a matched item visible but unselectable, with a short reason.
 //! Every check here is read-only. When a check cannot be completed the item is
-//! treated as blocked or not matched, never as ready.
+//! treated as blocked or not matched, never as ready. Demoting guards
+//! (`git_active`) move an item to review and live in `recommend::build`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -12,12 +13,20 @@ use super::model::Guards;
 use super::tools::Tools;
 use crate::platform::{Facts, Runner};
 
-const LOCKFILES: [&str; 5] = [
+/// Manifests and lockfiles whose mtime shows a project is being worked on.
+const EVIDENCE: [&str; 12] = [
+    "package.json",
     "package-lock.json",
     "pnpm-lock.yaml",
     "yarn.lock",
     "bun.lock",
     "bun.lockb",
+    "Cargo.toml",
+    "Cargo.lock",
+    "pyproject.toml",
+    "requirements.txt",
+    "uv.lock",
+    "poetry.lock",
 ];
 
 /// Friendly names for the process substrings used in rules.toml.
@@ -63,7 +72,8 @@ pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
 }
 
 /// How long the project containing `path` (its parent folder) has been idle,
-/// measured from the newest of the last commit, `package.json` and any lockfile.
+/// measured from the newest of the last commit and the project's manifests and
+/// lockfiles (`EVIDENCE`).
 /// `None` when there is no evidence at all.
 ///
 /// Only repositories below `root` count: a repository enclosing the scan root
@@ -77,9 +87,8 @@ pub fn project_age(path: &Path, root: &Path, env: &Env) -> Option<Duration> {
             newest = Some(newest.map_or(t, |n| n.max(t)));
         }
     };
-    consider(mtime(&project.join("package.json")));
-    for lock in LOCKFILES {
-        consider(mtime(&project.join(lock)));
+    for name in EVIDENCE {
+        consider(mtime(&project.join(name)));
     }
     if let Some(repo) = repo_below(project, root)
         && let Some(git) = Git::new(env)
@@ -179,7 +188,7 @@ fn changed_within(path: &Path, window: Duration, now: SystemTime) -> bool {
 }
 
 /// The nearest folder from `dir` upwards, strictly below `root`, holding `.git`.
-fn repo_below(dir: &Path, root: &Path) -> Option<PathBuf> {
+pub(crate) fn repo_below(dir: &Path, root: &Path) -> Option<PathBuf> {
     dir.ancestors()
         .take_while(|d| *d != root && d.starts_with(root))
         .find(|d| d.join(".git").symlink_metadata().is_ok())
@@ -582,6 +591,27 @@ mod tests {
         // A fresh lockfile makes it active.
         fs::write(proj.join("pnpm-lock.yaml"), "").unwrap();
         assert!(!idle(&FakeRunner::default()));
+    }
+
+    #[test]
+    fn project_idle_counts_rust_and_python_evidence() {
+        let t = tempfile::tempdir().unwrap();
+        let facts = Facts::default();
+        let proj = aged(t.path(), "proj", 90 * DAY);
+        fs::rename(proj.join("f"), proj.join("Cargo.lock")).unwrap();
+        let target = proj.join("target");
+        let idle = || {
+            let env = Env {
+                facts: &facts,
+                runner: &FakeRunner::default(),
+                tools: &no_tools(),
+                now: SystemTime::now(),
+            };
+            project_idle(&target, 30, t.path(), &env)
+        };
+        assert!(idle());
+        fs::write(proj.join("uv.lock"), "").unwrap();
+        assert!(!idle());
     }
 
     #[test]

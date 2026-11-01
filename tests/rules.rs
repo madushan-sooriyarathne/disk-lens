@@ -139,6 +139,30 @@ const TABLE: &[(&str, &[&str], &[&str])] = &[
         ],
     ),
     (
+        "rust-target-idle",
+        &["Desktop/oldrust/target"],
+        &[
+            "Desktop/activerust/target",
+            "Desktop/oldrust/target/debug/target",
+            "Desktop/norust/target",
+            ".cargo/registry/target",
+        ],
+    ),
+    (
+        "python-venv-idle",
+        &[
+            "Desktop/oldpy/.venv",
+            "Desktop/oldpy2/venv",
+            "Desktop/olduv/.venv",
+        ],
+        &[
+            "Desktop/activepy/.venv",
+            "Desktop/nopy/.venv",
+            "Desktop/oldpy/.venv/lib/.venv",
+            "Desktop/idle/node_modules/pkg/.venv",
+        ],
+    ),
+    (
         "gradle-caches",
         &[".gradle/caches", ".gradle/wrapper/dists", ".gradle/daemon"],
         &[".gradle/wrapper/other", ".gradle/native"],
@@ -227,6 +251,15 @@ const TABLE: &[(&str, &[&str], &[&str])] = &[
         ],
     ),
     (
+        "dist-idle",
+        &["Desktop/idle/dist", "Desktop/web-idle/dist"],
+        &[
+            "Desktop/active/dist",
+            "Desktop/nopkg/dist",
+            "Desktop/idle/dist/inner/dist",
+        ],
+    ),
+    (
         "agent-worktrees",
         &["Desktop/atlas/.claude/worktrees", "Desktop/foo/.worktrees"],
         &["Library/app/.worktrees", "Desktop/atlas/claude/worktrees"],
@@ -270,6 +303,8 @@ fn guard_files(f: &Fixture) {
         "Desktop/web/package.json",
         "Desktop/active/package.json",
         "Desktop/web/node_modules/pkg/package.json",
+        "Desktop/activerust/Cargo.toml",
+        "Desktop/activepy/pyproject.toml",
     ] {
         f.file(p, 0);
     }
@@ -280,6 +315,10 @@ fn guard_files(f: &Fixture) {
         "Desktop/idle/package.json",
         "Desktop/web-idle/package.json",
         "Desktop/web-idle/package-lock.json",
+        "Desktop/oldrust/Cargo.toml",
+        "Desktop/oldpy/pyproject.toml",
+        "Desktop/oldpy2/requirements.txt",
+        "Desktop/olduv/uv.lock",
         "Desktop/active/node_modules/dep/package.json",
         "Library/proj/package.json",
         ".nvm/versions/node/lib/package.json",
@@ -349,6 +388,19 @@ fn specific_rules_beat_app_caches() {
     assert_eq!(got["Library/Caches/CocoaPods"], "cocoapods-cache");
     assert_eq!(got["Library/Caches/com.other"], "app-caches");
     assert_eq!(got.len(), 7);
+}
+
+#[test]
+fn dist_inside_node_modules_is_not_matched_by_dist_idle() {
+    let f = Fixture::new();
+    f.dir("Desktop/idle/node_modules/pkg/dist");
+    f.file("Desktop/idle/package.json", OLD);
+    let got = f.matches(&f.all_tools());
+    assert_eq!(
+        got.get("Desktop/idle/node_modules/pkg/dist")
+            .map(String::as_str),
+        None
+    );
 }
 
 #[test]

@@ -177,6 +177,7 @@ mod tests {
                         ItemStatus::Ready
                     },
                     method: MethodView::Delete,
+                    active_work: None,
                     idle_days: None,
                 })
                 .collect(),

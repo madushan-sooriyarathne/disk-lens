@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use disklens_lib::platform::{Facts, FakeRunner, ProcessRunner, Runner};
 use disklens_lib::recommend::build::analyze;
@@ -20,7 +20,7 @@ use disklens_lib::scanner::tree::Snapshot;
 use disklens_lib::scanner::{ScanOptions, scan};
 use disklens_lib::view::{ViewNode, build_view};
 
-const FIXTURE_VERSION: &str = "3";
+const FIXTURE_VERSION: &str = "4";
 const MB: u64 = 1_000_000;
 
 fn sandbox() -> Option<PathBuf> {
@@ -79,11 +79,13 @@ fn sandbox_rows_tiers_statuses_and_totals() {
     let ids = by_id(&rows);
 
     // Hidden in sandbox mode: pnpm, ollama, xcrun and docker do not resolve.
-    let expected: [(&str, Tier, usize); 23] = [
+    let expected: [(&str, Tier, usize); 29] = [
         ("app-caches", Tier::Safe, 1),
         ("npm-cache", Tier::Safe, 3),
         ("gradle-caches", Tier::Safe, 3),
-        ("next-turbo-build", Tier::Safe, 3),
+        ("next-turbo-build", Tier::Safe, 2),
+        ("rust-target-idle", Tier::Safe, 1),
+        ("python-venv-idle", Tier::Safe, 1),
         ("yarn-cache", Tier::Safe, 2),
         ("uv-puppeteer", Tier::Safe, 2),
         ("cargo-registry", Tier::Safe, 2),
@@ -98,7 +100,11 @@ fn sandbox_rows_tiers_statuses_and_totals() {
         ("agent-worktrees:atlas", Tier::Review, 4),
         ("huggingface-cache", Tier::Review, 1),
         ("lmstudio-models", Tier::Review, 1),
-        ("node-modules-idle", Tier::Review, 1),
+        ("node-modules-idle", Tier::Review, 2),
+        ("dist-idle", Tier::Review, 1),
+        ("next-turbo-build:active", Tier::Review, 1),
+        ("rust-target-idle:active", Tier::Review, 3),
+        ("node-modules-idle:active", Tier::Review, 3),
         ("xcode-archives", Tier::Review, 1),
         ("ios-device-support", Tier::Review, 1),
         ("ios-backups", Tier::Review, 1),
@@ -194,6 +200,95 @@ fn sandbox_rows_tiers_statuses_and_totals() {
     paths.dedup();
     assert_eq!(paths.len(), n);
     assert!(safe > 60 * MB && all > safe);
+}
+
+#[test]
+fn active_work_reasons_per_fixture_repo() {
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let real_home = std::env::var("HOME").unwrap();
+    let tools = Tools::discover(Path::new(&real_home), true);
+    let runner = ProcessRunner {
+        timeout: Duration::from_secs(30),
+        home: real_home,
+    };
+    let rows = rows(&snap, &tools, &runner);
+
+    let mut got: Vec<(String, String)> = rows
+        .iter()
+        .filter(|r| r.row_id.ends_with(":active"))
+        .flat_map(|r| &r.items)
+        .map(|i| {
+            let rel = i.path.rsplit("/Desktop/").next().unwrap().to_string();
+            (
+                rel,
+                i.active_work.clone().expect("active row item has a reason"),
+            )
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(String, String)> = [
+        ("aw-dirty/node_modules", "1 uncommitted file"),
+        ("aw-dirty/target", "1 uncommitted file"),
+        ("aw-noupstream/node_modules", "1 unpushed commit on feat/x"),
+        ("aw-noupstream/target", "1 unpushed commit on feat/x"),
+        ("aw-unpushed/node_modules", "2 unpushed commits on main"),
+        ("aw-unpushed/target", "2 unpushed commits on main"),
+        ("gitrepo/.next", "1 unpushed commit on main"),
+    ]
+    .map(|(p, r)| (p.to_string(), r.to_string()))
+    .into();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn only_active_rows_carry_active_work() {
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let real_home = std::env::var("HOME").unwrap();
+    let tools = Tools::discover(Path::new(&real_home), true);
+    let runner = ProcessRunner {
+        timeout: Duration::from_secs(30),
+        home: real_home,
+    };
+    let rows = rows(&snap, &tools, &runner);
+
+    let leaked: Vec<&str> = rows
+        .iter()
+        .filter(|r| !r.row_id.ends_with(":active"))
+        .flat_map(|r| &r.items)
+        .filter(|i| i.active_work.is_some())
+        .map(|i| i.path.as_str())
+        .collect();
+    assert_eq!(leaked, Vec::<&str>::new());
+}
+
+// Release-only like the treemap timing target:
+// cargo test --release --test sandbox_rows -- --ignored
+#[test]
+#[ignore]
+fn git_state_read_under_50_ms_per_repo() {
+    let Some(home) = sandbox() else { return };
+    let repos = [
+        "aw-clean",
+        "aw-dirty",
+        "aw-unpushed",
+        "aw-noupstream",
+        "gitrepo",
+        "atlas",
+    ];
+    for name in repos {
+        let repo = home.join("Desktop").join(name);
+        let start = Instant::now();
+        disklens_lib::rules::git_state::read(&repo).unwrap();
+        let took = start.elapsed();
+        eprintln!("git_state::read {}: {took:?}", repo.display());
+        assert!(
+            took < Duration::from_millis(50),
+            "{}: {took:?}",
+            repo.display()
+        );
+    }
 }
 
 #[test]

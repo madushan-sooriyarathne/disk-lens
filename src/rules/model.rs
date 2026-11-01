@@ -99,6 +99,8 @@ pub struct Guards {
     pub requires_running: Vec<String>,
     // safety
     pub git_clean: bool,
+    // demoting
+    pub git_active: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,6 +110,8 @@ pub struct Rule {
     pub label: String,
     pub description: String,
     pub regenerates: String,
+    /// Extra words the command palette matches (PRD FR-KB-2).
+    pub keywords: Vec<String>,
     pub category: String,
     #[serde(deserialize_with = "tier")]
     pub tier: Tier,

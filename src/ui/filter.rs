@@ -191,6 +191,7 @@ mod tests {
                     status: ItemStatus::Ready,
                     method: MethodView::Delete,
                     idle_days,
+                    active_work: None,
                 })
                 .collect(),
         }

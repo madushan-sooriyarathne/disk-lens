@@ -10,6 +10,7 @@ use std::time::SystemTime;
 use disklens_lib::platform::{Facts, FakeRunner};
 use disklens_lib::recommend::build::Analysis;
 use disklens_lib::recommend::build::analyze;
+use disklens_lib::recommend::model::Tier;
 use disklens_lib::rules::guards::Env;
 use disklens_lib::rules::model::Rules;
 use disklens_lib::rules::tools::Tools;
@@ -205,4 +206,47 @@ fn a_folder_with_a_project_marker_is_a_code_project() {
 fn a_project_deeper_than_the_depth_limit_is_not_claimed() {
     let (_, totals) = totals_of(&["a/b/c/d/e/Cargo.toml"]);
     assert_eq!(folders(&totals, "code_projects"), 0);
+}
+
+#[test]
+fn a_tile_of_an_active_project_is_review() {
+    let t = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(t.path()).unwrap();
+    fs::create_dir_all(root.join("proj/build-out")).unwrap();
+    fs::write(root.join("proj/build-out/f"), vec![b'x'; TWO_MB]).unwrap();
+    // An unreadable repository counts as active work.
+    fs::create_dir_all(root.join("proj/.git")).unwrap();
+    fs::write(root.join("proj/.git/HEAD"), "garbage").unwrap();
+    let rules = Rules::parse(&format!(
+        "{}\n{}",
+        include_str!("../rules/rules.toml"),
+        r#"
+[[rule]]
+id = "active-safe"
+label = "Build output"
+description = "Test rule."
+regenerates = "Rebuild."
+keywords = ["k"]
+category = "code_projects"
+tier = "safe"
+paths = ["~/**/build-out"]
+method = "delete"
+guards = { git_active = true }
+"#
+    ))
+    .unwrap();
+    let snap = scanned(&root);
+    let facts = Facts::default();
+    let runner = FakeRunner::default();
+    let tools = Tools::new(vec![], false);
+    let env = Env {
+        facts: &facts,
+        runner: &runner,
+        tools: &tools,
+        now: SystemTime::now(),
+    };
+    let analysis = analyze(&rules, &snap, &env);
+    let v = build_view(&snap, &root.join("proj"), Some((&rules, &analysis))).unwrap();
+    let tile = v.children.iter().find(|c| c.name == "build-out").unwrap();
+    assert_eq!(tile.tier, Some(Tier::Review));
 }

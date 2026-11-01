@@ -29,6 +29,9 @@ pub struct RecItem {
     pub size: u64,
     pub status: ItemStatus,
     pub method: MethodView,
+    /// Why the item's project counts as active work (git_active), shown as the "Active work" badge.
+    #[serde(default)]
+    pub active_work: Option<String>,
     /// Whole days since the item's project last changed, when its rule measures it.
     #[serde(default)]
     pub idle_days: Option<u32>,
