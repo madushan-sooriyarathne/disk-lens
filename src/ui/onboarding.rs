@@ -37,12 +37,13 @@ static ICON_LIGHT: LazyLock<Arc<Image>> = LazyLock::new(|| {
     ))
 });
 
-/// The glass icon for the current appearance (the bundle's `.icns` is the dark one).
+/// The glass icon that stands out against the current appearance: the light one in
+/// dark mode, the dark one in light mode (the bundle's `.icns` is the dark one).
 fn app_icon(t: &Theme) -> Arc<Image> {
     if t.dark {
-        ICON_DARK.clone()
-    } else {
         ICON_LIGHT.clone()
+    } else {
+        ICON_DARK.clone()
     }
 }
 
