@@ -176,6 +176,20 @@ Each run starts with DiskLens not in the Full Disk Access list (`tccutil reset S
 | After the drag, DiskLens still responds to clicks | | untested | untested | untested |
 | Turning DiskLens on advances the step within a second, System Settings in front | | untested | untested | untested |
 
+## Phase 14: active-work guard
+
+Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`).
+
+- [ ] Recommended shows "Rust build output in idle projects" (safe, `aw-clean`) and "Rust build output in idle projects (active work)" (review) with the amber Active work pill; the same split for node_modules, and "Next.js & Turbo build output (active work)" for `Desktop/gitrepo`.
+- [ ] Selecting an active-work row shows the pill beside the tier in the inspector and each item's reason: "1 uncommitted file" (`aw-dirty`), "2 unpushed commits on main" (`aw-unpushed`), "1 unpushed commit on feat/x" (`aw-noupstream`), "1 unpushed commit on main" (`gitrepo`).
+- [ ] Select safe stages none of the active-work items; staging one by hand works and the cleanup sheet runs it (dry run).
+- [ ] In Explore, `Desktop/aw-dirty/target` is drawn restorable (no stripes) and `Desktop/aw-clean/target` disposable (stripes).
+- [ ] `DISKLENS_MOCK=1 cargo run`: the node_modules review row shows the pill; its `old-saas` item shows "2 unpushed commits on feat/search".
+- [ ] Row labels with the pill still truncate at the minimum window size; no row grows taller.
+- [x] `cargo test --release --test sandbox_rows -- --ignored`: `git_state::read` under 50 ms per sandbox repository (2.3 to 9.4 ms, 2026-11-01).
+- [x] `otool -L target/release/disklens` lists no libgit2, OpenSSL or libssh2 dylib.
+- [x] `scripts/package.sh` builds the universal DMG at 15.7 MB, under 25 MB (2026-11-01).
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

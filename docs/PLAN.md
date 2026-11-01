@@ -21,7 +21,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 11 Recommended and cleanup sheet | Merged | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10 |
 | 12 Onboarding | Built, awaiting QA and the spike | v2, PRD section 13.4.1. Branch `feat/phase-12-onboarding` |
 | 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
-| 14 Active-work guard and project artifacts | Not started | v2, PRD section 13.4.11 (free) |
+| 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` off `main`, built while Phase 13 was in progress |
 | 15 Pro licensing and gating | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
 | 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (490 tests, 1 release-only test ignored) all pass.
+Last full gate run on macOS (Phase 14, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (513 tests, 2 release-only tests ignored) all pass.
 
 ### What is left
 
@@ -225,6 +225,21 @@ Last full gate run on macOS (Phase 12, 2026-11-01): `cargo fmt --check`, `cargo 
 - Open:
   - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
   - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
+
+**Phase 14: Active-work guard and project artifacts**
+- Built:
+  - `rules/git_state.rs` reads a repository in process with libgit2 (`git2`, vendored and static, no https or ssh): status entries (untracked included, untracked folders as one entry, ignored files excluded, the index never written) and, per local branch and a detached HEAD, the commits no `refs/remotes/*` ref contains (counted up to 1000).
+  - `git_active`, the first *demoting* guard (RULES.md section 4.2). `recommend::build::analyze` checks it once per snapshot, reading each repository once. An affected item moves to the review row "<label> (active work)" (`<row_id>:active`) with `RecItem.active_work` set to the reason; the treemap draws it as review tier (`Analysis::tier_of`). It never blocks, so revalidation and cleanup are unchanged.
+  - Rules: `rust-target-idle` and `python-venv-idle` (safe), `dist-idle` (review), all with `project_idle_days = 30`, `quiet_minutes = 60` and `git_active`; `node-modules-idle` and `next-turbo-build` get `git_active`. Idle evidence adds `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `requirements.txt`, `uv.lock` and `poetry.lock`. Every rule has a required, non-empty `keywords` list for the palette.
+  - UI: an amber Active work pill on the row and in the inspector, with each item's reason under its path; the mock marks one item.
+  - Fixture v4: `Desktop/aw-clean`, `aw-dirty`, `aw-unpushed` and `aw-noupstream` (each with ignored `target` and `node_modules`), plus idle `py-proj` and `js-lib`; fixture commits are dated 2024-01-01.
+- Decisions (2026-11-01):
+  - Base branch `main`; Phase 13 changes the same spots in `recommend/build.rs`, `recommend/model.rs` and `rules/guards.rs` (idle age), so the second branch to merge resolves the overlap.
+  - Rust `target` and Python virtual environments are safe tier; `dist` is review (PRD FR-GIT-4).
+  - Changes inside the item itself do not count (build output is often untracked). A repository with no remote counts as active, as FR-GIT-1 reads; so the fixture's `Desktop/gitrepo` `.next` moves to review. An item with no repository below the scan root is not demoted.
+  - Checked once per snapshot, not on every refresh: the treemap needs the same tier, and status is too slow for window activation. A repository that changes after the scan is picked up by the next scan.
+- Measured: `git_state::read` over the sandbox repositories takes 2 to 10 ms each (release; target 50 ms). git2 adds 0.80 MB to the arm64 release binary (12.86 to 13.66 MB). `scripts/package.sh` (ad-hoc): universal DMG 15.7 MB (target 25 MB), universal binary 29.4 MB.
+- Open: the native-window check in `docs/QA.md` (Phase 14).
 
 **Housekeeping**
 - `platform/` is one `mod.rs` with the `System`, `Runner` and `Trash` traits. Phase 5 adds FDA code there.
