@@ -17,8 +17,8 @@ use super::theme;
 use crate::cleanup::audit::now_ms;
 use crate::license::{self, Kind, Status};
 
-/// The marketing site (Phase 15b builds it); Buy and Start Trial open pages on it.
-const SITE_URL: &str = "https://disklens.app";
+/// The marketing site (`site/`); Buy and Start Trial open pages on it.
+const SITE_URL: &str = "https://disklens.space";
 const WIDTH: f32 = 520.;
 const HEIGHT: f32 = 270.;
 const SECONDS_PER_DAY: u64 = 86_400;
