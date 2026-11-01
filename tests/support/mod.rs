@@ -18,6 +18,7 @@ use disklens_lib::cleanup::revalidate::GROWTH_FLOOR;
 use disklens_lib::error::Result;
 use disklens_lib::platform::{Facts, FakeRunner, FakeSystem, FakeTrash};
 use disklens_lib::recommend::build::{Analysis, analyze};
+use disklens_lib::recommend::model::Recommendation;
 use disklens_lib::rules::guards::Env;
 use disklens_lib::rules::model::Rules;
 use disklens_lib::rules::tools::Tools;
@@ -38,6 +39,8 @@ pub struct World {
     pub runner: FakeRunner,
     pub growth_floor: u64,
     pub analysis: Option<Analysis>,
+    /// Whether the machine has a Pro license; it must change nothing a free rule does.
+    pub pro: bool,
 }
 
 impl World {
@@ -60,6 +63,7 @@ impl World {
             runner: FakeRunner::default(),
             growth_floor: GROWTH_FLOOR,
             analysis: None,
+            pro: false,
         }
     }
 
@@ -128,7 +132,15 @@ impl World {
             runner: &self.runner,
             tools,
             now: SystemTime::now(),
+            pro: self.pro,
         }
+    }
+
+    pub fn recommendations(&self) -> Vec<Recommendation> {
+        let facts = Facts::default();
+        let tools = self.tools();
+        self.analysis()
+            .recommendations(Rules::embedded(), &self.env(&facts, &tools))
     }
 
     pub fn analysis(&self) -> &Analysis {
@@ -203,6 +215,7 @@ impl World {
             trash: &trash,
             dry_run,
             growth_floor: self.growth_floor,
+            pro: self.pro,
         };
         let mut log = Audit::open(&self.logs).unwrap();
         let summary = execute(&engine, plan, &mut log, on_event);

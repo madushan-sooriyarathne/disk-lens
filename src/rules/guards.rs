@@ -49,6 +49,8 @@ pub struct Env<'a> {
     pub runner: &'a dyn Runner,
     pub tools: &'a Tools,
     pub now: SystemTime,
+    /// A Pro license is active. Only the matcher reads it, to skip `pro` rules.
+    pub pro: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +445,7 @@ mod tests {
                 runner: &runner,
                 tools: &tools,
                 now: SystemTime::now(),
+                pro: false,
             };
             assert_eq!(
                 blocked(&c.guards, &old, &env).as_deref(),
@@ -464,6 +467,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let g = Guards {
             quiet_minutes: Some(10),
@@ -498,6 +502,7 @@ mod tests {
                 runner: &runner,
                 tools: &tools,
                 now: SystemTime::now(),
+                pro: false,
             };
             blocked(&g, &wt, &env)
         };
@@ -536,6 +541,7 @@ mod tests {
             runner: &FakeRunner::default(),
             tools: &no_tools(),
             now: SystemTime::now(),
+            pro: false,
         };
         assert_eq!(blocked(&g, &wt, &env), Some("Git not found".into()));
     }
@@ -577,6 +583,7 @@ mod tests {
                 runner,
                 tools: &tools,
                 now,
+                pro: false,
             };
             project_idle(&nm, 30, t.path(), &env)
         };
@@ -606,6 +613,7 @@ mod tests {
                 runner: &FakeRunner::default(),
                 tools: &no_tools(),
                 now: SystemTime::now(),
+                pro: false,
             };
             project_idle(&target, 30, t.path(), &env)
         };
@@ -624,6 +632,7 @@ mod tests {
             runner: &FakeRunner::default(),
             tools: &no_tools(),
             now: SystemTime::now() + Duration::from_secs(365 * DAY),
+            pro: false,
         };
         assert!(!project_idle(
             &t.path().join("p/node_modules"),
@@ -643,6 +652,7 @@ mod tests {
             runner: &FakeRunner::default(),
             tools: &no_tools(),
             now: SystemTime::now(),
+            pro: false,
         };
         assert_eq!(
             project_age(&t.path().join("p/node_modules"), t.path(), &env),
@@ -661,6 +671,7 @@ mod tests {
             runner: &FakeRunner::default(),
             tools: &no_tools(),
             now: SystemTime::now(),
+            pro: false,
         };
         let days = project_age(&t.path().join("p/node_modules"), t.path(), &env)
             .map(|a| a.as_secs() / DAY);
@@ -694,6 +705,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         assert!(project_idle(&proj.join("node_modules"), 30, &root, &env));
         assert!(runner.calls.lock().unwrap().is_empty());

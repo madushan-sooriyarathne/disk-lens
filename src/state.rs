@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::cleanup::model::CleanupPlan;
 use crate::config::Config;
+use crate::license::{self, Status};
 use crate::platform::{
     Access, Facts, MacAccess, MacSystem, MacTrash, ProcessRunner, Runner, System, Trash,
 };
@@ -13,6 +14,7 @@ use crate::recommend::build::Analysis;
 use crate::rules::guards::Env;
 use crate::rules::tools::Tools;
 use crate::scanner::tree::Snapshot;
+use crate::settings;
 
 /// Read-only probes (`git status`, `simctl list`, `docker system df`) give up after this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -37,11 +39,14 @@ pub struct AppState {
     /// A cleanup is running. Scans and other cleanups wait for it.
     pub cleaning: AtomicBool,
     pub machine: Machine,
+    /// The stored license token. Not a verdict: `license()` checks it every time.
+    pub license_token: RwLock<Option<String>>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
         let machine = Machine::real(&config);
+        let license_token = RwLock::new(settings::load(&config.data_dir).license);
         Self {
             config,
             current: RwLock::new(None),
@@ -50,7 +55,18 @@ impl AppState {
             plan_seq: AtomicU64::new(0),
             cleaning: AtomicBool::new(false),
             machine,
+            license_token,
         }
+    }
+
+    /// Checked against the clock on every call, so a trial ending mid-session is seen.
+    pub fn license(&self) -> Status {
+        let token = self.license_token.read().expect("license lock");
+        license::current_status(token.as_deref())
+    }
+
+    pub fn is_pro(&self) -> bool {
+        self.license().is_pro()
     }
 }
 
@@ -108,12 +124,13 @@ impl Machine {
         crate::platform::preseed_access(self.access.as_ref(), &self.home);
     }
 
-    pub fn env<'a>(&'a self, facts: &'a Facts) -> Env<'a> {
+    pub fn env<'a>(&'a self, facts: &'a Facts, pro: bool) -> Env<'a> {
         Env {
             facts,
             runner: self.runner.as_ref(),
             tools: self.tools(),
             now: SystemTime::now(),
+            pro,
         }
     }
 }

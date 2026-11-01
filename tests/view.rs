@@ -101,6 +101,7 @@ fn analyzed(files: &[&str], bytes: usize) -> (tempfile::TempDir, Snapshot, Analy
         runner: &runner,
         tools: &tools,
         now: SystemTime::now(),
+        pro: false,
     };
     let analysis = analyze(Rules::embedded(), &snap, &env);
     (t, snap, analysis)
@@ -244,6 +245,7 @@ guards = { git_active = true }
         runner: &runner,
         tools: &tools,
         now: SystemTime::now(),
+        pro: false,
     };
     let analysis = analyze(&rules, &snap, &env);
     let v = build_view(&snap, &root.join("proj"), Some((&rules, &analysis))).unwrap();

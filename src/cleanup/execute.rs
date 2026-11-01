@@ -34,6 +34,8 @@ pub struct Engine<'a> {
     pub dry_run: bool,
     /// `revalidate::GROWTH_FLOOR` outside tests.
     pub growth_floor: u64,
+    /// A Pro license is active, so `pro` rules still match when revalidated.
+    pub pro: bool,
 }
 
 /// What one action did.
@@ -131,6 +133,7 @@ fn run<'p>(
         runner: engine.probes,
         tools: engine.tools,
         now: SystemTime::now(),
+        pro: engine.pro,
     };
     if let Err(reason) = revalidator.check(action, &env) {
         return Done::skipped(reason);

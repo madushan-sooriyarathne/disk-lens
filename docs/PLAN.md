@@ -435,7 +435,7 @@ pub struct ScanProgress { pub files: u64, pub bytes: u64, pub current: String } 
 // verified against assets/license.pub (not the update key). Valid when the signature verifies, v == 1,
 // the app's major version <= max_major, expires is null or in the future, and a trial has expires.
 pub enum LicenseStatus { Free, Pro { id: String }, Trial { id: String, ends: u64 },
-                         Ended { kind: String, id: String }, Invalid { reason: String } }
+                         Ended { kind: Kind, id: String }, Invalid(LicenseError) }  // Kind: Pro or Trial
 
 // Phase 14 onward
 pub enum Badge { ActiveWork { reason: String }, Reproducible { lockfile: String }, NoLockfile }
