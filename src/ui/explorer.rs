@@ -940,6 +940,7 @@ mod tests {
                 size: 1,
                 status,
                 method: MethodView::Delete,
+                idle_days: None,
             }],
         }
     }
