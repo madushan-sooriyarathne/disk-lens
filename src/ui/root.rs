@@ -219,11 +219,13 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &ExportScript, _, cx| this.export_script(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &HighlightCleanable, _, cx| this.toggle_highlight(cx)))
-            // Esc closes the cleanup dialog (not while it runs), then the context
-            // menu, then the queue, then clears the inspected row on Recommended,
-            // otherwise goes up.
+            // Esc goes back a step in onboarding. Otherwise it closes the cleanup
+            // dialog (not while it runs), then the context menu, then the queue, then
+            // clears the inspected row on Recommended, otherwise goes up.
             .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if let Some(stage) = &this.cleanup {
+                if matches!(this.phase, Phase::Onboarding(_)) {
+                    this.onboarding_back(cx);
+                } else if let Some(stage) = &this.cleanup {
                     if !matches!(stage, Cleanup::Running { .. }) {
                         this.close_cleanup(cx);
                     }

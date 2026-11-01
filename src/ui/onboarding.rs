@@ -97,16 +97,7 @@ pub fn render(
                 .justify_center()
                 .child(div().w(px(COLUMN)).child(content)),
         )
-        .child(
-            div()
-                .absolute()
-                .bottom(px(28.))
-                .left_0()
-                .right_0()
-                .flex()
-                .justify_center()
-                .child(indicator(&t, step)),
-        )
+        .child(footer(&t, model, step, cx))
 }
 
 /// A warm glow from the top over the window color, and film grain over both.
@@ -136,28 +127,80 @@ fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
         )
 }
 
-/// Three dots, the current one in the accent color.
-fn indicator(t: &Theme, step: Step) -> Stateful<Div> {
-    let current = match step {
-        Step::Welcome => 0,
-        Step::Access => 1,
-        Step::FirstScan => 2,
-    };
+const STEPS: [(Step, &str); 3] = [
+    (Step::Welcome, "Welcome"),
+    (Step::Access, "Full Disk Access"),
+    (Step::FirstScan, "First scan"),
+];
+
+/// Back on the left (not on Welcome), the page dots on the right.
+fn footer(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>) -> Div {
+    let back = (step != Step::Welcome).then(|| {
+        let (color, hover) = (t.secondary, t.label);
+        theme::focusable(div().id("onboarding-back"), t, Role::Button, "Back")
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .px_2()
+            .py_1()
+            .rounded(px(theme::R_CONTROL))
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |s| s.text_color(hover))
+            .child(
+                svg()
+                    .path("icons/ui/back.svg")
+                    .size(px(12.))
+                    .text_color(color),
+            )
+            .child("Back")
+            .on_click(cx.listener(|m, _, _, cx| m.onboarding_back(cx)))
+    });
+    div()
+        .absolute()
+        .bottom(px(24.))
+        .left(px(28.))
+        .right(px(28.))
+        .h(px(28.))
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(div().children(back))
+        .child(indicator(t, model, step, cx))
+}
+
+/// Three dots, the current one in the accent color; a reached step's dot goes to it.
+fn indicator(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>) -> Stateful<Div> {
+    let current = STEPS.iter().position(|&(s, _)| s == step).unwrap_or(0);
     div()
         .id("page-indicator")
         .role(Role::Group)
         .aria_label(format!("Step {} of 3", current + 1))
         .flex()
-        .gap(px(8.))
-        .children((0..3).map(|i| {
+        .items_center()
+        .children(STEPS.iter().enumerate().map(|(i, &(to, name))| {
+            let active = model.can_go(to);
+            let dim = t.tertiary.opacity(0.5);
+            let hover = t.tertiary;
+            // The hit area pads the dot, which stays 6 pt high.
             div()
-                .h(px(6.))
-                .w(px(if i == current { 18. } else { 6. }))
-                .rounded_full()
-                .bg(if i == current {
-                    t.accent
-                } else {
-                    t.tertiary.opacity(0.5)
+                .id(("onboarding-dot", i))
+                .role(Role::Button)
+                .aria_label(format!("Step {}: {name}", i + 1))
+                .px(px(4.))
+                .py(px(6.))
+                .group("dot")
+                .child(
+                    div()
+                        .h(px(6.))
+                        .w(px(if i == current { 18. } else { 6. }))
+                        .rounded_full()
+                        .bg(if i == current { t.accent } else { dim })
+                        .when(active, |d| d.group_hover("dot", move |s| s.bg(hover))),
+                )
+                .when(active, |d| {
+                    d.cursor_pointer()
+                        .on_click(cx.listener(move |m, _, _, cx| m.onboarding_go(to, cx)))
                 })
         }))
 }

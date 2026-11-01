@@ -48,8 +48,8 @@ pub enum Page {
     Recommended,
 }
 
-/// Onboarding steps (PRD FR-ONB-1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Onboarding steps (PRD FR-ONB-1), in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Step {
     Welcome,
     Access,
@@ -129,6 +129,12 @@ pub struct AppModel {
     access_poll: Option<Task<()>>,
     /// Where the window was before it moved beside System Settings.
     docked: Option<Moved>,
+    /// The furthest onboarding step reached; the page dots go back to any step up to it.
+    pub furthest: Step,
+    /// Counts onboarding step changes, so each one plays the step transition.
+    pub step_seq: usize,
+    /// The last step change went back, so the step enters from the left.
+    pub went_back: bool,
     /// Last scan failure or cancel notice; shown by the idle, error and banner views.
     pub error: Option<String>,
     /// Path of the scan root, as the snapshot reports it.
@@ -378,6 +384,9 @@ impl AppModel {
             access_confirmed: false,
             access_poll: None,
             docked: None,
+            furthest: Step::Welcome,
+            step_seq: 0,
+            went_back: false,
             error: None,
             root_path: String::new(),
             path: String::new(),
@@ -479,7 +488,7 @@ impl AppModel {
     /// Welcome -> Full Disk Access. The step checks for a grant at once, then every
     /// 500 ms until it is left, so it advances without DiskLens being in front.
     pub fn onboarding_continue(&mut self, cx: &mut Context<Self>) {
-        self.phase = Phase::Onboarding(Step::Access);
+        self.show_step(Step::Access);
         self.access_confirmed = false;
         let source = self.source.clone();
         self.access_poll = Some(cx.spawn(async move |this, cx| {
@@ -525,14 +534,71 @@ impl AppModel {
         .detach();
     }
 
-    /// Leaves the Full Disk Access step and starts the first scan (FR-ONB-4).
+    /// Leaves the Full Disk Access step and starts the first scan (FR-ONB-4). Not
+    /// while a scan cancelled by Back is still stopping: the backend runs one at a time.
     fn first_scan(&mut self, cx: &mut Context<Self>) {
+        if self.scan.is_some() {
+            return;
+        }
+        self.leave_access(cx);
+        self.show_step(Step::FirstScan);
+        self.start_scan(cx);
+    }
+
+    fn leave_access(&mut self, cx: &mut Context<Self>) {
         self.access_poll = None;
         if let Some(docked) = self.docked.take() {
             chrome::undock(docked, !self.reduce_motion, cx);
         }
-        self.phase = Phase::Onboarding(Step::FirstScan);
-        self.start_scan(cx);
+    }
+
+    fn show_step(&mut self, step: Step) {
+        if let Phase::Onboarding(from) = self.phase {
+            self.went_back = step < from;
+        }
+        self.phase = Phase::Onboarding(step);
+        self.furthest = self.furthest.max(step);
+        self.step_seq += 1;
+    }
+
+    /// Whether the page dots can go to `to`: a step reached before, other than the
+    /// current one, and the first scan only once a cancelled one has stopped.
+    pub fn can_go(&self, to: Step) -> bool {
+        to <= self.furthest
+            && self.phase != Phase::Onboarding(to)
+            && !(to == Step::FirstScan && self.scan.is_some())
+    }
+
+    /// Moves to an onboarding step reached before (the page dots, Back and Esc).
+    /// Leaving the first scan cancels it.
+    pub fn onboarding_go(&mut self, to: Step, cx: &mut Context<Self>) {
+        let Phase::Onboarding(from) = self.phase else {
+            return;
+        };
+        if !self.can_go(to) {
+            return;
+        }
+        match from {
+            Step::FirstScan => self.cancel_scan(cx),
+            Step::Access => self.leave_access(cx),
+            Step::Welcome => {}
+        }
+        match to {
+            Step::Welcome => {
+                self.show_step(Step::Welcome);
+                cx.notify();
+            }
+            Step::Access => self.onboarding_continue(cx),
+            Step::FirstScan => self.first_scan(cx),
+        }
+    }
+
+    pub fn onboarding_back(&mut self, cx: &mut Context<Self>) {
+        match self.phase {
+            Phase::Onboarding(Step::Access) => self.onboarding_go(Step::Welcome, cx),
+            Phase::Onboarding(Step::FirstScan) => self.onboarding_go(Step::Access, cx),
+            _ => {}
+        }
     }
 
     /// Opens the Full Disk Access pane after the pre-seed read, so DiskLens is
@@ -811,6 +877,10 @@ impl AppModel {
             }
             ScanEvent::Failed { message } => {
                 self.scan = None;
+                // Back from the first scan cancelled it; the step it went to stays.
+                if matches!(self.phase, Phase::Onboarding(Step::Welcome | Step::Access)) {
+                    return true;
+                }
                 self.phase = if self.meta.is_some() {
                     Phase::Ready
                 } else {
@@ -1823,6 +1893,91 @@ mod tests {
         });
         settle(cx, &model, |m| m.scan.is_none());
         assert!(!model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    /// A first launch on its first scan, which runs long enough to be cancelled.
+    fn at_first_scan(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        let (model, cx) = setup_first_run(cx, Duration::from_millis(30));
+        model.update(cx, |m, cx| {
+            m.onboarding_continue(cx);
+            m.continue_without_access(cx);
+        });
+        (model, cx)
+    }
+
+    #[gpui::test]
+    fn back_on_access_returns_to_welcome(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Welcome)
+        );
+    }
+
+    #[gpui::test]
+    fn back_on_access_stops_polling(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        assert!(model.read_with(cx, |m, _| m.access_poll.is_none()));
+    }
+
+    #[gpui::test]
+    fn back_on_welcome_does_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        let seq = model.read_with(cx, |m, _| m.step_seq);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        assert_eq!(model.read_with(cx, |m, _| m.step_seq), seq);
+    }
+
+    #[gpui::test]
+    fn back_on_the_first_scan_returns_to_access(cx: &mut TestAppContext) {
+        let (model, cx) = at_first_scan(cx);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        settle(cx, &model, |m| m.scan.is_none());
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Access)
+        );
+    }
+
+    #[gpui::test]
+    fn back_on_the_first_scan_shows_no_error(cx: &mut TestAppContext) {
+        let (model, cx) = at_first_scan(cx);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        settle(cx, &model, |m| m.scan.is_none());
+        assert!(model.read_with(cx, |m, _| m.error.is_none()));
+    }
+
+    #[gpui::test]
+    fn back_on_the_first_scan_leaves_onboarding_unfinished(cx: &mut TestAppContext) {
+        let (model, cx) = at_first_scan(cx);
+        model.update(cx, |m, cx| m.onboarding_back(cx));
+        settle(cx, &model, |m| m.scan.is_none());
+        assert!(!model.read_with(cx, |m, _| m.source.onboarding_done()));
+    }
+
+    #[gpui::test]
+    fn a_dot_cannot_skip_ahead(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        model.update(cx, |m, cx| m.onboarding_go(Step::FirstScan, cx));
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Welcome)
+        );
+    }
+
+    #[gpui::test]
+    fn a_dot_returns_to_a_reached_step(cx: &mut TestAppContext) {
+        let (model, cx) = at_access_step(cx);
+        model.update(cx, |m, cx| {
+            m.onboarding_go(Step::Welcome, cx);
+            m.onboarding_go(Step::Access, cx);
+        });
+        assert_eq!(
+            model.read_with(cx, |m, _| m.phase),
+            Phase::Onboarding(Step::Access)
+        );
     }
 
     #[gpui::test]
