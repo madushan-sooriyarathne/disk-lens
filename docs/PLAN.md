@@ -22,7 +22,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 12 Onboarding | Merged, awaiting QA and the spike | v2, PRD section 13.4.1 |
 | 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
-| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side built on branch `feat/phase-15a-licensing`, awaiting review (manual checks in `docs/QA.md` Phase 15a); 15b website and license server not started. Decisions recorded in PRD section 13.8 on 2026-11-01 |
+| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side built on branch `feat/phase-15a-licensing`, manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01, awaiting code review; 15b website and license server not started. Decisions recorded in PRD section 13.8 on 2026-11-01 |
 | 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
 | 18 Containers and VMs | Not started | Pro, PRD section 13.10.3 |

@@ -209,14 +209,16 @@ Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PW
 
 Mint tokens with `DISKLENS_LICENSE_KEY_PATH=~/.config/disklens/license.key scripts/mint-license.sh pro` (or `trial`). The script prints only the token.
 
-- [ ] `DISKLENS_MOCK=1 cargo run`: a Pro palette entry (`>` then "Saved Filters") opens the Pro sheet with Buy DiskLens Pro, Start 7-Day Trial and Enter License…; Buy and Trial open `<site>/buy` and `<site>/trial` in the browser (`DISKLENS_SITE_URL` to point them elsewhere).
-- [ ] The sidebar footer shows "DiskLens Pro…" while free and opens the same sheet; there is no nag at launch.
-- [ ] ⌘, and DiskLens › Settings… open one Settings window; a second ⌘, focuses it; closing it leaves the app running.
-- [ ] `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`: pasting a minted Pro token activates ("DiskLens Pro"), and a background rescan starts; a minted trial token shows "Trial: 7 days left"; a token with one character changed is refused with its reason; Remove License returns to Free.
-- [ ] With Pro active, a trial token is refused ("A Pro license is already active").
-- [ ] `DISKLENS_MOCK=pro cargo run`: `> stage dormant rust targets` lists Stage All for the rule; `> stage tier:safe` shows the item count and stages only ready items; Save Filter, Apply Saved Filter and Forget Saved Filter work and survive a relaunch in the sandbox run.
-- [ ] Light and dark: the Pro sheet, Settings window and footer status follow the system appearance with no off-platform controls.
-- [ ] Packaged app (`scripts/package.sh`, copy to `/Applications`): `open 'disklens://activate?token=<minted>'` opens Settings with the token filled in and does not activate until Activate is clicked; `open 'disklens://other'` does nothing.
+- [x] `DISKLENS_MOCK=1 cargo run`: a Pro palette entry (`>` then "Saved Filters") opens the Pro sheet with Buy DiskLens Pro, Start 7-Day Trial and Enter License…; Buy and Trial open `<site>/buy` and `<site>/trial` in the browser (`DISKLENS_SITE_URL` to point them elsewhere).
+- [x] The sidebar footer shows "DiskLens Pro…" while free and opens the same sheet; there is no nag at launch.
+- [x] ⌘, and DiskLens › Settings… open one Settings window; a second ⌘, focuses it; closing it leaves the app running.
+- [x] `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`: pasting a minted Pro token activates ("DiskLens Pro"), and a background rescan starts; a minted trial token shows "Trial: 7 days left"; a token with one character changed is refused with its reason; Remove License returns to Free.
+- [x] With Pro active, a trial token is refused ("A Pro license is already active").
+- [x] `DISKLENS_MOCK=pro cargo run`: `> stage dormant rust targets` lists Stage All for the rule; `> stage tier:safe` shows the item count and stages only ready items; Save Filter, Apply Saved Filter and Forget Saved Filter work and survive a relaunch in the sandbox run.
+- [x] Light and dark: the Pro sheet, Settings window and footer status follow the system appearance with no off-platform controls.
+- [x] Packaged app (`scripts/package.sh`, copy to `/Applications`): `open 'disklens://activate?token=<minted>'` opens Settings with the token filled in and does not activate until Activate is clicked; `open 'disklens://other'` does nothing.
+
+Result (2026-11-01, macOS 26.6): all Phase 15a checks passed, including the packaged `disklens://` link; checked by the user.
 
 ## Supervised real run (only when the user says so)
 
