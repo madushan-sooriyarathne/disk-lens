@@ -160,7 +160,8 @@ const STEPS: [(Step, &str); 3] = [
     (Step::FirstScan, "First scan"),
 ];
 
-/// Back on the left (not on Welcome), the page dots on the right.
+/// Back on the left (not on Welcome), the page dots on the right, both within the
+/// centered column.
 fn footer(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>) -> Div {
     let back = (step != Step::Welcome).then(|| {
         let (color, hover) = (t.secondary, t.label);
@@ -183,17 +184,25 @@ fn footer(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>) -
             .child("Back")
             .on_click(cx.listener(|m, _, _, cx| m.onboarding_back(cx)))
     });
+    // Negative margins cancel the hit padding, so the chevron and the last dot line
+    // up with the column's edges.
     div()
         .absolute()
         .bottom(px(24.))
-        .left(px(28.))
-        .right(px(28.))
-        .h(px(28.))
+        .left_0()
+        .right_0()
         .flex()
-        .items_center()
-        .justify_between()
-        .child(div().children(back))
-        .child(indicator(t, model, step, cx))
+        .justify_center()
+        .child(
+            div()
+                .w(px(COLUMN))
+                .h(px(28.))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().ml(px(-8.)).children(back))
+                .child(div().mr(px(-4.)).child(indicator(t, model, step, cx))),
+        )
 }
 
 /// Three dots, the current one in the accent color; a reached step's dot goes to it.
