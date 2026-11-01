@@ -22,14 +22,29 @@ const DISPLAY: f32 = 34.;
 const PILL_H: f32 = 40.;
 const NOISE_TILE: f32 = 128.;
 
-/// `scripts/make-icon.sh`. A PNG, because GPUI rasterizes an SVG of this size on its
+/// `scripts/make-icon.sh`. PNGs, because GPUI rasterizes an SVG of this size on its
 /// first draw and the icon would pop in.
-static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
+static ICON_DARK: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(
         ImageFormat::Png,
         include_bytes!("../../assets/icons/icon-256.png").to_vec(),
     ))
 });
+static ICON_LIGHT: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!("../../assets/icons/icon-256-light.png").to_vec(),
+    ))
+});
+
+/// The glass icon for the current appearance (the bundle's `.icns` is the dark one).
+fn app_icon(t: &Theme) -> Arc<Image> {
+    if t.dark {
+        ICON_DARK.clone()
+    } else {
+        ICON_LIGHT.clone()
+    }
+}
 
 /// `scripts/make-noise.py`; drawn at half size so each grain is one device pixel.
 static NOISE: LazyLock<Arc<Image>> = LazyLock::new(|| {
@@ -60,7 +75,8 @@ const FEATURES: [(&str, &str, &str); 3] = [
 
 /// Starts decoding the images, so they are ready by the first onboarding frame.
 pub fn preload(window: &mut Window, cx: &mut App) {
-    APP_ICON.clone().get_render_image(window, cx);
+    ICON_DARK.clone().get_render_image(window, cx);
+    ICON_LIGHT.clone().get_render_image(window, cx);
     NOISE.clone().get_render_image(window, cx);
 }
 
@@ -343,7 +359,7 @@ fn welcome(t: &Theme, cx: &mut Context<AppModel>) -> Div {
         .flex()
         .flex_col()
         .items_center()
-        .child(img(APP_ICON.clone()).size(px(APP_ICON_SIZE)))
+        .child(img(app_icon(t)).size(px(APP_ICON_SIZE)))
         .child(div().mt(px(20.)).child(display("Welcome to DiskLens")))
         .child(div().mt(px(8.)).child(lead(
             t,
@@ -411,11 +427,7 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
         .overflow_hidden()
         .flex()
         .justify_center()
-        .child(fda_preview::render(
-            t,
-            APP_ICON.clone(),
-            model.reduce_motion,
-        ))
+        .child(fda_preview::render(t, app_icon(t), model.reduce_motion))
         .child(fade)
         .child(grain(t, COLUMN, hero_h));
     let action = if model.access_confirmed {
@@ -472,7 +484,7 @@ fn drag_row(t: &Theme, cx: &mut Context<AppModel>) -> Div {
         .cursor(CursorStyle::OpenHand)
         .role(Role::Image)
         .aria_label("DiskLens app icon, drag it into the Full Disk Access list")
-        .child(img(APP_ICON.clone()).size(px(44.)))
+        .child(img(app_icon(t)).size(px(44.)))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|m, _, window, _| m.drag_app(window)),
