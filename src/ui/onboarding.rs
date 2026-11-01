@@ -1,13 +1,14 @@
 //! First launch (PRD 13.4.1): Welcome, Full Disk Access and the first scan. Content
 //! sits centred on the window over the brand colors (a blue glow and a hint of
-//! Cantaloupe), with Back and the page dots at the bottom, and film grain over it all.
+//! Cantaloupe) with film grain, with Back and the page dots at the bottom.
 
 use std::sync::{Arc, LazyLock};
 
 use gpui::{
-    Animation, AnimationExt, App, Context, CursorStyle, Div, FontWeight, Hsla, Image, ImageFormat,
-    IntoElement, MouseButton, ParentElement, Role, Stateful, Styled, Window, canvas, div, fill,
-    img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, svg,
+    Animation, AnimationExt, App, Bounds, Context, Corners, CursorStyle, Div, FontWeight, Hsla,
+    Image, ImageFormat, IntoElement, MouseButton, ParentElement, Pixels, Role, Stateful, Styled,
+    Window, canvas, div, fill, img, linear_color_stop, linear_gradient, point, prelude::*, px,
+    relative, rgb, size, svg,
 };
 
 use super::format::{format_bytes, group_digits};
@@ -94,15 +95,17 @@ pub fn render(
         Step::Access => access(&t, model, f32::from(viewport.height), cx),
         Step::FirstScan => first_scan(&t, model, cx),
     };
-    // Grain is the last layer, so the preview's fade never hides it. It takes no
-    // clicks: plain divs and images insert no hitbox.
     div()
         .relative()
         .size_full()
         .overflow_hidden()
         .bg(base(&t))
         .text_size(px(theme::T_BODY))
-        .child(backdrop(&t))
+        .child(backdrop(
+            &t,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+        ))
         .child(
             div()
                 .absolute()
@@ -113,11 +116,6 @@ pub fn render(
                 .child(step_transition(model, content)),
         )
         .child(footer(&t, model, step, cx))
-        .child(grain(
-            &t,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-        ))
 }
 
 /// How far a step travels as it enters.
@@ -153,8 +151,8 @@ const GLOW_END: f32 = 0.6;
 const WARM_END: f32 = 0.3;
 
 /// Brand colors: an Electric Blue glow from the top and a hint of Cantaloupe from
-/// the bottom over the base.
-fn backdrop(t: &Theme) -> Div {
+/// the bottom over the base, and film grain over both.
+fn backdrop(t: &Theme, width: f32, height: f32) -> Div {
     let (glow, warmth) = (glow(t), warmth(t));
     div()
         .absolute()
@@ -169,6 +167,7 @@ fn backdrop(t: &Theme) -> Div {
             linear_color_stop(warmth, 0.),
             linear_color_stop(warmth.opacity(0.), WARM_END),
         )))
+        .child(grain(t, width, height))
 }
 
 /// Midnight in dark mode; white in light mode.
@@ -200,8 +199,67 @@ fn grain(t: &Theme, width: f32, height: f32) -> Div {
         .w(px(cols * NOISE_TILE))
         .flex()
         .flex_wrap()
-        .opacity(if t.dark { 0.06 } else { 0.05 })
+        .opacity(grain_opacity(t))
         .children((0..tiles).map(|_| img(NOISE.clone()).size(px(NOISE_TILE))))
+}
+
+fn grain_opacity(t: &Theme) -> f32 {
+    if t.dark { 0.06 } else { 0.05 }
+}
+
+/// Height of a band of `fade_grain`, at most.
+const FADE_BAND: f32 = 4.;
+
+/// Adds back the grain the preview's fade covers: bands whose opacity follows the
+/// fade's ramp, each painting the backdrop's noise on the same window grid, so the
+/// grain stays even through the fade. A div per band, because only a div applies
+/// opacity.
+fn fade_grain(t: &Theme, height: f32) -> Div {
+    let n = (height / FADE_BAND).ceil().max(1.);
+    let band = height / n;
+    let opacity = grain_opacity(t);
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(px(height))
+        .children((0..n as usize).map(|i| {
+            let ramp = (i as f32 + 0.5) / n;
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(i as f32 * band))
+                .h(px(band))
+                .opacity(opacity * ramp)
+                .child(canvas(|_, _, _| {}, paint_noise).size_full())
+        }))
+}
+
+/// Paints the noise tiles that cross `bounds`, on the grid of `grain`, which starts
+/// at the window's top-left; `paint_image` clips them to `bounds`.
+fn paint_noise(bounds: Bounds<Pixels>, _: (), window: &mut Window, cx: &mut App) {
+    let Some(noise) = NOISE.clone().get_render_image(window, cx) else {
+        return;
+    };
+    let (left, right) = (f32::from(bounds.left()), f32::from(bounds.right()));
+    let bottom = f32::from(bounds.bottom());
+    let mut y = (f32::from(bounds.top()) / NOISE_TILE).floor() * NOISE_TILE;
+    while y < bottom {
+        let mut x = (left / NOISE_TILE).floor() * NOISE_TILE;
+        while x < right {
+            let tile = Bounds::new(point(px(x), px(y)), size(px(NOISE_TILE), px(NOISE_TILE)));
+            let painted =
+                window.paint_image(bounds, tile, Corners::default(), noise.clone(), 0, false);
+            if let Err(e) = painted {
+                tracing::warn!("could not paint the fade's grain: {e}");
+                return;
+            }
+            x += NOISE_TILE;
+        }
+        y += NOISE_TILE;
+    }
 }
 
 const STEPS: [(Step, &str); 3] = [
@@ -419,8 +477,9 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
     // The pane fades into the window below the DiskLens row. The fade ends in the
     // backdrop's color at that height (the base with what is left of the glow and
     // the warmth composited over it), read from where it lands, so the pane has no
-    // bottom edge.
+    // bottom edge; the backdrop's grain comes back through it.
     let hero_h = (height - ACCESS_REST).clamp(HERO_MIN, HERO_MAX);
+    let fade_h = (hero_h - fda_preview::DISKLENS_BOTTOM).max(40.);
     let (base, glow, warmth) = (base(t), glow(t), warmth(t));
     let fade = canvas(
         |_, _, _| {},
@@ -446,7 +505,7 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
     .left_0()
     .right_0()
     .bottom_0()
-    .h(px((hero_h - fda_preview::DISKLENS_BOTTOM).max(40.)));
+    .h(px(fade_h));
     let hero = div()
         .relative()
         .h(px(hero_h))
@@ -454,7 +513,8 @@ fn access(t: &Theme, model: &AppModel, height: f32, cx: &mut Context<AppModel>) 
         .flex()
         .justify_center()
         .child(fda_preview::render(t, app_icon(t), model.reduce_motion))
-        .child(fade);
+        .child(fade)
+        .child(fade_grain(t, fade_h));
     let action = if model.access_confirmed {
         div()
             .h(px(PILL_H))
