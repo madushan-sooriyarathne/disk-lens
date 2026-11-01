@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Bump when the fixture changes; sandbox_rows.rs refuses a stale fixture.
-FIXTURE_VERSION=3
+FIXTURE_VERSION=4
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SANDBOX="$REPO/.sandbox"
@@ -28,7 +28,11 @@ cd "$HOME_DIR"
 
 # file <path> [kb]: create a real file (default 4 KB), creating parents.
 file() { mkdir -p "$(dirname "$1")"; head -c "$(( ${2:-4} * 1024 ))" /dev/zero | tr '\0' 'x' > "$1"; }
-G() { git -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false "$@"; }
+# Old commit dates keep every project idle (project_idle_days reads the last commit).
+G() {
+  GIT_AUTHOR_DATE="2024-01-01T00:00:00" GIT_COMMITTER_DATE="2024-01-01T00:00:00" \
+    git -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false "$@"
+}
 MB=1100    # just over 1 MB (decimal), the default min_size_mb
 BIG=52000  # just over 50 MB, app-caches' min_size_mb
 
@@ -155,6 +159,52 @@ for p in idle-proj active-proj; do
   file Desktop/$p/package-lock.json 1
   file Desktop/$p/node_modules/dep/index.js $MB
 done
+
+# ---- Active-work repositories -----------------------------------------------
+# Each has its own bare remote (a shared one would reject non-fast-forward pushes).
+# Sources are committed and pushed; target/ and node_modules/ are ignored artifacts.
+#   aw-clean: nothing pending. aw-dirty: an untracked file. aw-unpushed: 2 commits
+#   ahead of origin/main. aw-noupstream: a branch that was never pushed.
+for p in aw-clean aw-dirty aw-unpushed aw-noupstream; do
+  G init -q --bare "$OUTSIDE/$p-remote.git"
+  mkdir -p Desktop/$p
+  (
+    cd Desktop/$p
+    file Cargo.toml 1
+    file Cargo.lock 1
+    file package.json 1
+    file package-lock.json 1
+    file src/main.rs 1
+    printf 'target/\nnode_modules/\n' > .gitignore
+    file target/debug/app.bin $MB
+    file node_modules/dep/index.js $MB
+    G init -q -b main
+    G add .
+    G commit -q -m init
+    G remote add origin "$OUTSIDE/$p-remote.git"
+    G push -q origin main
+  )
+done
+echo "untracked" > Desktop/aw-dirty/notes.txt
+(
+  cd Desktop/aw-unpushed
+  echo "one" >> src/main.rs
+  G commit -q -am "local one"
+  echo "two" >> src/main.rs
+  G commit -q -am "local two"
+)
+(
+  cd Desktop/aw-noupstream
+  G checkout -q -b feat/x
+  echo "x" >> src/main.rs
+  G commit -q -am "feature work"
+)
+
+# Idle projects without git.
+file Desktop/py-proj/pyproject.toml 1
+file Desktop/py-proj/.venv/lib/site.bin $MB
+file Desktop/js-lib/package.json 1
+file Desktop/js-lib/dist/index.js $MB
 
 # Everything was last touched long ago, so quiet_minutes guards pass and
 # projects count as idle. Only active-proj is touched again afterwards.
