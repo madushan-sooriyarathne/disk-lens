@@ -8,11 +8,17 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
+use std::borrow::Cow;
+
 use gpui::{AppContext, ClipboardItem, Context, FocusHandle, Subscription, Task, Window};
+use gpui_component::IndexPath;
+use gpui_component::command::CommandState;
 
 use super::cleanup;
 use super::explorer::{self, ExplorerState};
+use super::filter::Filter;
 use super::motion;
+use super::palette::{self, Cmd, Entry, Notice, Palette};
 use super::recommendations::{self, PanelState};
 use super::selection;
 use super::source::Source;
@@ -23,6 +29,7 @@ use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
 use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
+use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::update;
 use crate::view::{CategoryTotal, ViewKind, ViewNode};
@@ -146,6 +153,14 @@ pub struct AppModel {
     pub queue_open: bool,
     /// Highlight Cleanable (PRD FR-EXP-7): tiles with nothing to clean are dimmed.
     pub highlight_cleanable: bool,
+    /// The command palette while open (PRD FR-KB-1).
+    pub palette: Option<Palette>,
+    /// Bumped per folder search; an older result is dropped when it arrives late.
+    palette_seq: u64,
+    /// The palette's filter (PRD FR-KB-3): Explore dims and Recommended hides what doesn't match.
+    pub filter: Option<Filter>,
+    /// The Pro explanation or Keyboard Shortcuts sheet.
+    pub notice: Option<Notice>,
     /// Accessibility display settings, reread whenever the window becomes active.
     pub reduce_motion: bool,
     pub reduce_transparency: bool,
@@ -391,6 +406,10 @@ impl AppModel {
             inspector_visible: true,
             queue_open: false,
             highlight_cleanable: false,
+            palette: None,
+            palette_seq: 0,
+            filter: None,
+            notice: None,
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
@@ -688,6 +707,8 @@ impl AppModel {
                 let mut stale = false;
                 match loaded {
                     Ok((view, recommendations, totals, largest, preselected)) => {
+                        // Folder results and rows in an open palette belong to the old snapshot.
+                        this.palette = None;
                         let selected = if first {
                             let mut selected = HashSet::new();
                             for row in &recommendations {
@@ -1142,6 +1163,194 @@ impl AppModel {
         cx.notify();
     }
 
+    /// ⌘K, or `/` on Explore with `scope` set to the open folder. Not during onboarding,
+    /// over a sheet, or while the palette is already open (PRD FR-KB-1).
+    pub fn open_palette(
+        &mut self,
+        scope: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.phase != Phase::Ready
+            || self.cleanup.is_some()
+            || self.notice.is_some()
+            || self.palette.is_some()
+        {
+            return;
+        }
+        let state = cx.new(|cx| CommandState::new(window, cx));
+        state.update(cx, |s, cx| s.focus(window, cx));
+        self.palette = Some(Palette {
+            state,
+            scope,
+            query: String::new(),
+            folders: Vec::new(),
+            groups: Vec::new(),
+        });
+        self.palette_query(String::new(), cx);
+    }
+
+    /// Focus falls back to the window root when the palette's field goes away.
+    pub fn close_palette(&mut self, cx: &mut Context<Self>) {
+        if self.palette.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Re-ranks the list for `query` and searches the snapshot's folders off the UI thread.
+    pub fn palette_query(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(p) = &mut self.palette else { return };
+        p.query = query.clone();
+        let scope = p.scope.clone();
+        let wants_folders = scope.is_some() || !query.trim_start().starts_with('>');
+        if !wants_folders {
+            p.folders.clear();
+        }
+        self.regroup();
+        cx.notify();
+        if !wants_folders {
+            return;
+        }
+        self.palette_seq += 1;
+        let seq = self.palette_seq;
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.find_folders(&query, scope.as_deref()),
+            move |this, found, _| {
+                if this.palette_seq != seq {
+                    return;
+                }
+                match found {
+                    Ok(hits) => {
+                        if let Some(p) = &mut this.palette {
+                            p.folders = hits;
+                        }
+                        this.regroup();
+                    }
+                    Err(e) => tracing::warn!("folder search failed: {e}"),
+                }
+            },
+        );
+    }
+
+    fn regroup(&mut self) {
+        if let Some(p) = &mut self.palette {
+            p.groups = palette::groups(
+                &p.query,
+                p.scope.is_some(),
+                &self.recommendations,
+                &self.selected,
+                &p.folders,
+                self.filter.is_some(),
+                &self.root_path,
+            );
+        }
+    }
+
+    /// Return on a palette row.
+    pub fn palette_confirm(&mut self, ix: IndexPath, window: &mut Window, cx: &mut Context<Self>) {
+        let entry = self
+            .palette
+            .as_ref()
+            .and_then(|p| p.groups.get(ix.section)?.entries.get(ix.row).cloned());
+        if let Some(entry) = entry {
+            self.run_entry(entry, window, cx);
+        }
+    }
+
+    /// Runs a palette entry. Entries stage, navigate and filter; none of them opens
+    /// or confirms a cleanup (S-11).
+    pub fn run_entry(&mut self, entry: Entry, window: &mut Window, cx: &mut Context<Self>) {
+        match entry {
+            Entry::Command(Cmd::Filter) => {
+                if let Some(p) = &self.palette {
+                    p.state
+                        .update(cx, |s, cx| s.set_query("> filter ", window, cx));
+                }
+                return;
+            }
+            Entry::Invalid(_) => return,
+            _ => {}
+        }
+        self.close_palette(cx);
+        match entry {
+            Entry::Page(page) => self.set_page(page, cx),
+            Entry::Folder { path, .. } => self.explore(path, cx),
+            Entry::Row { row_id, .. } => self.show_row(row_id, cx),
+            Entry::Stage { row_id, .. } => self.toggle_row(&row_id, cx),
+            Entry::Command(cmd) => match cmd {
+                Cmd::Rescan => {
+                    if self.scan.is_none() {
+                        self.start_scan(cx);
+                    }
+                }
+                Cmd::SelectSafe => self.select_safe(cx),
+                Cmd::ClearQueue => self.clear_selection(cx),
+                Cmd::ExportScript => self.export_script(cx),
+                Cmd::ToggleInspector => self.toggle_inspector(cx),
+                Cmd::ShowQueue => self.toggle_queue(cx),
+                Cmd::HighlightCleanable => self.toggle_highlight(cx),
+                Cmd::ClearFilter => self.set_filter(None, cx),
+                Cmd::Shortcuts => self.show_notice(Notice::Shortcuts, cx),
+                Cmd::Filter => {}
+            },
+            Entry::Filter(f) => self.set_filter(Some(f), cx),
+            Entry::Pro(p) => self.show_notice(Notice::Pro(p), cx),
+            Entry::Invalid(_) => {}
+        }
+    }
+
+    pub fn set_filter(&mut self, filter: Option<Filter>, cx: &mut Context<Self>) {
+        self.filter = filter;
+        cx.notify();
+    }
+
+    /// Help › Keyboard Shortcuts and the Pro entries; not over the cleanup sheet.
+    pub fn show_notice(&mut self, notice: Notice, cx: &mut Context<Self>) {
+        if self.cleanup.is_none() && !matches!(self.phase, Phase::Onboarding(_)) {
+            self.notice = Some(notice);
+            cx.notify();
+        }
+    }
+
+    pub fn close_notice(&mut self, cx: &mut Context<Self>) {
+        if self.notice.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The recommendation rows the filter lets through, all of them without one.
+    pub fn shown_rows(&self) -> Cow<'_, [Recommendation]> {
+        let Some(f) = &self.filter else {
+            return Cow::Borrowed(&self.recommendations);
+        };
+        let rules = Rules::embedded();
+        Cow::Owned(
+            self.recommendations
+                .iter()
+                .filter(|r| {
+                    let category = rules
+                        .rules
+                        .iter()
+                        .find(|rule| rule.id == r.rule_id)
+                        .map_or("", |rule| rule.category.as_str());
+                    f.matches_row(r, category)
+                })
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// The idle age of the recommended item at `path`, for the filter's `idle>` term.
+    pub fn idle_at(&self, path: &str) -> Option<u32> {
+        self.recommendations
+            .iter()
+            .flat_map(|r| &r.items)
+            .find(|i| i.path == path)
+            .and_then(|i| i.idle_days)
+    }
+
     pub fn hover(&mut self, node_id: Option<String>, cx: &mut Context<Self>) {
         if self.hovered != node_id {
             self.hovered = node_id;
@@ -1193,7 +1402,8 @@ impl AppModel {
     /// j/k and the arrows on Recommended: focuses the next or previous row in list order, or
     /// the first row when none is focused, and scrolls it into view (PRD FR-REC-5).
     pub fn move_row(&mut self, down: bool, cx: &mut Context<Self>) {
-        let order = recommendations::ordered(&self.recommendations);
+        let rows = self.shown_rows().into_owned();
+        let order = recommendations::ordered(&rows);
         let current = self
             .focused_row
             .as_deref()
@@ -1206,7 +1416,7 @@ impl AppModel {
         let Some(id) = order.get(next).map(|r| r.row_id.clone()) else {
             return;
         };
-        if let Some(ix) = recommendations::list_index(&self.recommendations, &id) {
+        if let Some(ix) = recommendations::list_index(&rows, &id) {
             self.panel.scroll.scroll_to_item(ix);
         }
         if self.focused_row.as_deref() != Some(id.as_str()) {
@@ -1247,7 +1457,7 @@ impl AppModel {
         self.page = Page::Recommended;
         self.inspector_visible = true;
         self.focus_row(Some(row_id.clone()), cx);
-        if let Some(ix) = recommendations::list_index(&self.recommendations, &row_id) {
+        if let Some(ix) = recommendations::list_index(&self.shown_rows(), &row_id) {
             self.panel.scroll.scroll_to_item(ix);
         }
     }
@@ -3153,5 +3363,156 @@ mod tests {
             text.starts_with("#!/bin/bash\nset -euo pipefail\n"),
             "{text}"
         );
+    }
+
+    // -- Command palette (PRD 13.4.9) -------------------------------------------
+
+    fn open(model: &Entity<AppModel>, cx: &mut VisualTestContext, scope: Option<&str>) {
+        let scope = scope.map(String::from);
+        model.update_in(cx, |m, window, cx| m.open_palette(scope, window, cx));
+        cx.run_until_parked();
+    }
+
+    fn run(model: &Entity<AppModel>, cx: &mut VisualTestContext, entry: Entry) {
+        model.update_in(cx, |m, window, cx| m.run_entry(entry, window, cx));
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn cmd_k_opens_the_palette_and_escape_closes_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::ui::root::bind_keys(cx);
+        });
+        let source = Source::Mock(Box::new(MockData::new(false).with_step(Duration::ZERO)));
+        let (model, cx) = cx.add_window_view(|window, cx| AppModel::new(source, window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-k");
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.palette.is_some()));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.palette.is_none()));
+    }
+
+    #[gpui::test]
+    fn the_palette_does_not_open_over_the_cleanup_sheet(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, true);
+        model.update(cx, |m, cx| m.open_cleanup(cx));
+        open(&model, cx, None);
+        assert!(model.read_with(cx, |m, _| m.palette.is_none()));
+    }
+
+    #[gpui::test]
+    fn the_palette_does_not_open_during_onboarding(cx: &mut TestAppContext) {
+        let (model, cx) = setup_first_run(cx, Duration::ZERO);
+        open(&model, cx, None);
+        assert!(model.read_with(cx, |m, _| m.palette.is_none()));
+    }
+
+    #[gpui::test]
+    fn a_folder_entry_opens_it_in_explore(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        open(&model, cx, None);
+        let entry = Entry::Folder {
+            path: "~/Desktop/atlas".into(),
+            label: "~/Desktop/atlas".into(),
+            size: 0,
+        };
+        run(&model, cx, entry);
+        let at = model.read_with(cx, |m, _| (m.page, m.path.clone(), m.palette.is_some()));
+        assert_eq!(at, (Page::Explore, "~/Desktop/atlas".to_owned(), false));
+    }
+
+    #[gpui::test]
+    fn slash_searches_folders_under_the_open_one_only(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        open(&model, cx, Some("~/Desktop"));
+        let paths = model.read_with(cx, |m, _| {
+            m.palette
+                .as_ref()
+                .map(|p| p.folders.iter().map(|f| f.path.clone()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        });
+        assert!(
+            !paths.is_empty() && paths.iter().all(|p| p.starts_with("~/Desktop/")),
+            "{paths:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn a_filter_hides_the_rows_it_does_not_match(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        run(&model, cx, Entry::Filter(filter));
+        let tiers = model.read_with(cx, |m, _| {
+            m.shown_rows().iter().map(|r| r.tier).collect::<Vec<_>>()
+        });
+        assert_eq!(tiers, [Tier::Safe; 5]);
+    }
+
+    #[gpui::test]
+    fn a_stage_entry_stages_one_row(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        let row = model.read_with(cx, |m, _| {
+            m.recommendations
+                .iter()
+                .find(|r| !selection::ready_ids(r).is_empty())
+                .cloned()
+                .unwrap()
+        });
+        run(
+            &model,
+            cx,
+            Entry::Stage {
+                row_id: row.row_id.clone(),
+                rule_id: row.rule_id.clone(),
+                label: row.label.clone(),
+                staged: false,
+            },
+        );
+        let staged = model.read_with(cx, |m, _| m.selected.len());
+        assert_eq!(staged, selection::ready_ids(&row).len());
+    }
+
+    #[gpui::test]
+    fn a_pro_entry_opens_its_explanation(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        run(&model, cx, Entry::Pro(palette::Pro::SavedFilters));
+        let notice = model.read_with(cx, |m, _| m.notice);
+        assert_eq!(notice, Some(Notice::Pro(palette::Pro::SavedFilters)));
+    }
+
+    /// S-11: whatever the palette lists, running it never opens or starts a cleanup.
+    #[gpui::test]
+    fn no_palette_entry_starts_a_cleanup(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        for query in ["", ">", "> filter size>1GB"] {
+            // Rescan swaps a new snapshot in, which closes the palette.
+            settle(cx, &model, |m| m.scan.is_none());
+            open(&model, cx, None);
+            model.update(cx, |m, cx| m.palette_query(query.into(), cx));
+            cx.run_until_parked();
+            let entries: Vec<Entry> = model.read_with(cx, |m, _| {
+                m.palette
+                    .as_ref()
+                    .map(|p| p.groups.iter().flat_map(|g| g.entries.clone()).collect())
+                    .unwrap_or_default()
+            });
+            assert!(!entries.is_empty(), "nothing listed for {query:?}");
+            for entry in entries {
+                model.update(cx, |m, cx| {
+                    m.close_notice(cx);
+                    m.close_palette(cx);
+                });
+                open(&model, cx, None);
+                run(&model, cx, entry);
+                assert!(model.read_with(cx, |m, _| m.cleanup.is_none()));
+            }
+            model.update(cx, |m, cx| {
+                m.close_notice(cx);
+                m.close_palette(cx);
+            });
+        }
     }
 }

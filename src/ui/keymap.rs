@@ -14,6 +14,7 @@ actions!(
         StageSelected,
         OpenSelected,
         GoUp,
+        PaletteHere,
     ]
 );
 
@@ -21,7 +22,7 @@ pub const CONTEXT: &str = "Treemap";
 /// The Recommended list: j/k and the arrows move between rows (FR-REC-5).
 pub const LIST: &str = "Recommended";
 
-/// `/` is left unbound: Phase 13 opens the palette with it.
+/// `/` opens the palette limited to folders under the current one (root.rs).
 pub fn bind_keys(cx: &mut App) {
     let ctx = Some(CONTEXT);
     cx.bind_keys([
@@ -37,6 +38,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenSelected, ctx),
         KeyBinding::new("backspace", GoUp, ctx),
         KeyBinding::new("cmd-up", GoUp, ctx),
+        KeyBinding::new("/", PaletteHere, ctx),
     ]);
     let list = Some(LIST);
     cx.bind_keys([
