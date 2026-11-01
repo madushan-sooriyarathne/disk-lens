@@ -1255,6 +1255,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "cargo-packager-updater",
+ "futures",
  "git2",
  "globset",
  "gpui-component",

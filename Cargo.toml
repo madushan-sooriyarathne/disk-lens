@@ -40,6 +40,8 @@ objc2-quick-look-ui = { version = "0.3.2", default-features = false, features = 
 nucleo-matcher = "0.3.1"
 minisign-verify = "0.2.5"
 base64 = "0.23"
+# Only the unbounded channel that carries disklens:// links from the platform callback into the app.
+futures = { version = "0.3", default-features = false, features = ["std"] }
 
 [profile.release]
 codegen-units = 1
@@ -64,6 +66,8 @@ out-dir = "target/packager"
 binaries-dir = "target/universal-apple-darwin/release"
 target-triple = "universal-apple-darwin"
 binaries = [{ path = "disklens", main = true }]
+# disklens://activate?token=… opens Settings with the token filled in.
+deep-link-protocols = [{ schemes = ["disklens"] }]
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"

@@ -13,11 +13,13 @@ use gpui_component::{Sizable, Size};
 use super::format::{format_bytes, format_size};
 use super::keymap;
 use super::model::AppModel;
+use super::palette::{Notice, Pro};
 use super::selection::{RowState, blocked_reason, row_state};
 use super::shell::CONTROL_HEIGHT;
 use super::stats::compute_stats;
 use super::theme::{self, MONO, Theme};
 use crate::recommend::model::{Recommendation, Tier};
+use crate::rules::model::Rules;
 
 /// Page-only UI state; selection, focus and details live in the model.
 #[derive(Default)]
@@ -45,6 +47,20 @@ pub(super) fn ordered(recs: &[Recommendation]) -> Vec<&Recommendation> {
     TIERS
         .iter()
         .flat_map(|tier| recs.iter().filter(move |r| r.tier == *tier))
+        .collect()
+}
+
+/// What the Pro scanners look for, named without sizes, for the "More with Pro" entry
+/// (PRD 13.6). Empty while Pro is active or when no rule is Pro.
+pub(super) fn pro_rule_labels(rules: &Rules, is_pro: bool) -> Vec<String> {
+    if is_pro {
+        return Vec::new();
+    }
+    rules
+        .rules
+        .iter()
+        .filter(|r| r.pro)
+        .map(|r| r.label.clone())
         .collect()
 }
 
@@ -143,6 +159,31 @@ pub fn render(
             list = list.child(row(&t, r, &model.selected, on, !on && !previous_on, cx));
             previous_on = on;
         }
+    }
+    let more = pro_rule_labels(Rules::embedded(), model.license.is_pro());
+    if !more.is_empty() {
+        list = list.child(
+            theme::focusable(div().id("more-with-pro"), &t, Role::Button, "More with Pro")
+                .mt_5()
+                .px_1()
+                .py_2()
+                .rounded(px(theme::R_CONTROL))
+                .cursor_pointer()
+                .hover(move |s| s.bg(t.hover))
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(t.accent_text)
+                        .child("More with Pro"),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(t.secondary)
+                        .child(format!("DiskLens Pro also looks for {}.", more.join(", "))),
+                )
+                .on_click(cx.listener(|m, _, _, cx| m.show_notice(Notice::Pro(Pro::About), cx))),
+        );
     }
 
     let fade = div()
@@ -630,5 +671,33 @@ mod tests {
         assert_eq!(tilde("/Users/x", "/Users/x"), "~");
         assert_eq!(tilde("/Users/xy/.npm", "/Users/x"), "/Users/xy/.npm");
         assert_eq!(tilde("/opt/tool", "/Users/x"), "/opt/tool");
+    }
+
+    /// The embedded rules with the first one made a Pro rule.
+    fn rules_with_one_pro_rule() -> Rules {
+        let mut rules = Rules::embedded().clone();
+        rules.rules[0].pro = true;
+        rules
+    }
+
+    #[test]
+    fn more_with_pro_names_the_pro_rules() {
+        let rules = rules_with_one_pro_rule();
+        assert_eq!(
+            pro_rule_labels(&rules, false),
+            [rules.rules[0].label.clone()]
+        );
+    }
+
+    #[test]
+    fn more_with_pro_is_hidden_with_a_license() {
+        assert!(pro_rule_labels(&rules_with_one_pro_rule(), true).is_empty());
+    }
+
+    #[test]
+    fn more_with_pro_is_hidden_without_pro_rules() {
+        let mut rules = Rules::embedded().clone();
+        rules.rules.iter_mut().for_each(|r| r.pro = false);
+        assert!(pro_rule_labels(&rules, false).is_empty());
     }
 }

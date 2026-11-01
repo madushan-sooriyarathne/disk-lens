@@ -1,7 +1,6 @@
 //! Command palette (PRD 13.4.9): ⌘K over pages, recommendation rows, commands and
 //! snapshot folders; `>` limits it to commands and `> filter …` sets a filter
-//! (`filter.rs`). Also the two notice sheets it opens: a Pro feature's explanation
-//! (until Phase 15 adds licensing) and Keyboard Shortcuts.
+//! (`filter.rs`). Also the two notice sheets it opens: the Pro sheet and Keyboard Shortcuts.
 //!
 //! Drawn in the look of Raycast's compact window: a large field, rows with an icon and
 //! a kind, and a footer naming what Return does. The field is gpui-component's `Input`;
@@ -27,6 +26,7 @@ use super::keymap;
 use super::model::{AppModel, Page};
 use super::root;
 use super::selection;
+use super::settings_window::site_url;
 use super::theme::{self, Theme};
 use crate::recommend::model::Recommendation;
 use crate::rules::model::Rules;
@@ -86,6 +86,20 @@ pub enum Entry {
         label: String,
         staged: bool,
     },
+    /// Pro: stages every ready item of one row (FR-KB-4).
+    StageRule {
+        row_id: String,
+        rule_id: String,
+        label: String,
+    },
+    /// Pro: stages the ready items of every row `filter` matches; `count` is how many.
+    StageMatching {
+        filter: Filter,
+        count: usize,
+    },
+    /// Pro: a saved filter, by its text.
+    ApplySaved(String),
+    ForgetSaved(String),
     Command(Cmd),
     Filter(Filter),
     /// A filter that did not parse, shown disabled with the reason.
@@ -106,16 +120,21 @@ pub enum Cmd {
     /// Puts `> filter ` in the search field.
     Filter,
     ClearFilter,
+    /// Pro: keeps the active filter.
+    SaveFilter,
     Shortcuts,
 }
 
-/// Pro batch commands (FR-KB-4), listed with a Pro tag; they open the explanation.
+/// What the Pro sheet explains. The first three are the batch commands (FR-KB-4), listed
+/// with a Pro tag until a license makes them real; `About` is the sheet behind the
+/// sidebar link and "More with Pro".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pro {
     StageRule,
     StageFilter,
     SavedFilters,
     SweepNow,
+    About,
 }
 
 /// A sheet over the window that only explains something and closes.
@@ -194,6 +213,7 @@ impl Cmd {
             Self::HighlightCleanable => "Highlight Cleanable",
             Self::Filter => "Filter…",
             Self::ClearFilter => "Clear Filter",
+            Self::SaveFilter => "Save Filter",
             Self::Shortcuts => "Keyboard Shortcuts",
         }
     }
@@ -207,7 +227,7 @@ impl Cmd {
             Self::ToggleInspector => Box::new(root::ToggleInspector),
             Self::ShowQueue => Box::new(root::ShowQueue),
             Self::HighlightCleanable => Box::new(root::HighlightCleanable),
-            Self::Filter | Self::ClearFilter | Self::Shortcuts => return None,
+            Self::Filter | Self::ClearFilter | Self::SaveFilter | Self::Shortcuts => return None,
         })
     }
 }
@@ -219,6 +239,7 @@ impl Pro {
             Self::StageFilter => "Stage Everything Matching a Filter",
             Self::SavedFilters => "Saved Filters",
             Self::SweepNow => "Run Sweep Rule Now",
+            Self::About => "DiskLens Pro",
         }
     }
 
@@ -232,6 +253,9 @@ impl Pro {
             }
             Self::SavedFilters => "Keep the filters you use often and apply them by name.",
             Self::SweepNow => "Run an auto-sweep rule now and stage what it finds.",
+            Self::About => {
+                "Pro adds scanners for more kinds of clutter, batch staging from the command palette and saved filters."
+            }
         }
     }
 }
@@ -253,6 +277,13 @@ impl Entry {
             Self::Command(c) => c.label().into(),
             Self::Filter(f) => format!("Filter: {f}"),
             Self::Invalid(reason) => reason.clone(),
+            Self::StageRule { label, .. } => format!("Stage All {label}"),
+            Self::StageMatching { filter, count, .. } => {
+                let noun = if *count == 1 { "item" } else { "items" };
+                format!("Stage {count} {noun} matching {filter}")
+            }
+            Self::ApplySaved(text) => format!("Apply Saved Filter: {text}"),
+            Self::ForgetSaved(text) => format!("Forget Saved Filter: {text}"),
             Self::Pro(p) => p.label().into(),
         }
     }
@@ -260,7 +291,9 @@ impl Entry {
     /// Rules also match on their ID ("node-modules-idle").
     fn rule_id(&self) -> Option<&str> {
         match self {
-            Self::Row { rule_id, .. } | Self::Stage { rule_id, .. } => Some(rule_id),
+            Self::Row { rule_id, .. }
+            | Self::Stage { rule_id, .. }
+            | Self::StageRule { rule_id, .. } => Some(rule_id),
             _ => None,
         }
     }
@@ -276,17 +309,31 @@ impl Entry {
     }
 }
 
+/// What the list is built from.
+pub struct Inputs<'a> {
+    pub recs: &'a [Recommendation],
+    pub selected: &'a HashSet<String>,
+    pub folders: &'a [FolderHit],
+    /// The active filter, if any.
+    pub filter: Option<&'a Filter>,
+    pub root_path: &'a str,
+    /// With a license the Pro entries run; without one they explain.
+    pub pro: bool,
+    pub saved_filters: &'a [String],
+}
+
 /// The list for `query`. `scoped` is a `/` search: folders only. Folders arrive
 /// ranked from the search; everything else is ranked here.
-pub fn groups(
-    query: &str,
-    scoped: bool,
-    recs: &[Recommendation],
-    selected: &HashSet<String>,
-    folders: &[FolderHit],
-    filtering: bool,
-    root_path: &str,
-) -> Vec<Group> {
+pub fn groups(query: &str, scoped: bool, inputs: &Inputs) -> Vec<Group> {
+    let Inputs {
+        recs,
+        selected,
+        folders,
+        filter,
+        root_path,
+        pro,
+        ..
+    } = *inputs;
     let folder_entries = |n: usize| {
         folders
             .iter()
@@ -316,13 +363,29 @@ pub fn groups(
     }
     let mut commands: Vec<Entry> = COMMANDS.into_iter().map(Entry::Command).collect();
     commands.push(Entry::Command(Cmd::Filter));
-    if filtering {
+    if let Some(f) = filter {
         commands.push(Entry::Command(Cmd::ClearFilter));
+        if pro && !inputs.saved_filters.contains(&f.to_string()) {
+            commands.push(Entry::Command(Cmd::SaveFilter));
+        }
     }
-    let pro = PRO.into_iter().map(Entry::Pro).collect();
     if let Some(rest) = query.trim_start().strip_prefix('>') {
         let rest = rest.trim_start();
-        if let Some(terms) = filter_terms(rest) {
+        // `> stage tier:safe` stages what a filter matches. Words that are no filter, such
+        // as "dormant rust targets", search the rules below instead.
+        if pro
+            && let Some(Ok(f)) =
+                terms_after(rest, "stage").map(|t| Filter::parse(t, Rules::embedded()))
+        {
+            let count = matching_ids(recs, &f).len();
+            let entry = if count == 0 {
+                Entry::Invalid(format!("No ready items match {f}"))
+            } else {
+                Entry::StageMatching { filter: f, count }
+            };
+            return vec![group("Stage", vec![entry])];
+        }
+        if let Some(terms) = terms_after(rest, "filter") {
             let entry = match Filter::parse(terms, Rules::embedded()) {
                 Ok(f) => Entry::Filter(f),
                 Err(e) => Entry::Invalid(e.to_string()),
@@ -331,7 +394,7 @@ pub fn groups(
         }
         return keep(vec![
             group("Commands", ranked(rest, commands)),
-            group("Pro", ranked(rest, pro)),
+            group("Pro", ranked(rest, pro_entries(inputs, true))),
         ]);
     }
     let pages = [Page::Overview, Page::Explore, Page::Recommended]
@@ -359,7 +422,7 @@ pub fn groups(
         group("Pages", ranked(query, pages)),
         group("Recommendations", ranked(query, rows)),
         group("Commands", ranked(query, commands)),
-        group("Pro", ranked(query, pro)),
+        group("Pro", ranked(query, pro_entries(inputs, false))),
         group("Folders", folder_entries(FOLDERS_SHOWN)),
     ])
 }
@@ -381,9 +444,54 @@ pub fn child_index(groups: &[Group], ix: usize) -> usize {
     ix + groups.len()
 }
 
+/// The ready items of the rows `filter` matches, never a blocked one (S-11).
+pub fn matching_ids(recs: &[Recommendation], filter: &Filter) -> Vec<String> {
+    let rules = Rules::embedded();
+    recs.iter()
+        .filter(|r| {
+            filter.matches_row(
+                r,
+                rules.rule(&r.rule_id).map_or("", |x| x.category.as_str()),
+            )
+        })
+        .flat_map(selection::ready_ids)
+        .map(String::from)
+        .collect()
+}
+
+/// Pro entries. Without a license they are the placeholders that open the sheet. With one
+/// they are the real commands; `with_rules` adds one "Stage All" per rule, which only the
+/// `>` list shows, since a typed query already finds the free Stage entries.
+fn pro_entries(inputs: &Inputs, with_rules: bool) -> Vec<Entry> {
+    if !inputs.pro {
+        return PRO.into_iter().map(Entry::Pro).collect();
+    }
+    let mut entries = Vec::new();
+    if with_rules {
+        for r in inputs.recs {
+            if selection::ready_ids(r)
+                .iter()
+                .any(|id| !inputs.selected.contains(*id))
+            {
+                entries.push(Entry::StageRule {
+                    row_id: r.row_id.clone(),
+                    rule_id: r.rule_id.clone(),
+                    label: r.label.clone(),
+                });
+            }
+        }
+    }
+    for text in inputs.saved_filters {
+        entries.push(Entry::ApplySaved(text.clone()));
+        entries.push(Entry::ForgetSaved(text.clone()));
+    }
+    entries.push(Entry::Pro(Pro::SweepNow));
+    entries
+}
+
 /// `filter size>1GB` -> `size>1GB`; `filters` is not the filter command.
-fn filter_terms(rest: &str) -> Option<&str> {
-    let terms = rest.strip_prefix("filter")?;
+fn terms_after<'a>(rest: &'a str, word: &str) -> Option<&'a str> {
+    let terms = rest.strip_prefix(word)?;
     (terms.is_empty() || terms.starts_with(char::is_whitespace)).then_some(terms)
 }
 
@@ -406,7 +514,10 @@ fn ranked(query: &str, entries: Vec<Entry>) -> Vec<Entry> {
         .into_iter()
         .filter_map(|e| {
             let by_label = fuzzy.score(&e.label());
-            let by_rule = e.rule_id().and_then(|id| fuzzy.score(&rule_text(id)));
+            // With the label, so "stage dormant rust targets" finds "Stage All …".
+            let by_rule = e
+                .rule_id()
+                .and_then(|id| fuzzy.score(&format!("{} {}", e.label(), rule_text(id))));
             by_label.max(by_rule).map(|s| (s, e))
         })
         .collect();
@@ -686,14 +797,16 @@ fn icon(entry: &Entry) -> &'static str {
         Entry::Page(Page::Explore) => "map",
         Entry::Page(Page::Recommended) | Entry::Row { .. } => "sparkle",
         Entry::Folder { .. } => "folder",
-        Entry::Stage { .. } => "tray",
+        Entry::Stage { .. } | Entry::StageRule { .. } | Entry::StageMatching { .. } => "tray",
+        Entry::ApplySaved(_) => "search",
+        Entry::ForgetSaved(_) => "x",
         Entry::Command(c) => match c {
             Cmd::Rescan => "rescan",
             Cmd::SelectSafe | Cmd::ShowQueue | Cmd::ClearQueue => "tray",
             Cmd::ExportScript | Cmd::Shortcuts => "doc",
             Cmd::ToggleInspector => "inspector",
             Cmd::HighlightCleanable => "grid",
-            Cmd::Filter | Cmd::ClearFilter => "search",
+            Cmd::Filter | Cmd::ClearFilter | Cmd::SaveFilter => "search",
         },
         Entry::Filter(_) => "search",
         Entry::Pro(_) => "lock",
@@ -707,7 +820,11 @@ fn kind(entry: &Entry) -> &'static str {
         Entry::Page(_) => "Page",
         Entry::Folder { .. } => "Folder",
         Entry::Row { .. } => "Recommendation",
-        Entry::Stage { .. } => "Action",
+        Entry::Stage { .. }
+        | Entry::StageRule { .. }
+        | Entry::StageMatching { .. }
+        | Entry::ForgetSaved(_) => "Action",
+        Entry::ApplySaved(_) => "Filter",
         Entry::Command(_) => "Command",
         Entry::Filter(_) | Entry::Invalid(_) => "Filter",
         Entry::Pro(_) => "Pro",
@@ -722,6 +839,9 @@ fn verb(entry: &Entry) -> Option<&'static str> {
         Entry::Row { .. } => "Show",
         Entry::Stage { staged: false, .. } => "Stage",
         Entry::Stage { .. } => "Unstage",
+        Entry::StageRule { .. } | Entry::StageMatching { .. } => "Stage",
+        Entry::ApplySaved(_) => "Apply Filter",
+        Entry::ForgetSaved(_) => "Forget",
         Entry::Command(_) => "Run",
         Entry::Filter(_) => "Apply Filter",
         Entry::Pro(_) => "Learn More",
@@ -737,6 +857,8 @@ pub fn notice(
 ) -> Option<AnyElement> {
     let notice = model.notice?;
     let t = theme::current(window);
+    // The sheet offers a purchase only to someone who has no Pro yet.
+    let offer = matches!(notice, Notice::Pro(_)) && !model.license.is_pro();
     let body = match notice {
         Notice::Pro(p) => div()
             .flex()
@@ -744,11 +866,16 @@ pub fn notice(
             .gap_2()
             .child(heading(p.label()))
             .child(p.explanation())
-            .child(
+            .children((p == Pro::SweepNow).then(|| {
                 div()
                     .text_color(t.secondary)
-                    .child("This is part of DiskLens Pro, which arrives in a later update."),
-            ),
+                    .child("Auto-sweep rules arrive in a later update.")
+            }))
+            .children(offer.then(|| {
+                div()
+                    .text_color(t.secondary)
+                    .child("Everything DiskLens finds still cleans for free.")
+            })),
         Notice::Shortcuts => div()
             .flex()
             .flex_col()
@@ -790,7 +917,7 @@ pub fn notice(
                 .child(
                     div()
                         .id("notice")
-                        .w(px(420.))
+                        .w(px(if offer { 540. } else { 420. }))
                         .max_h(gpui::relative(0.85))
                         .overflow_y_scroll()
                         .flex()
@@ -804,13 +931,50 @@ pub fn notice(
                         .text_color(t.label)
                         .child(body)
                         .child(
-                            div().flex().justify_end().child(
-                                Button::new("notice-close")
-                                    .primary()
-                                    .with_size(Size::Small)
-                                    .label("Close")
-                                    .on_click(cx.listener(|m, _, _, cx| m.close_notice(cx))),
-                            ),
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .gap_2()
+                                .child({
+                                    let close = Button::new("notice-close")
+                                        .with_size(Size::Small)
+                                        .label("Close")
+                                        .on_click(cx.listener(|m, _, _, cx| m.close_notice(cx)));
+                                    // Close is the default only when nothing is offered.
+                                    if offer { close } else { close.primary() }
+                                })
+                                .children(offer.then(|| {
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("pro-license")
+                                                .with_size(Size::Small)
+                                                .label("Enter License…")
+                                                .on_click(cx.listener(|m, _, _, cx| {
+                                                    m.close_notice(cx);
+                                                    m.open_settings(None, cx);
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("pro-trial")
+                                                .with_size(Size::Small)
+                                                .label("Start 7-Day Trial")
+                                                .on_click(cx.listener(|_, _, _, cx| {
+                                                    cx.open_url(&site_url("trial"))
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("pro-buy")
+                                                .primary()
+                                                .with_size(Size::Small)
+                                                .label("Buy DiskLens Pro")
+                                                .on_click(cx.listener(|_, _, _, cx| {
+                                                    cx.open_url(&site_url("buy"))
+                                                })),
+                                        )
+                                })),
                         ),
                 ),
         )
@@ -877,7 +1041,41 @@ mod tests {
             name: "Projects".into(),
             size: 5,
         }];
-        groups(query, false, &recs, &selected, &folders, false, "/r")
+        groups(
+            query,
+            false,
+            &Inputs {
+                recs: &recs,
+                selected: &selected,
+                folders: &folders,
+                ..inputs(&[], &HashSet::new())
+            },
+        )
+    }
+
+    fn inputs<'a>(recs: &'a [Recommendation], selected: &'a HashSet<String>) -> Inputs<'a> {
+        Inputs {
+            recs,
+            selected,
+            folders: &[],
+            filter: None,
+            root_path: "/r",
+            pro: false,
+            saved_filters: &[],
+        }
+    }
+
+    fn pro_list(query: &str, recs: &[Recommendation], filter: Option<&Filter>) -> Vec<Group> {
+        let selected = HashSet::new();
+        groups(
+            query,
+            false,
+            &Inputs {
+                pro: true,
+                filter,
+                ..inputs(recs, &selected)
+            },
+        )
     }
 
     #[test]
@@ -914,11 +1112,7 @@ mod tests {
         let groups = groups(
             "dormant rust targets",
             false,
-            &recs,
-            &HashSet::new(),
-            &[],
-            false,
-            "/r",
+            &inputs(&recs, &HashSet::new()),
         );
         assert_eq!(labels(&groups), ["Show Rust build output in idle projects"]);
     }
@@ -945,7 +1139,14 @@ mod tests {
                 size: 1,
             })
             .collect();
-        let g = groups("", true, &[], &HashSet::new(), &folders, false, "/r");
+        let g = groups(
+            "",
+            true,
+            &Inputs {
+                folders: &folders,
+                ..inputs(&[], &HashSet::new())
+            },
+        );
         assert_eq!(g[0].entries.len(), 4);
     }
 
@@ -982,7 +1183,8 @@ mod tests {
 
     #[test]
     fn clear_filter_shows_only_while_filtering() {
-        let g = groups(">clear fil", false, &[], &HashSet::new(), &[], true, "/r");
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        let g = pro_list(">clear fil", &[], Some(&filter));
         assert_eq!(labels(&g)[0], "Clear Filter");
     }
 
@@ -993,14 +1195,14 @@ mod tests {
             name: "a".into(),
             size: 1,
         }];
+        let recs = [rec("npm", "a", true)];
         let g = groups(
             "a",
             true,
-            &[rec("npm", "a", true)],
-            &HashSet::new(),
-            &folders,
-            false,
-            "/r",
+            &Inputs {
+                folders: &folders,
+                ..inputs(&recs, &HashSet::new())
+            },
         );
         assert_eq!(labels(&g), ["Go to ~/a"]);
     }
@@ -1012,5 +1214,107 @@ mod tests {
             .find(|g| g.label == "Pro")
             .map(|g| g.entries.len());
         assert_eq!(pro, Some(4));
+    }
+
+    fn rust_row() -> Recommendation {
+        Recommendation {
+            rule_id: "rust-target-idle".into(),
+            ..rec("rust", "Rust build output in idle projects", true)
+        }
+    }
+
+    #[test]
+    fn pro_stage_finds_a_rule_by_its_keywords() {
+        let g = pro_list("> stage dormant rust targets", &[rust_row()], None);
+        assert_eq!(labels(&g), ["Stage All Rust build output in idle projects"]);
+    }
+
+    #[test]
+    fn pro_stage_all_is_not_offered_once_the_rule_is_staged() {
+        let recs = [rust_row()];
+        let selected = HashSet::from(["rust:1".to_owned()]);
+        let g = groups(
+            "> stage dormant rust targets",
+            false,
+            &Inputs {
+                pro: true,
+                ..inputs(&recs, &selected)
+            },
+        );
+        assert!(g.is_empty());
+    }
+
+    #[test]
+    fn pro_stage_with_a_filter_counts_only_ready_items() {
+        let recs = [rec("npm", "npm cache", true), rec("xcode", "Xcode", false)];
+        let g = pro_list("> stage tier:safe", &recs, None);
+        assert_eq!(labels(&g), ["Stage 1 item matching tier:safe"]);
+    }
+
+    #[test]
+    fn pro_stage_with_a_filter_that_matches_nothing_says_so() {
+        let g = pro_list("> stage tier:review", &[rec("npm", "npm", true)], None);
+        assert_eq!(labels(&g), ["No ready items match tier:review"]);
+    }
+
+    #[test]
+    fn free_stage_with_a_filter_offers_nothing_to_run() {
+        let recs = [rec("npm", "npm cache", true)];
+        let g = groups("> stage tier:safe", false, &inputs(&recs, &HashSet::new()));
+        assert!(!labels(&g).iter().any(|l| l.starts_with("Stage 1")));
+    }
+
+    #[test]
+    fn matching_ids_leave_out_blocked_items() {
+        let recs = [rec("xcode", "Xcode", false)];
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        assert!(matching_ids(&recs, &filter).is_empty());
+    }
+
+    #[test]
+    fn pro_offers_to_save_the_active_filter() {
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        let g = pro_list("> save", &[], Some(&filter));
+        assert_eq!(labels(&g), ["Save Filter"]);
+    }
+
+    #[test]
+    fn pro_does_not_offer_to_save_a_filter_twice() {
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        let saved = ["tier:safe".to_owned()];
+        let selected = HashSet::new();
+        let g = groups(
+            "> save",
+            false,
+            &Inputs {
+                pro: true,
+                filter: Some(&filter),
+                saved_filters: &saved,
+                ..inputs(&[], &selected)
+            },
+        );
+        assert!(!labels(&g).contains(&"Save Filter".to_owned()));
+    }
+
+    #[test]
+    fn pro_lists_a_saved_filter_to_apply_and_forget() {
+        let saved = ["size>1GB".to_owned()];
+        let selected = HashSet::new();
+        let g = groups(
+            "> saved filter",
+            false,
+            &Inputs {
+                pro: true,
+                saved_filters: &saved,
+                ..inputs(&[], &selected)
+            },
+        );
+        assert_eq!(
+            labels(&g),
+            [
+                "Apply Saved Filter: size>1GB",
+                "Forget Saved Filter: size>1GB"
+            ]
+        );
     }
 }
