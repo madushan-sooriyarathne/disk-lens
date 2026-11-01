@@ -14,6 +14,10 @@ const FILE_NAME: &str = "settings.json";
 pub struct Settings {
     /// The user moved past the Full Disk Access onboarding, granted or not (US-01).
     pub onboarding_done: bool,
+    /// The pasted license token; checked on every use, never trusted as stored.
+    pub license: Option<String>,
+    /// Palette filter queries the user saved (PRD FR-KB-4).
+    pub saved_filters: Vec<String>,
 }
 
 fn settings_path(data_dir: &Path) -> PathBuf {
@@ -55,6 +59,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings {
             onboarding_done: true,
+            license: Some("DL1.a.b".into()),
+            saved_filters: vec!["size:>1gb".into()],
         };
         save(dir.path(), &settings).unwrap();
         assert_eq!(load(dir.path()), settings);
@@ -71,6 +77,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(settings_path(dir.path()), "{not json").unwrap();
         assert_eq!(load(dir.path()), Settings::default());
+    }
+
+    #[test]
+    fn file_with_only_onboarding_done_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(settings_path(dir.path()), r#"{"onboarding_done": true}"#).unwrap();
+        let expected = Settings {
+            onboarding_done: true,
+            ..Settings::default()
+        };
+        assert_eq!(load(dir.path()), expected);
     }
 
     #[test]

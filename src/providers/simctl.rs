@@ -118,6 +118,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let got = items(&at, &env);
         let names: Vec<&str> = got.iter().map(|i| i.name.as_str()).collect();
@@ -162,6 +163,7 @@ mod tests {
                 runner: &runner,
                 tools: &tools,
                 now: SystemTime::now(),
+                pro: false,
             };
             assert!(items(&at, &env).is_empty());
         }

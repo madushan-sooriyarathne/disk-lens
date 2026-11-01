@@ -47,6 +47,7 @@ Each `[[rule]]` table supports these fields:
 | `priority` | integer | no, default `0` | Higher wins when several rules match one path |
 | `split_rows_by` | `"project"` | no | Produces one row per project instead of one per rule |
 | `row_label` | string | no | Template for split rows. Supports `{project}` |
+| `pro` | bool | no, default `false` | A Pro scanner rule. The matcher skips it without an active license (PRD 13.6) |
 
 Validation runs at startup and in tests, and fails on any of these:
 

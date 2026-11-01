@@ -444,6 +444,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let a = analyze(rules, &snap, &env);
         let r = a.recommendations(rules, &env);
@@ -633,6 +634,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let a = analyze(rules, &snap, &env);
         let d = a.details(rules, &snap, &env, "xcode-derived-data").unwrap();
@@ -662,6 +664,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let a = analyze(rules, &snap, &env);
         let id = |rel: &str| crate::view::dir_id(&snap, &w.home.join(rel)).unwrap();
@@ -732,6 +735,7 @@ guards = { git_active = true }
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let a = analyze(&rules, &snap, &env);
         let rows = a.recommendations(&rules, &env);

@@ -83,6 +83,7 @@ impl Fixture {
             runner: &runner,
             tools,
             now: SystemTime::now(),
+            pro: false,
         };
         let matcher = Matcher::new(rules, &snap.meta.root);
         matcher
@@ -528,9 +529,91 @@ fn scan_root_with_glob_characters_is_literal() {
         runner: &FakeRunner::default(),
         tools: &Tools::new(vec![], false),
         now: SystemTime::now(),
+        pro: false,
     };
     let got = Matcher::new(rules, &snap.meta.root).run(rules, &snap, &env);
     assert_eq!(got.len(), 1);
     assert_eq!(rules.rules[got[0].rule].id, "npm-cache");
     assert!(Path::new(&snap.meta.root).ends_with("we[ir]d*{home}"));
+}
+
+const PRO_RULES: &str = r##"
+schema_version = 1
+media_extensions = ["jpg"]
+
+[[category]]
+id = "package_caches"
+label = "Package caches"
+description = "Caches"
+fill = "#000000"
+border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
+
+[[category]]
+id = "documents_media"
+label = "Media"
+description = "Media"
+fill = "#000000"
+border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
+
+[[category]]
+id = "dev_tools"
+label = "Other"
+description = "Other"
+fill = "#000000"
+border = "#000000"
+fill_dark = "#000000"
+border_dark = "#000000"
+
+[[rule]]
+id = "pro-cache"
+label = "Pro cache"
+description = "d"
+regenerates = "r"
+keywords = ["k"]
+category = "package_caches"
+tier = "safe"
+paths = ["~/.pro-cache"]
+method = "delete"
+pro = true
+"##;
+
+/// Matches of a `pro = true` rule over one folder it covers.
+fn pro_rule_matches(pro: bool) -> usize {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = fs::canonicalize(tmp.path()).unwrap();
+    fs::create_dir_all(home.join(".pro-cache")).unwrap();
+    fs::write(home.join(".pro-cache/f"), vec![0u8; 4096]).unwrap();
+    let rules = Rules::parse(PRO_RULES).unwrap();
+    let snap = scan(
+        &home,
+        &ScanOptions::from_rules(&rules),
+        &Arc::new(AtomicBool::new(false)),
+        &mut |_| {},
+    )
+    .unwrap();
+    let facts = Facts::default();
+    let env = Env {
+        facts: &facts,
+        runner: &FakeRunner::default(),
+        tools: &Tools::new(vec![], false),
+        now: SystemTime::now(),
+        pro,
+    };
+    Matcher::new(&rules, &snap.meta.root)
+        .run(&rules, &snap, &env)
+        .len()
+}
+
+#[test]
+fn pro_rule_does_not_match_without_a_license() {
+    assert_eq!(pro_rule_matches(false), 0);
+}
+
+#[test]
+fn pro_rule_matches_with_a_license() {
+    assert_eq!(pro_rule_matches(true), 1);
 }

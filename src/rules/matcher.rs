@@ -112,6 +112,9 @@ impl Matcher {
         for &glob in hits.iter() {
             let (rule, prefix) = self.owners[glob];
             let r = &rules.rules[rule];
+            if r.pro && !env.pro {
+                continue;
+            }
             let better = match best {
                 None => true,
                 Some((pri, len, idx)) => {

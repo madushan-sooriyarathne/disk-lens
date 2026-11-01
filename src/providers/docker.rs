@@ -130,6 +130,7 @@ mod tests {
                 runner: &runner,
                 tools: &tools,
                 now: SystemTime::now(),
+                pro: false,
             };
             items(&at, &env)
         };

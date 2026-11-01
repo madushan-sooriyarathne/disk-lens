@@ -14,6 +14,7 @@ use crate::cleanup::model::{
 use crate::cleanup::script;
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::license::{LicenseError, Status};
 use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder, Tier};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::settings;
@@ -49,6 +50,9 @@ pub struct MockData {
     onboarding_done: AtomicBool,
     /// "preseed" and "open", in the order the Full Disk Access step made them.
     pub fda_calls: Mutex<Vec<&'static str>>,
+    /// In memory only: the mock never reads or writes a license.
+    license: Mutex<Status>,
+    saved_filters: Mutex<Vec<String>>,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -80,7 +84,15 @@ impl MockData {
             grant_after: None,
             onboarding_done: AtomicBool::new(false),
             fda_calls: Mutex::new(Vec::new()),
+            license: Mutex::new(Status::Free),
+            saved_filters: Mutex::new(Vec::new()),
         }
+    }
+
+    /// `DISKLENS_MOCK=pro`: starts with a Pro license.
+    pub fn pro(self) -> Self {
+        *self.license.lock().expect("mock license") = Status::Pro { id: "mock".into() };
+        self
     }
 
     /// A first launch: no snapshot, onboarding not done, no Full Disk Access.
@@ -372,12 +384,13 @@ fn collect(node: &ViewNode, fuzzy: &mut Fuzzy, hits: &mut Vec<(u32, FolderHit)>)
 
 impl Source {
     /// `DISKLENS_MOCK=1` serves the mock, `DISKLENS_MOCK=preselect` also selects the
-    /// mockup's rows, `DISKLENS_MOCK=onboarding` starts it as a first launch; otherwise
-    /// the live backend.
+    /// mockup's rows, `DISKLENS_MOCK=onboarding` starts it as a first launch,
+    /// `DISKLENS_MOCK=pro` starts it with Pro; otherwise the live backend.
     pub fn from_env() -> Self {
         match std::env::var("DISKLENS_MOCK").as_deref() {
             Ok("1" | "true") => Self::Mock(Box::new(MockData::new(false))),
             Ok("preselect") => Self::Mock(Box::new(MockData::new(true))),
+            Ok("pro") => Self::Mock(Box::new(MockData::new(false).pro())),
             Ok("onboarding") => Self::Mock(Box::new(MockData {
                 grant_after: Some(Duration::from_secs(6)),
                 ..MockData::new(false).first_run()
@@ -531,6 +544,56 @@ impl Source {
             }
             Self::Mock(m) => {
                 m.onboarding_done.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn license_status(&self) -> Status {
+        match self {
+            Self::Live(state) => backend::license_status(state),
+            Self::Mock(m) => m.license.lock().expect("mock license").clone(),
+        }
+    }
+
+    /// The mock accepts any token starting with `DL1.` as Pro and refuses the rest. It never
+    /// reaches the backend, so QA can try the flow without a signing key.
+    pub fn activate_license(&self, token: &str) -> Result<Status> {
+        match self {
+            Self::Live(state) => backend::activate_license(state, token),
+            Self::Mock(m) => {
+                if !token.trim().starts_with("DL1.") {
+                    return Err(LicenseError::Malformed.into());
+                }
+                let pro = Status::Pro { id: "mock".into() };
+                *m.license.lock().expect("mock license") = pro.clone();
+                Ok(pro)
+            }
+        }
+    }
+
+    pub fn remove_license(&self) -> Result<()> {
+        match self {
+            Self::Live(state) => backend::remove_license(state),
+            Self::Mock(m) => {
+                *m.license.lock().expect("mock license") = Status::Free;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn saved_filters(&self) -> Vec<String> {
+        match self {
+            Self::Live(state) => backend::saved_filters(state),
+            Self::Mock(m) => m.saved_filters.lock().expect("mock filters").clone(),
+        }
+    }
+
+    pub fn set_saved_filters(&self, filters: Vec<String>) -> Result<()> {
+        match self {
+            Self::Live(state) => backend::set_saved_filters(state, filters),
+            Self::Mock(m) => {
+                *m.saved_filters.lock().expect("mock filters") = filters;
                 Ok(())
             }
         }
@@ -784,6 +847,21 @@ mod tests {
         assert!(matches!(
             &events[0],
             ScanEvent::Progress { files: 120_000, .. }
+        ));
+    }
+
+    #[test]
+    fn the_mock_accepts_a_dl1_token_as_pro() {
+        let s = Source::Mock(Box::new(MockData::new(false)));
+        assert!(s.activate_license("DL1.x.y").unwrap().is_pro());
+    }
+
+    #[test]
+    fn the_mock_refuses_other_tokens() {
+        let s = Source::Mock(Box::new(MockData::new(false)));
+        assert!(matches!(
+            s.activate_license("hello"),
+            Err(Error::License(LicenseError::Malformed))
         ));
     }
 

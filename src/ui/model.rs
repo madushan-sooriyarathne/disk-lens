@@ -20,12 +20,14 @@ use super::motion;
 use super::palette::{self, Cmd, Entry, Notice, Palette};
 use super::recommendations::{self, PanelState};
 use super::selection;
+use super::settings_window;
 use super::source::Source;
 use super::stats;
 use super::theme;
 use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
 use crate::error::Error;
+use crate::license::Status;
 use crate::platform;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::rules::model::Rules;
@@ -160,6 +162,12 @@ pub struct AppModel {
     pub filter: Option<Filter>,
     /// The Pro explanation or Keyboard Shortcuts sheet.
     pub notice: Option<Notice>,
+    /// Shared with the Settings window, which reads and drives it.
+    pub license: Status,
+    /// Why the last activation or removal failed, shown in Settings.
+    pub license_error: Option<String>,
+    /// Pro: filters kept from the palette (FR-KB-4), in the order saved.
+    pub saved_filters: Vec<String>,
     /// Accessibility display settings, reread whenever the window becomes active.
     pub reduce_motion: bool,
     pub reduce_transparency: bool,
@@ -348,6 +356,8 @@ impl AppModel {
             this.reduce_motion = platform::reduce_motion();
             this.reduce_transparency = platform::reduce_transparency();
             this.recheck_access(cx);
+            // A trial may have ended while the app was in the background.
+            this.refresh_license(cx);
             if this.phase == Phase::Ready {
                 this.refresh(cx);
             }
@@ -385,6 +395,16 @@ impl AppModel {
                 }
             },
         );
+        off_thread(
+            &source,
+            cx,
+            |s| (s.license_status(), s.saved_filters()),
+            |this, (license, saved), _| {
+                // The scan that follows reads the same license, so this is not a change.
+                this.license = license;
+                this.saved_filters = saved;
+            },
+        );
         Self {
             source,
             phase: Phase::Loading,
@@ -409,6 +429,9 @@ impl AppModel {
             palette_seq: 0,
             filter: None,
             notice: None,
+            license: Status::Free,
+            license_error: None,
+            saved_filters: Vec::new(),
             reduce_motion: platform::reduce_motion(),
             reduce_transparency: platform::reduce_transparency(),
             category_totals: Vec::new(),
@@ -1255,11 +1278,15 @@ impl AppModel {
             p.groups = palette::groups(
                 &p.query,
                 p.scope.is_some(),
-                &self.recommendations,
-                &self.selected,
-                &p.folders,
-                self.filter.is_some(),
-                &self.root_path,
+                &palette::Inputs {
+                    recs: &self.recommendations,
+                    selected: &self.selected,
+                    folders: &p.folders,
+                    filter: self.filter.as_ref(),
+                    root_path: &self.root_path,
+                    pro: self.license.is_pro(),
+                    saved_filters: &self.saved_filters,
+                },
             );
             // Folder results arrive after the query, and may be fewer.
             let count = p.groups.iter().map(|g| g.entries.len()).sum::<usize>();
@@ -1335,6 +1362,10 @@ impl AppModel {
             Entry::Folder { path, .. } => self.explore(path, cx),
             Entry::Row { row_id, .. } => self.show_row(row_id, cx),
             Entry::Stage { row_id, .. } => self.toggle_row(&row_id, cx),
+            Entry::StageRule { row_id, .. } => self.add_row(&row_id, cx),
+            Entry::StageMatching { filter, .. } => self.stage_matching(&filter, cx),
+            Entry::ApplySaved(text) => self.apply_saved_filter(&text, cx),
+            Entry::ForgetSaved(text) => self.forget_filter(&text, cx),
             Entry::Command(cmd) => match cmd {
                 Cmd::Rescan => {
                     if self.scan.is_none() {
@@ -1348,6 +1379,7 @@ impl AppModel {
                 Cmd::ShowQueue => self.toggle_queue(cx),
                 Cmd::HighlightCleanable => self.toggle_highlight(cx),
                 Cmd::ClearFilter => self.set_filter(None, cx),
+                Cmd::SaveFilter => self.save_filter(cx),
                 Cmd::Shortcuts => self.show_notice(Notice::Shortcuts, cx),
                 Cmd::Filter => {}
             },
@@ -1360,6 +1392,111 @@ impl AppModel {
     pub fn set_filter(&mut self, filter: Option<Filter>, cx: &mut Context<Self>) {
         self.filter = filter;
         cx.notify();
+    }
+
+    /// Pro: stages the ready items of every row the filter matches. Blocked items stay out.
+    pub fn stage_matching(&mut self, filter: &Filter, cx: &mut Context<Self>) {
+        self.selected
+            .extend(palette::matching_ids(&self.recommendations, filter));
+        cx.notify();
+    }
+
+    /// Pro: keeps the active filter by its text.
+    pub fn save_filter(&mut self, cx: &mut Context<Self>) {
+        let Some(filter) = &self.filter else { return };
+        let text = filter.to_string();
+        if !self.saved_filters.contains(&text) {
+            let mut filters = self.saved_filters.clone();
+            filters.push(text);
+            self.persist_filters(filters, cx);
+        }
+    }
+
+    pub fn forget_filter(&mut self, text: &str, cx: &mut Context<Self>) {
+        let filters = self
+            .saved_filters
+            .iter()
+            .filter(|f| *f != text)
+            .cloned()
+            .collect();
+        self.persist_filters(filters, cx);
+    }
+
+    pub fn apply_saved_filter(&mut self, text: &str, cx: &mut Context<Self>) {
+        match Filter::parse(text, Rules::embedded()) {
+            Ok(filter) => self.set_filter(Some(filter), cx),
+            Err(e) => self.show_toast(format!("Saved filter no longer works: {e}"), cx),
+        }
+    }
+
+    fn persist_filters(&mut self, filters: Vec<String>, cx: &mut Context<Self>) {
+        self.saved_filters = filters.clone();
+        cx.notify();
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.set_saved_filters(filters),
+            |this, saved, cx| {
+                if let Err(e) = saved {
+                    this.show_toast(format!("Could not save filters: {e}"), cx);
+                }
+            },
+        );
+    }
+
+    /// Rereads the license; a change between free and Pro rescans (see `apply_license`).
+    pub fn refresh_license(&mut self, cx: &mut Context<Self>) {
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.license_status(),
+            |this, status, cx| this.apply_license(status, cx),
+        );
+    }
+
+    /// Settings' Activate. A failure shows under the field; success updates `license`.
+    pub fn activate_license(&mut self, token: String, cx: &mut Context<Self>) {
+        self.license_error = None;
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.activate_license(&token),
+            |this, activated, cx| match activated {
+                Ok(status) => this.apply_license(status, cx),
+                Err(e) => this.license_error = Some(e.to_string()),
+            },
+        );
+    }
+
+    pub fn remove_license(&mut self, cx: &mut Context<Self>) {
+        self.license_error = None;
+        off_thread(
+            &self.source,
+            cx,
+            |s| s.remove_license().map(|()| s.license_status()),
+            |this, removed, cx| match removed {
+                Ok(status) => this.apply_license(status, cx),
+                Err(e) => this.license_error = Some(e.to_string()),
+            },
+        );
+    }
+
+    fn apply_license(&mut self, status: Status, cx: &mut Context<Self>) {
+        let flipped = self.license.is_pro() != status.is_pro();
+        self.license = status;
+        // Pro rules only match at scan time, so the rows change with the next scan.
+        // ponytail: rescan on license change; reanalyze the current snapshot in place if the wait shows up in QA
+        if flipped && self.meta.is_some() && self.scan.is_none() {
+            self.start_scan(cx);
+        }
+    }
+
+    /// Opens Settings, or brings it forward. A `token` (from a `disklens://` link) fills the
+    /// field; it is never activated without a click. Deferred because the new window draws at
+    /// once and the Settings view reads this model, which is leased while a handler runs.
+    pub fn open_settings(&mut self, token: Option<String>, cx: &mut Context<Self>) {
+        let model = cx.entity();
+        cx.defer(move |cx| settings_window::open(&model, token, cx));
     }
 
     /// Help › Keyboard Shortcuts and the Pro entries; not over the cleanup sheet.
@@ -1889,9 +2026,21 @@ mod tests {
         cx: &mut TestAppContext,
         preselect: bool,
     ) -> (Entity<AppModel>, &mut VisualTestContext) {
+        setup_mock(cx, MockData::new(preselect))
+    }
+
+    /// `DISKLENS_MOCK=pro`.
+    fn setup_pro(cx: &mut TestAppContext) -> (Entity<AppModel>, &mut VisualTestContext) {
+        setup_mock(cx, MockData::new(false).pro())
+    }
+
+    fn setup_mock(
+        cx: &mut TestAppContext,
+        mock: MockData,
+    ) -> (Entity<AppModel>, &mut VisualTestContext) {
         cx.update(gpui_component::init);
         let cx = cx.add_empty_window();
-        let source = Source::Mock(Box::new(MockData::new(preselect).with_step(Duration::ZERO)));
+        let source = Source::Mock(Box::new(mock.with_step(Duration::ZERO)));
         let model = cx.update(|window, cx| cx.new(|cx| AppModel::new(source, window, cx)));
         cx.run_until_parked();
         (model, cx)
@@ -3580,15 +3729,16 @@ mod tests {
     }
 
     /// S-11: whatever the palette lists, running it never opens or starts a cleanup.
-    #[gpui::test]
-    fn no_palette_entry_starts_a_cleanup(cx: &mut TestAppContext) {
-        let (model, cx) = setup(cx, false);
-        // An empty field lists suggestions only; "show" and "stage" reach every row.
-        for query in ["", ">", "> filter size>1GB", "show", "stage"] {
+    fn assert_no_entry_starts_a_cleanup(
+        model: &Entity<AppModel>,
+        cx: &mut VisualTestContext,
+        queries: &[&str],
+    ) {
+        for query in queries {
             // Rescan swaps a new snapshot in, which closes the palette.
-            settle(cx, &model, |m| m.scan.is_none());
-            open(&model, cx, None);
-            model.update(cx, |m, cx| m.palette_query(query.into(), cx));
+            settle(cx, model, |m| m.scan.is_none());
+            open(model, cx, None);
+            model.update(cx, |m, cx| m.palette_query((*query).into(), cx));
             cx.run_until_parked();
             let entries: Vec<Entry> = model.read_with(cx, |m, _| {
                 m.palette
@@ -3602,8 +3752,8 @@ mod tests {
                     m.close_notice(cx);
                     m.close_palette(cx);
                 });
-                open(&model, cx, None);
-                run(&model, cx, entry);
+                open(model, cx, None);
+                run(model, cx, entry);
                 assert!(model.read_with(cx, |m, _| m.cleanup.is_none()));
             }
             model.update(cx, |m, cx| {
@@ -3611,5 +3761,187 @@ mod tests {
                 m.close_palette(cx);
             });
         }
+    }
+
+    #[gpui::test]
+    fn no_palette_entry_starts_a_cleanup(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        // An empty field lists suggestions only; "show" and "stage" reach every row.
+        let queries = ["", ">", "> filter size>1GB", "show", "stage"];
+        assert_no_entry_starts_a_cleanup(&model, cx, &queries);
+    }
+
+    #[gpui::test]
+    fn no_pro_batch_command_starts_a_cleanup(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        let queries = ["> stage", "> stage tier:safe", "> stage size>1GB", ">"];
+        assert_no_entry_starts_a_cleanup(&model, cx, &queries);
+    }
+
+    // -- Pro: batch staging and saved filters (FR-KB-4) --------------------------
+
+    /// Types `query` into the palette and presses Return on its first entry.
+    fn confirm_first(model: &Entity<AppModel>, cx: &mut VisualTestContext, query: &str) {
+        open(model, cx, None);
+        model.update(cx, |m, cx| m.palette_query(query.into(), cx));
+        cx.run_until_parked();
+        model.update_in(cx, |m, window, cx| m.palette_confirm(window, cx));
+        cx.run_until_parked();
+    }
+
+    fn ready_ids_where(
+        model: &Entity<AppModel>,
+        cx: &mut VisualTestContext,
+        keep: impl Fn(&Recommendation) -> bool,
+    ) -> HashSet<String> {
+        model.read_with(cx, |m, _| {
+            m.recommendations
+                .iter()
+                .filter(|r| keep(r))
+                .flat_map(selection::ready_ids)
+                .map(String::from)
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn pro_stage_all_stages_exactly_that_rules_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        let row = model.read_with(cx, |m, _| m.recommendations[0].clone());
+        let entry = Entry::StageRule {
+            row_id: row.row_id.clone(),
+            rule_id: row.rule_id.clone(),
+            label: row.label.clone(),
+        };
+        run(&model, cx, entry);
+        let expected = ready_ids_where(&model, cx, |r| r.row_id == row.row_id);
+        assert_eq!(model.read_with(cx, |m, _| m.selected.clone()), expected);
+    }
+
+    #[gpui::test]
+    fn pro_stage_by_filter_stages_exactly_the_matching_ready_items(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        model.update(cx, |m, _| {
+            // One blocked item among the safe rows: it must stay out.
+            m.recommendations
+                .iter_mut()
+                .find(|r| r.tier == Tier::Safe)
+                .unwrap()
+                .items[0]
+                .status = ItemStatus::Blocked {
+                reason: "busy".into(),
+            };
+        });
+        confirm_first(&model, cx, "> stage tier:safe");
+        let expected = ready_ids_where(&model, cx, |r| r.tier == Tier::Safe);
+        assert_eq!(model.read_with(cx, |m, _| m.selected.clone()), expected);
+    }
+
+    #[gpui::test]
+    fn a_pro_batch_entry_runs_instead_of_opening_the_sheet(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        confirm_first(&model, cx, "> stage tier:safe");
+        assert_eq!(model.read_with(cx, |m, _| m.notice), None);
+    }
+
+    #[gpui::test]
+    fn a_saved_filter_applies_again_after_it_is_cleared(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        let filter = Filter::parse("tier:safe", Rules::embedded()).unwrap();
+        model.update(cx, |m, cx| {
+            m.set_filter(Some(filter.clone()), cx);
+            m.save_filter(cx);
+            m.set_filter(None, cx);
+        });
+        run(&model, cx, Entry::ApplySaved("tier:safe".into()));
+        assert_eq!(model.read_with(cx, |m, _| m.filter.clone()), Some(filter));
+    }
+
+    #[gpui::test]
+    fn a_saved_filter_reaches_the_store(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        let filter = Filter::parse("size>1GB", Rules::embedded()).unwrap();
+        model.update(cx, |m, cx| {
+            m.set_filter(Some(filter), cx);
+            m.save_filter(cx);
+        });
+        cx.run_until_parked();
+        let stored = model.read_with(cx, |m, _| m.source.saved_filters());
+        assert_eq!(stored, ["size>1GB"]);
+    }
+
+    #[gpui::test]
+    fn a_forgotten_filter_is_gone(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        model.update(cx, |m, cx| {
+            m.saved_filters = vec!["size>1GB".into()];
+            m.forget_filter("size>1GB", cx);
+        });
+        assert!(model.read_with(cx, |m, _| m.saved_filters.is_empty()));
+    }
+
+    // -- License (Settings and the Pro sheet) ------------------------------------
+
+    #[gpui::test]
+    fn the_mock_pro_source_starts_as_pro(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        assert!(model.read_with(cx, |m, _| m.license.is_pro()));
+    }
+
+    #[gpui::test]
+    fn activating_a_token_makes_the_model_pro(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.activate_license("DL1.a.b".into(), cx));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.license.is_pro()));
+    }
+
+    #[gpui::test]
+    fn activating_a_token_starts_a_rescan(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.activate_license("DL1.a.b".into(), cx));
+        cx.run_until_parked();
+        assert!(model.read_with(cx, |m, _| m.scan.is_some()));
+    }
+
+    #[gpui::test]
+    fn a_refused_token_leaves_the_model_free_with_a_reason(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.activate_license("nope".into(), cx));
+        cx.run_until_parked();
+        let state = model.read_with(cx, |m, _| (m.license.is_pro(), m.license_error.clone()));
+        assert_eq!(
+            state,
+            (false, Some("this is not a DiskLens license".to_owned()))
+        );
+    }
+
+    #[gpui::test]
+    fn removing_the_license_goes_back_to_free_and_rescans(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        model.update(cx, |m, cx| m.remove_license(cx));
+        cx.run_until_parked();
+        let state = model.read_with(cx, |m, _| (m.license.clone(), m.scan.is_some()));
+        assert_eq!(state, (Status::Free, true));
+    }
+
+    #[gpui::test]
+    fn opening_settings_twice_keeps_one_settings_window(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| {
+            m.open_settings(None, cx);
+            m.open_settings(None, cx);
+        });
+        cx.run_until_parked();
+        // The test window plus Settings.
+        assert_eq!(cx.update(|_, cx| cx.windows().len()), 2);
+    }
+
+    #[gpui::test]
+    fn a_link_opens_settings_without_activating_the_token(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        model.update(cx, |m, cx| m.open_settings(Some("DL1.a.b".into()), cx));
+        cx.run_until_parked();
+        assert!(!model.read_with(cx, |m, _| m.license.is_pro()));
     }
 }

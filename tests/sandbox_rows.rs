@@ -56,6 +56,7 @@ fn rows(snap: &Snapshot, tools: &Tools, runner: &dyn Runner) -> Vec<Recommendati
         runner,
         tools,
         now: SystemTime::now(),
+        pro: false,
     };
     analyze(rules, snap, &env).recommendations(rules, &env)
 }
@@ -304,6 +305,7 @@ fn view_tiles_carry_tier_and_category() {
         runner: &runner,
         tools: &tools,
         now: SystemTime::now(),
+        pro: false,
     };
     let a = analyze(rules, &snap, &env);
     let v = build_view(&snap, &home.join(".npm"), Some((rules, &a))).unwrap();

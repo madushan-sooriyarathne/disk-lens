@@ -70,6 +70,7 @@ fn main() -> ExitCode {
         runner: &runner,
         tools: &tools,
         now: SystemTime::now(),
+        pro: false,
     };
     let matches = Matcher::new(rules, &snap.meta.root).run(rules, &snap, &env);
     println!(

@@ -19,12 +19,14 @@ pub mod recommendations;
 pub mod root;
 pub mod screens;
 pub mod selection;
+pub mod settings_window;
 pub mod shell;
 pub mod source;
 pub mod stats;
 pub mod theme;
 pub mod treemap;
 
+use futures::StreamExt;
 use gpui::{App, AppContext};
 
 use crate::rules::model::Rules;
@@ -35,20 +37,44 @@ use source::Source;
 pub fn run() {
     // Validates the bundled rules once at startup; an invalid file is a build defect.
     Rules::embedded();
-    gpui_platform::application()
-        .with_assets(assets::Assets)
-        .run(|cx: &mut App| {
-            gpui_component::init(cx);
-            root::bind_keys(cx);
-            root::set_menus(cx);
-            cx.open_window(chrome::window_options(cx), |window, cx| {
+    let app = gpui_platform::application().with_assets(assets::Assets);
+    // macOS can deliver a link while the app is still starting, before any window exists,
+    // so the callback only queues it for a task that starts with the app.
+    let (links, mut queued) = futures::channel::mpsc::unbounded();
+    app.on_open_urls(move |urls| {
+        // The receiver lives as long as the app; a failed send means it is quitting.
+        links.unbounded_send(urls).ok();
+    });
+    app.run(|cx: &mut App| {
+        gpui_component::init(cx);
+        root::bind_keys(cx);
+        root::set_menus(cx);
+        let main = cx
+            .open_window(chrome::window_options(cx), |window, cx| {
                 onboarding::preload(window, cx);
                 let model = cx.new(|cx| AppModel::new(Source::from_env(), window, cx));
+                cx.set_global(settings_window::MainModel(model.clone()));
                 // gpui-component's popovers, tooltips and sheets mount under Root.
                 cx.new(|cx| gpui_component::Root::new(model, window, cx))
             })
             .expect("open main window");
-            cx.on_window_closed(|cx, _| cx.quit()).detach();
-            cx.activate(true);
-        });
+        // Settings is a second window; only closing the main one ends the app.
+        let main_id = main.window_id();
+        cx.on_window_closed(move |cx, closed| {
+            if closed == main_id {
+                cx.quit();
+            }
+        })
+        .detach();
+        cx.spawn(async move |cx| {
+            while let Some(urls) = queued.next().await {
+                if let Some(token) = settings_window::deep_link_token(&urls) {
+                    // Fills the field; activating takes a click.
+                    cx.update(|cx| settings_window::open_main(Some(token), cx));
+                }
+            }
+        })
+        .detach();
+        cx.activate(true);
+    });
 }

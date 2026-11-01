@@ -2,6 +2,7 @@ pub mod backend;
 pub mod cleanup;
 pub mod config;
 pub mod error;
+pub mod license;
 pub mod platform;
 pub mod providers;
 pub mod recommend;

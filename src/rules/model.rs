@@ -136,6 +136,9 @@ pub struct Rule {
     pub priority: i32,
     pub split_rows_by: Option<SplitBy>,
     pub row_label: Option<String>,
+    /// Only matched while a Pro license is active (`Env.pro`).
+    #[serde(default)]
+    pub pro: bool,
 }
 
 /// `rules.toml` spells tiers in lowercase; `never` is declared with `[[protect]]` instead.

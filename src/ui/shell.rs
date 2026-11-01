@@ -11,7 +11,9 @@ use super::chrome::{SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
 use super::explorer;
 use super::format::format_bytes;
 use super::model::{AppModel, Page};
+use super::palette::{Notice, Pro};
 use super::screens::unreadable_notice;
+use super::settings_window::status_line;
 use super::stats::compute_stats;
 use super::theme::{self, Theme};
 use crate::cleanup::audit::now_ms;
@@ -138,7 +140,34 @@ pub fn sidebar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .child("Categories"),
         )
         .children(categories)
-        .child(div().mt_auto().children(footer_notice(model, t, cx)))
+        .child(
+            div()
+                .mt_auto()
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .children(footer_notice(model, t, cx))
+                .child(pro_status(model, t, cx)),
+        )
+}
+
+/// The license in the sidebar footer (FR-WIN-1): quiet text while Pro, else a link to the
+/// Pro sheet. No countdown or nag.
+fn pro_status(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> AnyElement {
+    let row = div().px_2().text_size(px(theme::T_SMALL));
+    if model.license.is_pro() {
+        return row
+            .text_color(t.sidebar_secondary)
+            .child(status_line(&model.license, now_ms() / 1000))
+            .into_any_element();
+    }
+    theme::focusable(row.id("pro-status"), &t, Role::Button, "About DiskLens Pro")
+        .text_color(t.sidebar_secondary)
+        .cursor_pointer()
+        .hover(move |s| s.text_color(t.accent_text))
+        .child("DiskLens Pro…")
+        .on_click(cx.listener(|m, _, _, cx| m.show_notice(Notice::Pro(Pro::About), cx)))
+        .into_any_element()
 }
 
 /// Full Disk Access and unreadable folders (FR-WIN-5), in place of the v1 banner.

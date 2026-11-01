@@ -10,12 +10,14 @@ use crate::cleanup::plan::{self, Request};
 use crate::cleanup::revalidate::GROWTH_FLOOR;
 use crate::cleanup::script;
 use crate::error::{Error, Result};
+use crate::license::{self, Status};
 use crate::platform::{self, Facts};
 use crate::recommend::build::analyze;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::rules::model::Rules;
 use crate::scanner::tree::{ScanEvent, Snapshot, SnapshotMeta};
 use crate::scanner::{self, ScanOptions, snapshot, volume};
+use crate::settings;
 use crate::state::{AppState, Current};
 use crate::view::{self, CategoryTotal, FolderHit, ViewNode};
 
@@ -94,7 +96,11 @@ fn install(state: &AppState, snap: Snapshot) {
     let started = std::time::Instant::now();
     // Match-time guards only look at files, git history and tools.
     let facts = Facts::default();
-    let analysis = analyze(Rules::embedded(), &snap, &state.machine.env(&facts));
+    let analysis = analyze(
+        Rules::embedded(),
+        &snap,
+        &state.machine.env(&facts, state.is_pro()),
+    );
     tracing::info!(
         "analysed {} items in {:?}",
         analysis.items.len(),
@@ -172,9 +178,10 @@ pub fn get_category_totals(state: &Arc<AppState>) -> Result<Vec<CategoryTotal>> 
 pub fn get_recommendations(state: &Arc<AppState>) -> Result<Vec<Recommendation>> {
     let cur = current(state)?;
     let facts = state.machine.system.facts();
-    Ok(cur
-        .analysis
-        .recommendations(Rules::embedded(), &state.machine.env(&facts)))
+    Ok(cur.analysis.recommendations(
+        Rules::embedded(),
+        &state.machine.env(&facts, state.is_pro()),
+    ))
 }
 
 pub fn get_item_details(state: &Arc<AppState>, row_id: String) -> Result<ItemDetails> {
@@ -184,7 +191,7 @@ pub fn get_item_details(state: &Arc<AppState>, row_id: String) -> Result<ItemDet
         .details(
             Rules::embedded(),
             &cur.snapshot,
-            &state.machine.env(&facts),
+            &state.machine.env(&facts, state.is_pro()),
             &row_id,
         )
         .ok_or(Error::UnknownRow(row_id))
@@ -231,7 +238,7 @@ pub fn build_cleanup_plan(
         format!("{}-{seq}", cur.analysis.snapshot_id),
         Rules::embedded(),
         &cur.analysis,
-        &state.machine.env(&facts),
+        &state.machine.env(&facts, state.is_pro()),
         &Request {
             snapshot_id: &snapshot_id,
             item_ids: &item_ids,
@@ -309,6 +316,7 @@ pub fn execute_cleanup(
             trash: machine.trash.as_ref(),
             dry_run: state.config.dry_run,
             growth_floor: GROWTH_FLOOR,
+            pro: state.is_pro(),
         };
         tracing::info!(
             "cleanup {} of {} items (dry run: {})",
@@ -342,4 +350,46 @@ pub fn local_snapshot_count(state: &Arc<AppState>) -> Result<usize> {
     Ok(platform::local_snapshot_count(
         state.machine.runner.as_ref(),
     )?)
+}
+
+pub fn license_status(state: &Arc<AppState>) -> Status {
+    state.license()
+}
+
+/// Stores `token` when it is valid now. The caller rescans: rows are analysed with
+/// the license that was active when the scan finished.
+pub fn activate_license(state: &Arc<AppState>, token: &str) -> Result<Status> {
+    let token = token.trim();
+    let status = license::current_status(Some(token));
+    match &status {
+        Status::Invalid(reason) => return Err(reason.clone().into()),
+        Status::Ended { .. } => return Err(Error::LicenseEnded),
+        Status::Trial { .. } if matches!(state.license(), Status::Pro { .. }) => {
+            return Err(Error::ProLicenseActive);
+        }
+        _ => {}
+    }
+    let mut stored = settings::load(&state.config.data_dir);
+    stored.license = Some(token.to_string());
+    settings::save(&state.config.data_dir, &stored)?;
+    *state.license_token.write().expect("license lock") = Some(token.to_string());
+    Ok(status)
+}
+
+pub fn remove_license(state: &Arc<AppState>) -> Result<()> {
+    let mut stored = settings::load(&state.config.data_dir);
+    stored.license = None;
+    settings::save(&state.config.data_dir, &stored)?;
+    *state.license_token.write().expect("license lock") = None;
+    Ok(())
+}
+
+pub fn saved_filters(state: &Arc<AppState>) -> Vec<String> {
+    settings::load(&state.config.data_dir).saved_filters
+}
+
+pub fn set_saved_filters(state: &Arc<AppState>, filters: Vec<String>) -> Result<()> {
+    let mut stored = settings::load(&state.config.data_dir);
+    stored.saved_filters = filters;
+    settings::save(&state.config.data_dir, &stored)
 }

@@ -5,7 +5,9 @@ use gpui::{
 };
 
 use super::model::{AppModel, Cleanup, Page, Phase};
-use super::{cleanup, inspector, keymap, onboarding, palette, screens, shell, theme};
+use super::{
+    cleanup, inspector, keymap, onboarding, palette, screens, settings_window, shell, theme,
+};
 use crate::view::ViewKind;
 
 actions!(
@@ -33,6 +35,7 @@ actions!(
         Minimize,
         Zoom,
         KeyboardShortcuts,
+        OpenSettings,
     ]
 );
 
@@ -45,6 +48,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
         KeyBinding::new("shift-tab", FocusPrev, Some(CONTEXT)),
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-r", Rescan, Some(CONTEXT)),
         KeyBinding::new("cmd-e", ExportScript, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-r", RevealInFinder, Some(CONTEXT)),
@@ -59,12 +63,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-m", Minimize, Some(CONTEXT)),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &OpenSettings, cx| settings_window::open_main(None, cx));
 }
 
 /// The menu bar in PRD FR-WIN-4.
 pub fn set_menus(cx: &mut App) {
     cx.set_menus([
         Menu::new("DiskLens").items([
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
             MenuItem::action("Quit DiskLens", Quit),

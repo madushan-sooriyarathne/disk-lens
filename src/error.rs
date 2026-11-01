@@ -28,6 +28,12 @@ pub enum Error {
     Settings(String),
     #[error("{0}")]
     Update(String),
+    #[error("{0}")]
+    License(#[from] crate::license::LicenseError),
+    #[error("this license has ended")]
+    LicenseEnded,
+    #[error("a Pro license is already active; a trial would replace it")]
+    ProLicenseActive,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
