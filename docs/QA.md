@@ -150,7 +150,8 @@ Run with `DISKLENS_MOCK=preselect cargo run`, in light and in dark appearance, t
 
 Run with `DISKLENS_MOCK=onboarding cargo run` (access is granted 6 s after Open System Settings), in light and dark appearance.
 
-- [ ] Backdrop: the warm glow at the top is a hint, not a wash; the grain is just visible, in light and dark. Content is centred with no card; Back (not on Welcome) and the page dots sit at the bottom, lined up with the left and right edges of the content column.
+- [ ] Backdrop: Midnight in dark mode, white in light; the Electric Blue glow at the top and the Cantaloupe at the bottom are hints, not a wash; the grain is just visible, in light and dark. Content is centred with no card; Back (not on Welcome) and the page dots sit at the bottom, lined up with the left and right edges of the content column.
+- [ ] Brand: the glass icon shows light in light mode and dark in dark mode (Welcome, System Settings preview, drag row); Continue and Open System Settings are deep blue with white text; the active dot and the first Welcome feature are Electric Blue. The packaged app's Dock and Finder icon is the dark glass icon.
 - [ ] The app icon shows on the first frame of Welcome and on the drag card, with no pop-in.
 - [ ] Welcome: app icon, "Welcome to DiskLens", the subtitle, three feature rows, Continue; VoiceOver reads "Step 1 of 3".
 - [ ] Full Disk Access: the System Settings pane matches the real one in the current appearance (capsule, title, description, rows, switches) and DiskLens's switch turns on in a loop (still with Reduce Motion). At 960×640 the pane is cropped below the DiskLens row and nothing overlaps the page dots.
