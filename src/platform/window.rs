@@ -15,24 +15,29 @@ pub struct Frame {
     pub height: f64,
 }
 
-/// A window moved away from `from`, which `restore` puts it back to.
+/// A move of a window from `from` to `to`: `apply` makes it, `restore` undoes it.
+#[derive(Clone)]
 pub struct Moved {
     window: Retained<NSWindow>,
     from: Frame,
+    to: Frame,
 }
 
 impl Moved {
+    pub fn apply(&self, animate: bool) {
+        set(&self.window, self.to, animate);
+    }
+
     pub fn restore(self, animate: bool) {
         set(&self.window, self.from, animate);
     }
 }
 
-/// Moves `handle`'s window to `place(visible frame of its screen)`. None when the
-/// window has no AppKit handle (tests) or no screen.
+/// Plans a move of `handle`'s window to `place(visible frame of its screen)`. None
+/// when the window has no AppKit handle (tests) or no screen.
 pub fn move_window(
     handle: &impl HasWindowHandle,
     place: impl FnOnce(Frame) -> Frame,
-    animate: bool,
 ) -> Option<Moved> {
     let RawWindowHandle::AppKit(h) = handle.window_handle().ok()?.as_raw() else {
         return None;
@@ -43,8 +48,8 @@ pub fn move_window(
     let window = view.window()?;
     let screen = window.screen()?;
     let from = frame(window.frame());
-    set(&window, place(frame(screen.visibleFrame())), animate);
-    Some(Moved { window, from })
+    let to = place(frame(screen.visibleFrame()));
+    Some(Moved { window, from, to })
 }
 
 fn frame(r: NSRect) -> Frame {

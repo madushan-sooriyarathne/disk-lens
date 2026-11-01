@@ -42,9 +42,23 @@ fn background() -> WindowBackgroundAppearance {
 }
 
 /// Moves the window to the right half of its screen, so the onboarding card stays
-/// beside System Settings (PRD FR-ONB-3a). The result puts it back.
-pub fn dock_right(window: &Window, animate: bool) -> Option<Moved> {
-    window::move_window(window, right_half, animate)
+/// beside System Settings (PRD FR-ONB-3a). `undock` puts it back.
+pub fn dock_right(window: &Window, animate: bool, cx: &mut App) -> Option<Moved> {
+    let moved = window::move_window(window, right_half)?;
+    let apply = moved.clone();
+    later(cx, move || apply.apply(animate));
+    Some(moved)
+}
+
+pub fn undock(moved: Moved, animate: bool, cx: &mut App) {
+    later(cx, move || moved.restore(animate));
+}
+
+/// NOTE: AppKit resizes synchronously, and GPUI's resize handler borrows the app,
+/// which the caller's update already holds; the handler then fails and GPUI keeps
+/// the old viewport size. On the next main-loop turn the app is free.
+fn later(cx: &mut App, f: impl FnOnce() + 'static) {
+    cx.spawn(async move |_| f()).detach();
 }
 
 /// The right half of a screen's visible frame, never below the minimum width.

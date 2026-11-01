@@ -529,7 +529,7 @@ impl AppModel {
     fn first_scan(&mut self, cx: &mut Context<Self>) {
         self.access_poll = None;
         if let Some(docked) = self.docked.take() {
-            docked.restore(!self.reduce_motion);
+            chrome::undock(docked, !self.reduce_motion, cx);
         }
         self.phase = Phase::Onboarding(Step::FirstScan);
         self.start_scan(cx);
@@ -540,7 +540,7 @@ impl AppModel {
     /// the window moves to the right half of its screen, beside System Settings.
     pub fn open_fda_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.phase == Phase::Onboarding(Step::Access) && self.docked.is_none() {
-            self.docked = chrome::dock_right(window, !self.reduce_motion);
+            self.docked = chrome::dock_right(window, !self.reduce_motion, cx);
         }
         off_thread(
             &self.source,
