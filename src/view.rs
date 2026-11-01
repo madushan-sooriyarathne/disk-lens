@@ -51,6 +51,9 @@ pub struct CategoryTotal {
 
 use std::path::{Component, Path, PathBuf};
 
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
+
 use crate::cleanup::protected::Protected;
 use crate::error::{Error, Result};
 use crate::scanner::tree::Snapshot;
@@ -150,6 +153,78 @@ pub fn dir_path(snap: &Snapshot, id: u32) -> PathBuf {
     let mut path = PathBuf::from(&snap.meta.root);
     path.extend(names.iter().rev());
     path
+}
+
+/// A folder found by name, for the command palette (PRD FR-KB-2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderHit {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+}
+
+/// Fuzzy scores against one query, shared by the backend, the mock and the palette
+/// so they all rank alike. Smart case: an uppercase letter in the query matches case.
+pub struct Fuzzy {
+    pattern: Pattern,
+    matcher: Matcher,
+    buf: Vec<char>,
+}
+
+impl Fuzzy {
+    pub fn new(query: &str) -> Self {
+        Self {
+            pattern: Pattern::parse(query, CaseMatching::Smart, Normalization::Smart),
+            matcher: Matcher::new(Config::DEFAULT),
+            buf: Vec::new(),
+        }
+    }
+
+    /// Higher is better; `None` when `text` does not match. An empty query matches
+    /// everything with score 0.
+    pub fn score(&mut self, text: &str) -> Option<u32> {
+        self.pattern
+            .score(Utf32Str::new(text, &mut self.buf), &mut self.matcher)
+    }
+}
+
+/// Up to `limit` folders below `under` (the scan root when `None`) whose name
+/// matches `query`, best match first, then largest. An empty query lists the
+/// largest folders. `under` outside the snapshot is refused.
+pub fn find_folders(
+    snap: &Snapshot,
+    query: &str,
+    under: Option<&Path>,
+    limit: usize,
+) -> Result<Vec<FolderHit>> {
+    let start = match under {
+        Some(p) => dir_id(snap, p).ok_or_else(|| Error::NotInSnapshot(p.display().to_string()))?,
+        None => 0,
+    };
+    let mut fuzzy = Fuzzy::new(query);
+    let mut hits: Vec<(u32, u64, u32)> = Vec::new();
+    let mut stack: Vec<u32> = snap.nodes[start as usize].children.clone();
+    while let Some(id) = stack.pop() {
+        let node = &snap.nodes[id as usize];
+        if let Some(score) = fuzzy.score(&node.name) {
+            hits.push((score, node.size, id));
+        }
+        stack.extend_from_slice(&node.children);
+    }
+    let best = |a: &(u32, u64, u32), b: &(u32, u64, u32)| b.0.cmp(&a.0).then(b.1.cmp(&a.1));
+    if hits.len() > limit && limit > 0 {
+        hits.select_nth_unstable_by(limit - 1, best);
+    }
+    hits.truncate(limit);
+    hits.sort_unstable_by(best);
+    Ok(hits
+        .into_iter()
+        .map(|(_, size, id)| FolderHit {
+            path: dir_path(snap, id).display().to_string(),
+            name: snap.nodes[id as usize].name.clone(),
+            size,
+        })
+        .collect())
 }
 
 /// The absolute path for `path` if it is a scanned directory or a listed large file.
@@ -590,5 +665,82 @@ mod tests {
         );
         assert!(validated_path(&s, Path::new("/r/a/unlisted.bin")).is_err());
         assert!(build_view(&s, Path::new("/r/a/big.bin"), None).is_err());
+    }
+
+    fn found(s: &Snapshot, q: &str, under: Option<&str>) -> Vec<String> {
+        find_folders(s, q, under.map(Path::new), 10)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.path)
+            .collect()
+    }
+
+    fn projects() -> Snapshot {
+        snap(|b| {
+            b.push_dir(1, "Projects".into(), 0, NodeFlags::default());
+            b.push_dir(2, "atlas".into(), 0, NodeFlags::default());
+            b.add_file(3, "f", 3000, 3000, None);
+            b.push_dir(2, "atlas-old".into(), 0, NodeFlags::default());
+            b.add_file(3, "f", 1000, 1000, None);
+            b.push_dir(1, "Downloads".into(), 0, NodeFlags::default());
+            b.push_dir(2, "atlas".into(), 0, NodeFlags::default());
+            b.add_file(3, "f", 5000, 5000, None);
+        })
+    }
+
+    #[test]
+    fn find_folders_ranks_exact_names_then_size() {
+        assert_eq!(
+            found(&projects(), "atlas", None),
+            [
+                "/r/Downloads/atlas",
+                "/r/Projects/atlas",
+                "/r/Projects/atlas-old"
+            ]
+        );
+    }
+
+    #[test]
+    fn find_folders_matches_fuzzily() {
+        assert_eq!(found(&projects(), "prj", None), ["/r/Projects"]);
+    }
+
+    #[test]
+    fn find_folders_stays_under_the_scope() {
+        assert_eq!(
+            found(&projects(), "atlas", Some("/r/Projects")),
+            ["/r/Projects/atlas", "/r/Projects/atlas-old"]
+        );
+    }
+
+    #[test]
+    fn find_folders_with_no_query_lists_the_largest() {
+        let hits = find_folders(&projects(), "", None, 2).unwrap();
+        let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+        assert_eq!(paths, ["/r/Downloads", "/r/Downloads/atlas"]);
+    }
+
+    #[test]
+    fn find_folders_refuses_a_scope_outside_the_snapshot() {
+        assert!(find_folders(&projects(), "a", Some(Path::new("/etc")), 10).is_err());
+    }
+
+    /// Release only: `cargo test --release -- --ignored find_folders_400k`.
+    #[test]
+    #[ignore]
+    fn find_folders_400k_dirs_under_100_ms() {
+        let s = snap(|b| {
+            for i in 0..400 {
+                b.push_dir(1, format!("group-{i}"), 0, NodeFlags::default());
+                for j in 0..1000 {
+                    b.push_dir(2, format!("project-{i}-{j}"), 0, NodeFlags::default());
+                }
+            }
+        });
+        let start = std::time::Instant::now();
+        let hits = find_folders(&s, "proj 12", None, 50).unwrap();
+        let took = start.elapsed();
+        assert_eq!(hits.len(), 50);
+        assert!(took.as_millis() < 100, "took {took:?}");
     }
 }

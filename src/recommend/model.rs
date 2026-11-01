@@ -32,6 +32,9 @@ pub struct RecItem {
     /// Why the item's project counts as active work (git_active), shown as the "Active work" badge.
     #[serde(default)]
     pub active_work: Option<String>,
+    /// Whole days since the item's project last changed, when its rule measures it.
+    #[serde(default)]
+    pub idle_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

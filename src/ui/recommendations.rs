@@ -82,9 +82,12 @@ pub fn render(
     let Some(meta) = &model.meta else {
         return page;
     };
-    let recs = &model.recommendations;
+    // The filter (FR-KB-3) hides rows and their share of the tier totals; the queue
+    // summary still counts everything staged.
+    let shown = model.shown_rows().into_owned();
+    let recs = &shown;
     let totals = compute_stats(meta, recs, &HashSet::new());
-    let chosen = compute_stats(meta, recs, &model.selected);
+    let chosen = compute_stats(meta, &model.recommendations, &model.selected);
 
     let mut list = div()
         .id("recommendations-list")
@@ -99,7 +102,11 @@ pub fn render(
                 .flex()
                 .justify_center()
                 .text_color(t.secondary)
-                .child("Nothing to clean up in this scan."),
+                .child(if model.recommendations.is_empty() {
+                    "Nothing to clean up in this scan."
+                } else {
+                    "No recommendations match the filter."
+                }),
         );
     }
     let focused = model.focused_row.as_deref();
@@ -580,6 +587,7 @@ mod tests {
             size: 1,
             status: ItemStatus::Ready,
             method: MethodView::Delete,
+            idle_days: None,
             active_work: active_work.map(Into::into),
         });
         r

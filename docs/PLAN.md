@@ -19,9 +19,9 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 9 Overview | Merged | v2, PRD section 13.4.4 |
 | 10 Explore and inspector | Merged | v2, PRD sections 13.4.5 and 13.4.7 |
 | 11 Recommended and cleanup sheet | Merged | v2, PRD sections 13.4.6, 13.4.8 and 13.4.10 |
-| 12 Onboarding | Built, awaiting QA and the spike | v2, PRD section 13.4.1. Branch `feat/phase-12-onboarding` |
-| 13 Command palette | Not started | v2, PRD section 13.4.9 (free part) |
-| 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` off `main`, built while Phase 13 was in progress |
+| 12 Onboarding | Merged, awaiting QA and the spike | v2, PRD section 13.4.1 |
+| 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
+| 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
 | 15 Pro licensing and gating | Not started | v2, PRD section 13.6; needs the open decisions in PRD section 13.8 |
 | 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
@@ -32,7 +32,7 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 22 Auto-sweep | Not started | Pro, PRD section 13.10.7; needs Phase 21 |
 | 23+ Remaining Pro features | Not started | Other volumes, history, large and old files, duplicates, local rules file, clone-aware sizes; one phase each |
 
-Last full gate run on macOS (Phase 14, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (513 tests, 2 release-only tests ignored) all pass.
+Last full gate run on macOS (Phase 14 merged with Phase 13, 2026-11-01): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (568 tests, 3 release-only tests ignored) all pass.
 
 ### What is left
 
@@ -226,6 +226,23 @@ Last full gate run on macOS (Phase 14, 2026-11-01): `cargo fmt --check`, `cargo 
   - The spike in `docs/QA.md` (Phase 12): whether `~/.Trash` adds DiskLens to the list without a prompt, and whether the list accepts the dragged app. Anything that shows a prompt is dropped.
   - The native drag starts from GPUI's mouse-down; whether GPUI's own pressed state recovers after the drag is part of the spike.
 
+**Phase 13: Command palette**
+- Built:
+  - `palette.rs`: ⌘K (View › Command Palette) opens it over Overview, Explore and Recommended, not during onboarding, over the cleanup sheet or over a notice. ↑/↓ and ⌃N/⌃P move (bound in the `Palette` key context, `keymap.rs`), Return runs, Esc clears the field, then closes. An empty field shows four suggestions: the three pages and Rescan.
+  - Look of Raycast's compact window: a floating panel with no scrim, a 52 pt search bar, 40 pt rows with a line icon, the title and on the right the shortcut, kind, folder size or Pro tag, and a footer naming what Return does. The field is gpui-component's `Input`; the list is drawn in `palette.rs`, because the kit's `Command` fixes a small field and plain rows.
+  - Groups: Pages, Recommendations ("Show …" and, for rows with ready items, "Stage …"/"Unstage …"), Commands with their shortcuts, Pro, and Folders. Everything but folders is ranked by `view::Fuzzy` (nucleo-matcher, smart case); rows also match on their rule ID.
+  - `view::find_folders`: fuzzy over folder names in the snapshot, optionally below one folder, top 50 by score then size, paths built only for those. Off the UI thread, late results dropped. A release-only test keeps 400k folders under 100 ms.
+  - `filter.rs`: `size>`, `size<` (decimal units, bare numbers are bytes), `tier:`, `category:` (a `rules.toml` id) and `idle>Nd`, all of which must hold; errors name the bad term. `> filter …` shows one entry (or the error, disabled); running it sets the toolbar token, Explore dims tiles that don't match, Recommended hides rows that don't (and their share of the tier totals; j/k skips them).
+  - `idle>Nd` reads `RecItem.idle_days`: `guards::project_age` (the `project_idle` evidence, now returning the age) for items of rules with `project_idle_days`. A row is as idle as its most idle item; a tile without an age never matches.
+  - `/` on Explore opens the palette limited to folders under the open one.
+  - Pro batch commands (stage a rule, stage by filter, saved filters, run a sweep rule) are listed with a Pro tag and open an explanation sheet until Phase 15. Help › Keyboard Shortcuts opens a sheet listing every shortcut.
+  - A snapshot swap closes an open palette. No palette entry opens or confirms a cleanup (S-11, tested over every listed entry).
+- Decisions (2026-11-01):
+  - `idle>30d` works now instead of waiting for Phase 14: the analysis runs the project age check once more per idle-rule item (a second `git log`, once per snapshot, off the UI thread; marked `ponytail:` in `recommend/build.rs`).
+  - Select Safe keeps its v1 meaning under a filter (every ready safe item), and the queue summary counts everything staged.
+- Open:
+  - The manual checks in `docs/QA.md` (Phase 13), including the open time on a real home snapshot.
+
 **Phase 14: Active-work guard and project artifacts**
 - Built:
   - `rules/git_state.rs` reads a repository in process with libgit2 (`git2`, vendored and static, no https or ssh): status entries (untracked included, untracked folders as one entry, ignored files excluded, the index never written) and, per local branch and a detached HEAD, the commits no `refs/remotes/*` ref contains (counted up to 1000).
@@ -234,7 +251,7 @@ Last full gate run on macOS (Phase 14, 2026-11-01): `cargo fmt --check`, `cargo 
   - UI: an amber Active work pill on the row and in the inspector, with each item's reason under its path; the mock marks one item.
   - Fixture v4: `Desktop/aw-clean`, `aw-dirty`, `aw-unpushed` and `aw-noupstream` (each with ignored `target` and `node_modules`), plus idle `py-proj` and `js-lib`; fixture commits are dated 2024-01-01.
 - Decisions (2026-11-01):
-  - Base branch `main`; Phase 13 changes the same spots in `recommend/build.rs`, `recommend/model.rs` and `rules/guards.rs` (idle age), so the second branch to merge resolves the overlap.
+  - Built off `main` while Phase 13 was in progress, then merged with it: `Item` and `RecItem` carry both `idle_days` (Phase 13) and `active_work`, and `guards::project_age` reads the extended evidence list.
   - Rust `target` and Python virtual environments are safe tier; `dist` is review (PRD FR-GIT-4).
   - Changes inside the item itself do not count (build output is often untracked). A repository with no remote counts as active, as FR-GIT-1 reads; so the fixture's `Desktop/gitrepo` `.next` moves to review. An item with no repository below the scan root is not demoted.
   - Checked once per snapshot, not on every refresh: the treemap needs the same tier, and status is too slow for window activation. A repository that changes after the scan is picked up by the next scan.

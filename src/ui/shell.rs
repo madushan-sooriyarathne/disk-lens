@@ -285,6 +285,12 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .children(status)
                 .child(scan_button),
         )
+        .children(
+            model
+                .filter
+                .as_ref()
+                .map(|f| filter_token(&f.to_string(), &t, cx)),
+        )
         .child(
             // The Overview has no inspector.
             icon_button("toggle-inspector", "inspector", "Inspector", &t)
@@ -304,6 +310,29 @@ pub fn toolbar(model: &AppModel, t: Theme, cx: &mut Context<AppModel>) -> impl I
                 .on_click(cx.listener(|m, _, _, cx| m.toggle_queue(cx))),
         )
         .child(clean)
+}
+
+/// The active palette filter (FR-KB-3), removed with its x button.
+fn filter_token(text: &str, t: &Theme, cx: &mut Context<AppModel>) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .h(px(22.))
+        .pl(px(8.))
+        .rounded(px(theme::R_CONTROL))
+        .bg(t.selected)
+        .text_size(px(12.))
+        .child(text.to_owned())
+        .child(
+            Button::new("clear-filter")
+                .ghost()
+                .with_size(Size::Size(px(20.)))
+                .icon(gpui_component::Icon::default().path("icons/ui/x.svg"))
+                .accessibility_label("Clear Filter")
+                .tooltip("Clear Filter")
+                .on_click(cx.listener(|m, _, _, cx| m.set_filter(None, cx))),
+        )
 }
 
 /// `Clean up 52.5 GB`, the one accent control (FR-WIN-3): in the toolbar and the queue.

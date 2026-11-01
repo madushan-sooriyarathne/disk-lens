@@ -66,17 +66,21 @@ pub fn sibling_exists(path: &Path, names: &[String]) -> bool {
 }
 
 /// The project containing `path` (its parent folder) has been idle for `days`.
-/// Idle time is measured from the newest of the last commit and the project's
-/// manifest and lockfiles (`EVIDENCE`). With no evidence at all the project does
-/// not count as idle.
+/// With no evidence at all the project does not count as idle.
+pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
+    project_age(path, root, env).is_some_and(|a| a >= Duration::from_secs(u64::from(days) * 86_400))
+}
+
+/// How long the project containing `path` (its parent folder) has been idle,
+/// measured from the newest of the last commit and the project's manifests and
+/// lockfiles (`EVIDENCE`).
+/// `None` when there is no evidence at all.
 ///
 /// Only repositories below `root` count: a repository enclosing the scan root
 /// (a dotfiles repo in home, or the repo holding a sandbox) says nothing about
 /// the projects inside it.
-pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
-    let Some(project) = path.parent() else {
-        return false;
-    };
+pub fn project_age(path: &Path, root: &Path, env: &Env) -> Option<Duration> {
+    let project = path.parent()?;
     let mut newest: Option<SystemTime> = None;
     let mut consider = |t: Option<SystemTime>| {
         if let Some(t) = t {
@@ -91,7 +95,7 @@ pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
     {
         consider(git.last_commit(&repo));
     }
-    newest.is_some_and(|t| age(env.now, t) >= Duration::from_secs(u64::from(days) * 86_400))
+    newest.map(|t| age(env.now, t))
 }
 
 // ---------------------------------------------------------------------------
@@ -627,6 +631,40 @@ mod tests {
             t.path(),
             &env
         ));
+    }
+
+    #[test]
+    fn project_without_evidence_has_no_age() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(t.path().join("p/node_modules")).unwrap();
+        let facts = Facts::default();
+        let env = Env {
+            facts: &facts,
+            runner: &FakeRunner::default(),
+            tools: &no_tools(),
+            now: SystemTime::now(),
+        };
+        assert_eq!(
+            project_age(&t.path().join("p/node_modules"), t.path(), &env),
+            None
+        );
+    }
+
+    #[test]
+    fn project_age_counts_from_the_newest_evidence() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(t.path().join("p/node_modules")).unwrap();
+        aged(t.path(), "p/package.json", 40 * DAY);
+        let facts = Facts::default();
+        let env = Env {
+            facts: &facts,
+            runner: &FakeRunner::default(),
+            tools: &no_tools(),
+            now: SystemTime::now(),
+        };
+        let days = project_age(&t.path().join("p/node_modules"), t.path(), &env)
+            .map(|a| a.as_secs() / DAY);
+        assert_eq!(days, Some(40));
     }
 
     #[test]
