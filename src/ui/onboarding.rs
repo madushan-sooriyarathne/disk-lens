@@ -6,15 +6,17 @@ use std::sync::{Arc, LazyLock};
 
 use gpui::{
     Animation, AnimationExt, App, Bounds, Context, Corners, CursorStyle, Div, FontWeight, Hsla,
-    Image, ImageFormat, IntoElement, MouseButton, ParentElement, Pixels, Role, Stateful, Styled,
-    Window, canvas, div, fill, img, linear_color_stop, linear_gradient, point, prelude::*, px,
-    relative, rgb, size, svg,
+    Image, ImageFormat, IntoElement, MouseButton, ParentElement, Pixels, Role, SharedString,
+    Stateful, Styled, Window, canvas, div, fill, img, linear_color_stop, linear_gradient, point,
+    prelude::*, px, relative, rgb, size, svg,
 };
 
 use super::format::{format_bytes, group_digits};
 use super::model::{AppModel, Step};
+use super::stats::{self, TierStat};
 use super::theme::{self, Theme};
 use super::{fda_preview, motion};
+use crate::scanner::tree::SnapshotMeta;
 
 /// Width of the centred column.
 const COLUMN: f32 = 488.;
@@ -268,10 +270,10 @@ const STEPS: [(Step, &str); 3] = [
     (Step::FirstScan, "First scan"),
 ];
 
-/// Back on the left (not on Welcome), the page dots on the right, both within the
-/// centered column.
+/// Back on the left (not on Welcome or once the first scan finished), the page dots
+/// on the right, both within the centered column.
 fn footer(t: &Theme, model: &AppModel, step: Step, cx: &mut Context<AppModel>) -> Div {
-    let back = (step != Step::Welcome).then(|| {
+    let back = (step != Step::Welcome && model.meta.is_none()).then(|| {
         let (color, hover) = (t.secondary, t.label);
         theme::focusable(div().id("onboarding-back"), t, Role::Button, "Back")
             .flex()
@@ -361,13 +363,13 @@ fn display(text: &'static str) -> Div {
         .child(text)
 }
 
-fn lead(t: &Theme, text: &'static str) -> Div {
+fn lead(t: &Theme, text: impl Into<SharedString>) -> Div {
     div()
         .text_size(px(15.))
         .line_height(px(21.))
         .text_color(t.secondary)
         .text_center()
-        .child(text)
+        .child(text.into())
 }
 
 /// A full-width capsule button; Tab reaches it and Return presses it.
@@ -623,6 +625,9 @@ fn drag_row(t: &Theme, cx: &mut Context<AppModel>) -> Div {
 }
 
 fn first_scan(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> Div {
+    if let Some(meta) = &model.meta {
+        return scan_complete(t, meta, model, cx);
+    }
     let p = model.scan.clone().unwrap_or_default();
     let current = if p.current.is_empty() {
         "Starting…".to_string()
@@ -682,6 +687,75 @@ fn first_scan(t: &Theme, model: &AppModel, cx: &mut Context<AppModel>) -> Div {
 }
 
 /// `bytes` (rules order) as `(id, bytes)` in the sidebar's order.
+/// The first scan's end: what is safe to clean, what is worth a look, and the way
+/// to the Overview.
+fn scan_complete(
+    t: &Theme,
+    meta: &SnapshotMeta,
+    model: &AppModel,
+    cx: &mut Context<AppModel>,
+) -> Div {
+    let s = stats::compute_stats(meta, &model.recommendations, &model.selected);
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .child(
+            div()
+                .text_size(px(theme::T_SMALL))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.tertiary)
+                .child("SCAN COMPLETE"),
+        )
+        .child(
+            div()
+                .mt(px(10.))
+                .text_size(px(56.))
+                .line_height(px(62.))
+                .font_weight(FontWeight::BOLD)
+                .child(format_bytes(s.safe.size)),
+        )
+        .child(
+            div()
+                .mt(px(2.))
+                .text_size(px(15.))
+                .text_color(t.safe_text)
+                .child("safe to clean"),
+        )
+        .child(lead(t, summary(s.safe, s.review)).mt(px(20.)))
+        .child(
+            div().mt(px(32.)).w_full().child(
+                pill(
+                    t,
+                    "onboarding-done",
+                    "Go to Overview",
+                    rgb(theme::BRAND_BLUE_DEEP).into(),
+                    gpui::white(),
+                )
+                .on_click(cx.listener(|m, _, _, cx| m.finish_onboarding(cx))),
+            ),
+        )
+}
+
+fn summary(safe: TierStat, review: TierStat) -> String {
+    let items = match safe.items {
+        1 => "1 item".to_string(),
+        n => format!("{} items", group_digits(n as u64)),
+    };
+    match (safe.size > 0, review.size > 0) {
+        (false, false) => "Nothing to clean up right now. Your disk is in good shape.".into(),
+        (true, false) => format!("{items} you can clean safely."),
+        (true, true) => format!(
+            "{items} you can clean safely, and {} more worth a look in Recommended.",
+            format_bytes(review.size)
+        ),
+        (false, true) => format!(
+            "Nothing is safe to clean right now, but {} is worth a look in Recommended.",
+            format_bytes(review.size)
+        ),
+    }
+}
+
 fn by_category(bytes: &[u64]) -> [(&'static str, u64); 6] {
     let ids = &crate::rules::model::Rules::embedded().categories;
     theme::LEGEND_ORDER.map(|id| {
@@ -762,4 +836,17 @@ pub(super) fn category_rows(t: &Theme, bytes: &[u64]) -> Div {
         .gap_3()
         .child(stacked_bar(t, bytes))
         .child(legend(t, bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_summary_without_savings_says_so() {
+        assert_eq!(
+            summary(TierStat::default(), TierStat::default()),
+            "Nothing to clean up right now. Your disk is in good shape."
+        );
+    }
 }
