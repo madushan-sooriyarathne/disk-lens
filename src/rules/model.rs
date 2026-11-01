@@ -110,6 +110,8 @@ pub struct Rule {
     pub label: String,
     pub description: String,
     pub regenerates: String,
+    /// Extra words the command palette matches (PRD FR-KB-2).
+    pub keywords: Vec<String>,
     pub category: String,
     #[serde(deserialize_with = "tier")]
     pub tier: Tier,

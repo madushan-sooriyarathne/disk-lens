@@ -41,7 +41,7 @@ mod tests {
         assert_eq!(r.schema_version, 1);
         assert_eq!(r.categories.len(), 6);
         assert_eq!(r.protect.len(), 19);
-        assert_eq!(r.rules.len(), 27);
+        assert_eq!(r.rules.len(), 30);
         assert!(r.media_extensions.iter().any(|e| e == "heic"));
     }
 

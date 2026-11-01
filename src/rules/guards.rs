@@ -13,12 +13,20 @@ use super::model::Guards;
 use super::tools::Tools;
 use crate::platform::{Facts, Runner};
 
-const LOCKFILES: [&str; 5] = [
+/// Manifests and lockfiles whose mtime shows a project is being worked on.
+const EVIDENCE: [&str; 12] = [
+    "package.json",
     "package-lock.json",
     "pnpm-lock.yaml",
     "yarn.lock",
     "bun.lock",
     "bun.lockb",
+    "Cargo.toml",
+    "Cargo.lock",
+    "pyproject.toml",
+    "requirements.txt",
+    "uv.lock",
+    "poetry.lock",
 ];
 
 /// Friendly names for the process substrings used in rules.toml.
@@ -58,8 +66,9 @@ pub fn sibling_exists(path: &Path, names: &[String]) -> bool {
 }
 
 /// The project containing `path` (its parent folder) has been idle for `days`.
-/// Idle time is measured from the newest of the last commit, `package.json` and
-/// any lockfile. With no evidence at all the project does not count as idle.
+/// Idle time is measured from the newest of the last commit and the project's
+/// manifest and lockfiles (`EVIDENCE`). With no evidence at all the project does
+/// not count as idle.
 ///
 /// Only repositories below `root` count: a repository enclosing the scan root
 /// (a dotfiles repo in home, or the repo holding a sandbox) says nothing about
@@ -74,9 +83,8 @@ pub fn project_idle(path: &Path, days: u32, root: &Path, env: &Env) -> bool {
             newest = Some(newest.map_or(t, |n| n.max(t)));
         }
     };
-    consider(mtime(&project.join("package.json")));
-    for lock in LOCKFILES {
-        consider(mtime(&project.join(lock)));
+    for name in EVIDENCE {
+        consider(mtime(&project.join(name)));
     }
     if let Some(repo) = repo_below(project, root)
         && let Some(git) = Git::new(env)
@@ -579,6 +587,27 @@ mod tests {
         // A fresh lockfile makes it active.
         fs::write(proj.join("pnpm-lock.yaml"), "").unwrap();
         assert!(!idle(&FakeRunner::default()));
+    }
+
+    #[test]
+    fn project_idle_counts_rust_and_python_evidence() {
+        let t = tempfile::tempdir().unwrap();
+        let facts = Facts::default();
+        let proj = aged(t.path(), "proj", 90 * DAY);
+        fs::rename(proj.join("f"), proj.join("Cargo.lock")).unwrap();
+        let target = proj.join("target");
+        let idle = || {
+            let env = Env {
+                facts: &facts,
+                runner: &FakeRunner::default(),
+                tools: &no_tools(),
+                now: SystemTime::now(),
+            };
+            project_idle(&target, 30, t.path(), &env)
+        };
+        assert!(idle());
+        fs::write(proj.join("uv.lock"), "").unwrap();
+        assert!(!idle());
     }
 
     #[test]

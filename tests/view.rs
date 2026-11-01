@@ -226,6 +226,7 @@ id = "active-safe"
 label = "Build output"
 description = "Test rule."
 regenerates = "Rebuild."
+keywords = ["k"]
 category = "code_projects"
 tier = "safe"
 paths = ["~/**/build-out"]
