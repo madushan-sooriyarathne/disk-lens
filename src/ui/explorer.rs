@@ -946,6 +946,7 @@ mod tests {
                 method: MethodView::Delete,
                 active_work: None,
                 idle_days: None,
+                rehydrate: None,
             }],
         }
     }

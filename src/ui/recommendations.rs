@@ -629,6 +629,7 @@ mod tests {
             status: ItemStatus::Ready,
             method: MethodView::Delete,
             idle_days: None,
+            rehydrate: None,
             active_work: active_work.map(Into::into),
         });
         r

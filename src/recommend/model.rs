@@ -35,6 +35,17 @@ pub struct RecItem {
     /// Whole days since the item's project last changed, when its rule measures it.
     #[serde(default)]
     pub idle_days: Option<u32>,
+    /// FR-LOCK-1, Pro only: whether a lockfile next to the project rebuilds the item.
+    #[serde(default)]
+    pub rehydrate: Option<Rehydrate>,
+}
+
+/// Whether a project artifact can be rebuilt with the same versions (PRD FR-LOCK-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Rehydrate {
+    /// The name of the lockfile next to the project manifest.
+    Lockfile(String),
+    NoLockfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

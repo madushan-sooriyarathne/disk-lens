@@ -1018,6 +1018,7 @@ mod tests {
                 },
                 method: MethodView::Delete,
                 idle_days: None,
+                rehydrate: None,
                 active_work: None,
             }],
         }
