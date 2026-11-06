@@ -27,6 +27,9 @@ pub struct SnapshotsView {
     pub running: bool,
     /// What the last action did.
     pub message: Option<String>,
+    /// `tmutil` failed without administrator rights: the confirm offers the opt-in, then
+    /// the retry through the prompt.
+    pub needs_admin: bool,
 }
 
 /// "Up to 38.0 GB is purgeable, mostly held by local snapshots." (FR-SNAP-2).
@@ -55,6 +58,9 @@ pub fn outcome_line(action: &SnapshotAction, outcome: &SnapshotOutcome) -> Strin
             "Asked macOS to free up to {} held by local snapshots.",
             format_bytes(*bytes)
         ),
+        (SnapshotOutcome::NeedsAdmin, _) => {
+            "macOS refused without administrator rights. Nothing changed.".into()
+        }
         (SnapshotOutcome::Failed(why), _) => format!("Nothing changed: {why}."),
     }
 }
@@ -92,6 +98,7 @@ pub fn render(
         body = body.child(confirm(
             &t,
             action,
+            view.needs_admin,
             model.allow_admin_actions,
             model.source.is_dry_run(),
             view.running,
@@ -221,23 +228,24 @@ fn others(t: &Theme, names: &[String]) -> Div {
         .children(names.iter().map(|n| muted(t, n.clone())))
 }
 
-/// The opt-in first when the action needs it, then the exact command and Confirm.
+/// The exact command and Confirm. After `tmutil` failed without administrator rights, the
+/// opt-in first, then the retry through the system prompt.
 fn confirm(
     t: &Theme,
     action: &SnapshotAction,
+    admin: bool,
     allow_admin: bool,
     dry_run: bool,
     running: bool,
     cx: &mut Context<AppModel>,
 ) -> Div {
-    let admin = action.needs_admin();
     let mut c = note(t).flex().flex_col().gap_2();
     if admin && !allow_admin {
         c = c
             .child(
-                "Deleting or thinning local snapshots needs administrator rights. DiskLens asks \
-                 macOS for them once per action, through the system password prompt, and keeps \
-                 nothing afterwards. Nothing else ever runs with these rights.",
+                "macOS refused this without administrator rights. DiskLens can retry it once \
+                 through the system password prompt, and keeps nothing afterwards. Only snapshot \
+                 actions ever use these rights.",
             )
             .child(
                 Switch::new("snapshots-allow-admin")
@@ -259,7 +267,7 @@ fn confirm(
             .when(admin, |d| {
                 d.child(muted(
                     t,
-                    "macOS asks for an administrator password next. The authorization is not kept.",
+                    "macOS asks for an administrator password next, through osascript. The authorization is not kept.",
                 ))
             })
             .when(dry_run, |d| {

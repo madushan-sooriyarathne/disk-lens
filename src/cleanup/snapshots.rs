@@ -1,10 +1,12 @@
 //! Thinning and deleting local Time Machine snapshots (PRD FR-SNAP-4, FR-SNAP-5), the one
-//! place DiskLens asks for administrator rights (the S-06 exception).
+//! place DiskLens may ask for administrator rights (the S-06 exception).
 //!
-//! Every action is checked in this order, and refused at the first failure: Pro is active;
-//! a date has the tmutil form; administrator actions are allowed when the action needs
-//! them; the snapshot is in a `tmutil listlocalsnapshots /` read right now (S-12). A dry
-//! run stops there. Every action, refused or not, is audit logged.
+//! Every action is checked first, and refused at the first failure: Pro is active; a date
+//! has the tmutil form; the snapshot is in a `tmutil listlocalsnapshots /` read right now
+//! (S-12). A dry run stops there. Then `tmutil` runs directly: on macOS 26 neither action
+//! needs administrator rights (Phase 17 spike, docs/QA.md). Only when that fails, and only
+//! with the opt-in on, it is retried once through the administrator prompt, after the
+//! listing is read again. Every command that runs, and every refusal, is audit logged.
 
 use std::path::Path;
 
@@ -14,9 +16,6 @@ use crate::platform::{Runner, TMUTIL, is_snapshot_date, list_local_snapshots};
 const OSASCRIPT: &str = "/usr/bin/osascript";
 /// `tmutil thinlocalsnapshots` urgency: 4 is the highest.
 const THIN_URGENCY: &str = "4";
-/// NOTE: from the Phase 17 spike (docs/QA.md): whether `tmutil thinlocalsnapshots` needs
-/// administrator rights. While true, Thin goes through the same prompt as Delete.
-const THIN_NEEDS_ADMIN: bool = true;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotAction {
@@ -27,14 +26,7 @@ pub enum SnapshotAction {
 }
 
 impl SnapshotAction {
-    pub fn needs_admin(&self) -> bool {
-        match self {
-            Self::Thin { .. } => THIN_NEEDS_ADMIN,
-            Self::Delete { .. } => true,
-        }
-    }
-
-    /// The `tmutil` command, as shown to the user before they confirm.
+    /// The `tmutil` command: shown before Confirm, and what runs first.
     pub fn tmutil_argv(&self) -> Vec<String> {
         let args: Vec<String> = match self {
             Self::Thin { bytes } => vec![
@@ -48,28 +40,16 @@ impl SnapshotAction {
         std::iter::once(TMUTIL.to_owned()).chain(args).collect()
     }
 
-    /// What runs. An action that needs administrator rights goes through one
-    /// `osascript … with administrator privileges` call: the system prompt, then nothing
-    /// kept. The script text holds only constants and a date `check` has validated, the
-    /// single exception to S-05 (PRD FR-SNAP-5).
-    pub fn argv(&self) -> Vec<String> {
-        let tmutil = self.tmutil_argv();
-        if !self.needs_admin() {
-            return tmutil;
-        }
+    /// The retry with administrator rights: one `osascript … with administrator
+    /// privileges` call, the system prompt, then nothing kept. The script text holds only
+    /// constants and a date `check` has validated, the single exception to S-05
+    /// (PRD FR-SNAP-5).
+    pub fn privileged_argv(&self) -> Vec<String> {
         let script = format!(
             "do shell script \"{}\" with administrator privileges",
-            tmutil.join(" ")
+            self.tmutil_argv().join(" ")
         );
         vec![OSASCRIPT.into(), "-e".into(), script]
-    }
-
-    fn method(&self) -> &'static str {
-        if self.needs_admin() {
-            "privileged_command"
-        } else {
-            "command"
-        }
     }
 
     fn item_id(&self) -> String {
@@ -87,8 +67,6 @@ pub enum Refused {
     NotPro,
     #[error("That is not a snapshot date")]
     MalformedDate,
-    #[error("Actions that need administrator rights are turned off")]
-    AdminOff,
     #[error("That snapshot no longer exists")]
     Gone,
     #[error("There are no local snapshots to thin")]
@@ -102,7 +80,9 @@ pub enum SnapshotOutcome {
     Ran,
     /// Checked and logged; nothing ran (S-08).
     DryRun,
-    /// The command ran and failed, or the user cancelled the administrator prompt.
+    /// `tmutil` failed and the administrator opt-in is off, so nothing was retried.
+    NeedsAdmin,
+    /// The command failed, or the user cancelled the administrator prompt.
     Failed(String),
 }
 
@@ -123,33 +103,32 @@ pub fn run(
     action: &SnapshotAction,
     audit: &mut Audit,
 ) -> Result<SnapshotOutcome, Refused> {
-    let result = check(engine, action).map(|()| perform(engine, action));
-    let (status, detail) = match &result {
-        Ok(SnapshotOutcome::Ran) => ("command_ran", None),
-        Ok(SnapshotOutcome::DryRun) => ("dry_run", None),
-        Ok(SnapshotOutcome::Failed(why)) => ("failed", Some(why.clone())),
-        Err(refused) => ("skipped", Some(refused.to_string())),
-    };
-    let entry = Entry {
-        ts: audit::now_ms(),
-        plan_id: "snapshots".into(),
-        item_id: action.item_id(),
-        rule: "apfs-snapshots".into(),
-        path: "/".into(),
-        method: action.method().into(),
-        argv: Some(action.argv()),
-        bytes: 0,
-        result: status.into(),
-        detail,
-        dry_run: engine.dry_run,
-    };
-    if let Err(e) = audit.record(&entry) {
-        tracing::error!(
-            "could not write {} for {entry:?}: {e}",
-            audit.path().display()
-        );
+    let direct = action.tmutil_argv();
+    if let Err(refused) = check(engine, action) {
+        log(audit, engine, action, &direct, Err(&refused));
+        return Err(refused);
     }
-    result
+    if engine.dry_run {
+        log(audit, engine, action, &direct, Ok(&SnapshotOutcome::DryRun));
+        return Ok(SnapshotOutcome::DryRun);
+    }
+    let first = execute(engine.commands, &direct);
+    log(audit, engine, action, &direct, Ok(&first));
+    if !matches!(first, SnapshotOutcome::Failed(_)) {
+        return Ok(first);
+    }
+    if !engine.allow_admin {
+        return Ok(SnapshotOutcome::NeedsAdmin);
+    }
+    let privileged = action.privileged_argv();
+    // The failed attempt may have raced a change; act only on what is listed now.
+    if let Err(refused) = check(engine, action) {
+        log(audit, engine, action, &privileged, Err(&refused));
+        return Err(refused);
+    }
+    let second = execute(engine.commands, &privileged);
+    log(audit, engine, action, &privileged, Ok(&second));
+    Ok(second)
 }
 
 fn check(engine: &SnapshotEngine, action: &SnapshotAction) -> Result<(), Refused> {
@@ -160,9 +139,6 @@ fn check(engine: &SnapshotEngine, action: &SnapshotAction) -> Result<(), Refused
         && !is_snapshot_date(date)
     {
         return Err(Refused::MalformedDate);
-    }
-    if action.needs_admin() && !engine.allow_admin {
-        return Err(Refused::AdminOff);
     }
     let listed =
         list_local_snapshots(engine.probes).map_err(|e| Refused::ListFailed(e.to_string()))?;
@@ -175,16 +151,52 @@ fn check(engine: &SnapshotEngine, action: &SnapshotAction) -> Result<(), Refused
     }
 }
 
-fn perform(engine: &SnapshotEngine, action: &SnapshotAction) -> SnapshotOutcome {
-    if engine.dry_run {
-        return SnapshotOutcome::DryRun;
-    }
-    let argv = action.argv();
+fn execute(runner: &dyn Runner, argv: &[String]) -> SnapshotOutcome {
     let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
-    match engine.commands.run(Path::new(&argv[0]), &args) {
+    match runner.run(Path::new(&argv[0]), &args) {
         Ok(out) if out.success => SnapshotOutcome::Ran,
         Ok(_) => SnapshotOutcome::Failed("Cancelled or failed".into()),
         Err(e) => SnapshotOutcome::Failed(e.to_string()),
+    }
+}
+
+fn log(
+    audit: &mut Audit,
+    engine: &SnapshotEngine,
+    action: &SnapshotAction,
+    argv: &[String],
+    result: Result<&SnapshotOutcome, &Refused>,
+) {
+    let (status, detail) = match result {
+        Ok(SnapshotOutcome::Ran) => ("command_ran", None),
+        Ok(SnapshotOutcome::DryRun) => ("dry_run", None),
+        Ok(SnapshotOutcome::NeedsAdmin) => ("failed", Some("needs administrator rights".into())),
+        Ok(SnapshotOutcome::Failed(why)) => ("failed", Some(why.clone())),
+        Err(refused) => ("skipped", Some(refused.to_string())),
+    };
+    let method = if argv.first().is_some_and(|p| p == OSASCRIPT) {
+        "privileged_command"
+    } else {
+        "command"
+    };
+    let entry = Entry {
+        ts: audit::now_ms(),
+        plan_id: "snapshots".into(),
+        item_id: action.item_id(),
+        rule: "apfs-snapshots".into(),
+        path: "/".into(),
+        method: method.into(),
+        argv: Some(argv.to_vec()),
+        bytes: 0,
+        result: status.into(),
+        detail,
+        dry_run: engine.dry_run,
+    };
+    if let Err(e) = audit.record(&entry) {
+        tracing::error!(
+            "could not write {} for {entry:?}: {e}",
+            audit.path().display()
+        );
     }
 }
 
@@ -195,7 +207,8 @@ mod tests {
 
     const LIST: &str = "tmutil listlocalsnapshots /";
     const DATE: &str = "2026-10-30-101500";
-    const DELETE: &str = "osascript -e do shell script \"/usr/bin/tmutil deletelocalsnapshots 2026-10-30-101500\" with administrator privileges";
+    const DIRECT: &str = "tmutil deletelocalsnapshots 2026-10-30-101500";
+    const PRIVILEGED: &str = "osascript -e do shell script \"/usr/bin/tmutil deletelocalsnapshots 2026-10-30-101500\" with administrator privileges";
 
     fn probes() -> FakeRunner {
         FakeRunner::default().with(
@@ -205,8 +218,16 @@ mod tests {
         )
     }
 
+    /// `tmutil` works without administrator rights, as on macOS 26.
     fn commands() -> FakeRunner {
-        FakeRunner::default().with(DELETE, true, "")
+        FakeRunner::default().with(DIRECT, true, "")
+    }
+
+    /// `tmutil` fails without administrator rights; the prompt succeeds.
+    fn needs_admin() -> FakeRunner {
+        FakeRunner::default()
+            .with(DIRECT, false, "")
+            .with(PRIVILEGED, true, "")
     }
 
     fn engine<'a>(probes: &'a FakeRunner, commands: &'a FakeRunner) -> SnapshotEngine<'a> {
@@ -214,7 +235,7 @@ mod tests {
             probes,
             commands,
             dry_run: false,
-            allow_admin: true,
+            allow_admin: false,
             pro: true,
         }
     }
@@ -227,34 +248,105 @@ mod tests {
         runner.calls.lock().unwrap().clone()
     }
 
+    fn audit() -> (tempfile::TempDir, Audit) {
+        let dir = tempfile::tempdir().unwrap();
+        let audit = Audit::open(dir.path()).unwrap();
+        (dir, audit)
+    }
+
     #[test]
-    fn a_listed_snapshot_is_deleted_through_the_administrator_prompt() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+    fn a_listed_snapshot_is_deleted_without_a_prompt() {
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         run(&engine(&p, &c), &delete(DATE), &mut audit).unwrap();
-        assert_eq!(calls(&c), [DELETE]);
+        assert_eq!(calls(&c), [DIRECT]);
+    }
+
+    #[test]
+    fn a_failed_delete_with_the_opt_in_off_asks_for_it() {
+        let (p, c, (_d, mut audit)) = (probes(), needs_admin(), audit());
+        assert_eq!(
+            run(&engine(&p, &c), &delete(DATE), &mut audit),
+            Ok(SnapshotOutcome::NeedsAdmin)
+        );
+    }
+
+    #[test]
+    fn with_the_opt_in_off_no_privileged_command_runs() {
+        let (p, c, (_d, mut audit)) = (probes(), needs_admin(), audit());
+        let _ = run(&engine(&p, &c), &delete(DATE), &mut audit);
+        assert_eq!(calls(&c), [DIRECT]);
+    }
+
+    #[test]
+    fn with_the_opt_in_on_a_failed_delete_is_retried_through_the_prompt() {
+        let (p, c, (_d, mut audit)) = (probes(), needs_admin(), audit());
+        let engine = SnapshotEngine {
+            allow_admin: true,
+            ..engine(&p, &c)
+        };
+        let _ = run(&engine, &delete(DATE), &mut audit);
+        assert_eq!(calls(&c), [DIRECT, PRIVILEGED]);
+    }
+
+    #[test]
+    fn the_retry_reads_the_listing_again() {
+        let (p, c, (_d, mut audit)) = (probes(), needs_admin(), audit());
+        let engine = SnapshotEngine {
+            allow_admin: true,
+            ..engine(&p, &c)
+        };
+        let _ = run(&engine, &delete(DATE), &mut audit);
+        assert_eq!(calls(&p), [LIST, LIST]);
+    }
+
+    #[test]
+    fn the_privileged_retry_is_logged_with_its_method_and_command() {
+        let (p, c, (_d, mut audit)) = (probes(), needs_admin(), audit());
+        let engine = SnapshotEngine {
+            allow_admin: true,
+            ..engine(&p, &c)
+        };
+        let _ = run(&engine, &delete(DATE), &mut audit);
+        let entry = audit::read(audit.path()).unwrap().remove(1);
+        assert_eq!(
+            (entry.method.as_str(), entry.argv),
+            ("privileged_command", Some(delete(DATE).privileged_argv()))
+        );
+    }
+
+    #[test]
+    fn a_cancelled_prompt_is_a_failure() {
+        let (p, (_d, mut audit)) = (probes(), audit());
+        let c = FakeRunner::default()
+            .with(DIRECT, false, "")
+            .with(PRIVILEGED, false, "");
+        let engine = SnapshotEngine {
+            allow_admin: true,
+            ..engine(&p, &c)
+        };
+        assert_eq!(
+            run(&engine, &delete(DATE), &mut audit),
+            Ok(SnapshotOutcome::Failed("Cancelled or failed".into()))
+        );
     }
 
     #[test]
     fn a_date_not_in_the_current_list_is_refused() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let result = run(&engine(&p, &c), &delete("2026-10-29-101500"), &mut audit);
         assert_eq!(result, Err(Refused::Gone));
     }
 
     #[test]
     fn a_refused_date_never_reaches_a_command() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let _ = run(&engine(&p, &c), &delete("2026-10-29-101500"), &mut audit);
         assert_eq!(calls(&c), Vec::<String>::new());
     }
 
     #[test]
-    fn a_malformed_date_is_refused_before_listing() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+    fn a_malformed_date_is_refused() {
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let result = run(
             &engine(&p, &c),
             &delete("2026-10-30-101500\"; rm"),
@@ -265,8 +357,7 @@ mod tests {
 
     #[test]
     fn a_non_time_machine_snapshot_is_never_acted_on() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let result = run(
             &engine(&p, &c),
             &delete("com.apple.os.update-6058"),
@@ -276,21 +367,8 @@ mod tests {
     }
 
     #[test]
-    fn with_the_opt_in_off_no_privileged_command_runs() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
-        let engine = SnapshotEngine {
-            allow_admin: false,
-            ..engine(&p, &c)
-        };
-        let _ = run(&engine, &delete(DATE), &mut audit);
-        assert_eq!(calls(&c), Vec::<String>::new());
-    }
-
-    #[test]
     fn without_pro_the_action_is_refused() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let engine = SnapshotEngine {
             pro: false,
             ..engine(&p, &c)
@@ -303,8 +381,7 @@ mod tests {
 
     #[test]
     fn a_dry_run_never_invokes_the_runner() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let engine = SnapshotEngine {
             dry_run: true,
             ..engine(&p, &c)
@@ -315,8 +392,7 @@ mod tests {
 
     #[test]
     fn a_dry_run_is_logged_as_a_dry_run() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         let engine = SnapshotEngine {
             dry_run: true,
             ..engine(&p, &c)
@@ -327,33 +403,20 @@ mod tests {
     }
 
     #[test]
-    fn a_privileged_action_is_logged_with_its_method_and_command() {
-        let (p, c, dir) = (probes(), commands(), tempfile::tempdir().unwrap());
-        let mut audit = Audit::open(dir.path()).unwrap();
+    fn a_direct_delete_is_logged_as_a_command() {
+        let (p, c, (_d, mut audit)) = (probes(), commands(), audit());
         run(&engine(&p, &c), &delete(DATE), &mut audit).unwrap();
         let entry = audit::read(audit.path()).unwrap().remove(0);
         assert_eq!(
-            (entry.method.as_str(), entry.argv),
-            ("privileged_command", Some(delete(DATE).argv()))
-        );
-    }
-
-    #[test]
-    fn a_cancelled_prompt_is_a_failure() {
-        let (p, dir) = (probes(), tempfile::tempdir().unwrap());
-        let c = FakeRunner::default().with(DELETE, false, "");
-        let mut audit = Audit::open(dir.path()).unwrap();
-        assert_eq!(
-            run(&engine(&p, &c), &delete(DATE), &mut audit),
-            Ok(SnapshotOutcome::Failed("Cancelled or failed".into()))
+            (entry.method.as_str(), entry.result.as_str()),
+            ("command", "command_ran")
         );
     }
 
     #[test]
     fn thin_without_local_snapshots_is_refused() {
-        let (c, dir) = (commands(), tempfile::tempdir().unwrap());
+        let (c, (_d, mut audit)) = (commands(), audit());
         let p = FakeRunner::default().with(LIST, true, "Snapshots for disk /:\n");
-        let mut audit = Audit::open(dir.path()).unwrap();
         let result = run(
             &engine(&p, &c),
             &SnapshotAction::Thin { bytes: 1 },

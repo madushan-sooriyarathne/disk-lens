@@ -301,8 +301,9 @@ impl Render for SettingsView {
                             }),
                     )
                     .child(div().text_size(px(12.)).text_color(t.secondary).child(
-                        "Used only to delete or thin local Time Machine snapshots. macOS \
-                                 asks for your password each time, and nothing is kept.",
+                        "Used only when macOS refuses to delete or thin a local Time Machine \
+                         snapshot without them. macOS asks for your password each time, and \
+                         nothing is kept.",
                     ))
             }))
     }

@@ -27,7 +27,7 @@ use super::stats;
 use super::theme;
 use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
-use crate::cleanup::snapshots::SnapshotAction;
+use crate::cleanup::snapshots::{SnapshotAction, SnapshotOutcome};
 use crate::error::Error;
 use crate::license::Status;
 use crate::platform;
@@ -1575,6 +1575,7 @@ impl AppModel {
     pub fn ask_snapshot_action(&mut self, action: SnapshotAction, cx: &mut Context<Self>) {
         if let Some(view) = self.snapshots.as_mut().filter(|v| !v.running) {
             view.confirm = Some(action);
+            view.needs_admin = false;
             view.message = None;
             cx.notify();
         }
@@ -1583,6 +1584,7 @@ impl AppModel {
     pub fn cancel_snapshot_action(&mut self, cx: &mut Context<Self>) {
         if let Some(view) = self.snapshots.as_mut().filter(|v| !v.running) {
             view.confirm = None;
+            view.needs_admin = false;
             cx.notify();
         }
     }
@@ -1605,7 +1607,12 @@ impl AppModel {
             move |this, result, cx| {
                 if let Some(view) = &mut this.snapshots {
                     view.running = false;
-                    view.confirm = None;
+                    // Refused without administrator rights: keep the action, so the opt-in
+                    // and then the retry through the prompt are one click away.
+                    view.needs_admin = matches!(result, Ok(SnapshotOutcome::NeedsAdmin));
+                    if !view.needs_admin {
+                        view.confirm = None;
+                    }
                     view.message = Some(match &result {
                         Ok(outcome) => snapshots::outcome_line(&action, outcome),
                         Err(e) => format!("Nothing changed: {e}."),
@@ -3870,33 +3877,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_delete_without_the_opt_in_changes_nothing(cx: &mut TestAppContext) {
-        let (model, cx) = setup_pro(cx);
-        run(&model, cx, Entry::Command(Cmd::Snapshots));
-        cx.run_until_parked();
-        model.update(cx, |m, cx| {
-            m.ask_snapshot_action(
-                SnapshotAction::Delete {
-                    date: "2026-11-04-091500".into(),
-                },
-                cx,
-            );
-            m.confirm_snapshot_action(cx);
-        });
-        cx.run_until_parked();
-        let message = model.read_with(cx, |m, _| m.snapshots.as_ref()?.message.clone());
-        assert_eq!(
-            message.as_deref(),
-            Some("Nothing changed: Actions that need administrator rights are turned off.")
-        );
-    }
-
-    #[gpui::test]
     fn a_confirmed_delete_in_a_dry_run_runs_nothing(cx: &mut TestAppContext) {
         let (model, cx) = setup_pro(cx);
         run(&model, cx, Entry::Command(Cmd::Snapshots));
-        cx.run_until_parked();
-        model.update(cx, |m, cx| m.set_allow_admin_actions(true, cx));
         cx.run_until_parked();
         model.update(cx, |m, cx| {
             m.ask_snapshot_action(

@@ -507,16 +507,13 @@ impl Source {
         }
     }
 
-    /// The mock checks Pro and the opt-in, then acts as a dry run: nothing runs.
+    /// The mock checks Pro, then acts as a dry run: nothing runs.
     pub fn snapshot_action(&self, action: &SnapshotAction) -> Result<SnapshotOutcome> {
         match self {
             Self::Live(state) => backend::run_snapshot_action(state, action),
             Self::Mock(m) => {
                 if !m.license.lock().expect("mock license").is_pro() {
                     return Err(Refused::NotPro.into());
-                }
-                if action.needs_admin() && !m.allow_admin_actions.load(Ordering::Relaxed) {
-                    return Err(Refused::AdminOff.into());
                 }
                 Ok(SnapshotOutcome::DryRun)
             }
