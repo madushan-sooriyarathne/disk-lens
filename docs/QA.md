@@ -250,25 +250,24 @@ Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PW
 
 ## Phase 17: APFS snapshot inspector
 
-Spike (run by hand on the dev Mac, macOS 26.6.2; macOS 13 to 15 are not available here). Paste the output of each:
+Spike (2026-11-07, run by hand in Terminal on the dev Mac, macOS 26.6.2; macOS 13 to 15 are not available here):
 
-1. `tmutil localsnapshot` (creates a test snapshot; does it need sudo?)
-2. `tmutil listlocalsnapshots /` and `tmutil listlocalsnapshotdates /`
-3. `tmutil thinlocalsnapshots / 1000000000 4` without sudo, then `echo $?` (this can remove every local Time Machine snapshot, not only the test one)
-4. `tmutil localsnapshot` again, then `tmutil deletelocalsnapshots <date>` without sudo, then `echo $?`
-5. `osascript -e 'do shell script "/usr/bin/tmutil deletelocalsnapshots <date>" with administrator privileges'`, then `echo $?` (record the prompt text)
-6. Step 5 again, pressing Cancel: exit code and message
+- `tmutil localsnapshot` needs no sudo: "Created local snapshot with date: 2026-11-07-015802".
+- `tmutil listlocalsnapshots /` prints `com.apple.TimeMachine.2026-11-07-015802.local` under "Snapshots for disk /:"; `listlocalsnapshotdates /` prints `2026-11-07-015802`. Both match the parser and the date check.
+- `tmutil thinlocalsnapshots / 1000000000 4` without sudo: "Thinned local snapshots: com.apple.TimeMachine.2026-11-07-015802.local", exit 0.
+- `tmutil deletelocalsnapshots 2026-11-07-015921` without sudo: "Deleted local snapshot '2026-11-07-015921'", exit 0.
+- Not run: the `osascript` prompt and its Cancel, because nothing needed it. Terminal may hold Full Disk Access, and DiskLens normally does too.
 
-Results: not run yet. If step 3 succeeds without sudo, set `THIN_NEEDS_ADMIN` in `src/cleanup/snapshots.rs` to false.
+Decision: both actions run `tmutil` directly. The `osascript` administrator prompt stays only as the fallback when `tmutil` fails and the opt-in is on (PRD FR-SNAP-4, FR-SNAP-5).
 
 Manual checks (`DISKLENS_MOCK=pro cargo run` for the look, the packaged app or `DISKLENS_DRY_RUN=0` with a Pro license for real actions):
 
 - [ ] Free: ⌘K "Local Snapshots…", the Overview purgeable line and the results "Show Snapshots…" link open the Pro sheet; the held-by line and the purgeable line read as before.
 - [ ] Pro, mock: the sheet lists 3 snapshots with dates and ages, one "Managed by macOS" name without actions, and the purgeable line.
-- [ ] Delete with the opt-in off shows the explanation and the switch; nothing runs. After turning it on, Confirm shows `/usr/bin/tmutil deletelocalsnapshots <date>` and, in a dry run, reports that nothing ran.
+- [ ] Delete shows `/usr/bin/tmutil deletelocalsnapshots <date>` before Confirm and, in a dry run, reports that nothing ran.
 - [ ] Settings shows the same switch only with Pro, and it stays in sync with the sheet.
-- [ ] Real Mac, with a test snapshot: Delete shows the macOS administrator prompt; after it, the snapshot is gone from the list and the audit log has one `privileged_command` line with the argv. Record free space before and after.
-- [ ] Real Mac: Cancel in the prompt reports "Nothing changed: Cancelled or failed." and the snapshot stays.
+- [ ] Real Mac, with a test snapshot (`tmutil localsnapshot`): Delete runs with no prompt; the snapshot is gone from the list and the audit log has one `command` line with the argv. Record free space before and after.
+- [ ] Fallback (only testable where `tmutil` refuses without admin rights, e.g. macOS 13 to 15, or without Full Disk Access): with the opt-in off, the sheet says macOS refused and shows the switch; with it on, Confirm shows the macOS administrator prompt and the log has a `privileged_command` line. Cancel reports "Nothing changed: Cancelled or failed." and the snapshot stays.
 - [ ] Real Mac: Thin with snapshots present; record free space before and after.
 - [ ] Dry run on a real Mac: the snapshot stays and no prompt appears.
 - [ ] Light and dark: the sheet, the command line and the opt-in read clearly; Esc closes it (not while an action runs).
