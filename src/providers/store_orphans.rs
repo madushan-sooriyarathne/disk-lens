@@ -74,6 +74,11 @@ pub fn bun(at: &Found) -> Vec<ProviderItem> {
     let mut out = Vec::new();
     for &c in &snap.nodes[at.node as usize].children {
         let name = &snap.nodes[c as usize].name;
+        // `@G@`, `@GH@` and `@T@` folders hold git, GitHub and tarball dependencies,
+        // which no lockfile names as `name@version`. A scope never has a second `@`.
+        if name.strip_prefix('@').is_some_and(|r| r.contains('@')) {
+            continue;
+        }
         if name.starts_with('@') && !name.contains("@@@") {
             for &p in &snap.nodes[c as usize].children {
                 let rel = format!("{name}/{}", snap.nodes[p as usize].name);
@@ -410,6 +415,19 @@ mod tests {
             .collect::<Vec<_>>();
         got.sort();
         assert_eq!(got, ["@s/kit@1.0.0", "orphan@3.0.0"]);
+    }
+
+    #[test]
+    fn bun_skips_git_github_and_tarball_dependency_folders() {
+        let (_t, root) = tree(&[
+            ("cache/@GH@owner-repo-0123456@@@1/package.json", "{}"),
+            ("cache/@G@0123456/x@1.0.0@@@1/package.json", "{}"),
+            ("cache/@T@0123456@@@1/package.json", "{}"),
+            ("app/bun.lock", BUN_LOCK),
+        ]);
+        let s = snap(&root);
+        let cache = root.join("cache");
+        assert!(bun(&found(&s, &cache)).is_empty());
     }
 
     #[test]
