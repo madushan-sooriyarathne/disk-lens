@@ -22,8 +22,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 12 Onboarding | Merged, awaiting QA and the spike | v2, PRD section 13.4.1 |
 | 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
-| 15 Pro licensing and gating | In progress | v2, PRD section 13.6. Split: 15a app side merged (manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01); 15b website (`site/`) and license server (`server/`) built on branch `feat/phase-15b-web`, awaiting QA (`docs/QA.md` Phase 15b) and review. Decisions recorded in PRD section 13.8 on 2026-11-01 |
-| 16 Lockfile tags and orphaned stores | Not started | Pro, PRD section 13.10.1 |
+| 15 Pro licensing and gating | Merged | v2, PRD section 13.6. Split: 15a app side merged (manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01); 15b website (`site/`) and license server (`server/`) merged, manual checks in `docs/QA.md` Phase 15b still to run. Decisions recorded in PRD section 13.8 on 2026-11-01 |
+| 16 Lockfile tags and orphaned stores | Built, awaiting review | Pro, PRD section 13.10.1. Branch `feat/phase-16-lockfile-stores`. Pro store rules replace the free rows while a license is active (decided 2026-11-06). Manual checks in `docs/QA.md` Phase 16 |
 | 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
 | 18 Containers and VMs | Not started | Pro, PRD section 13.10.3 |
 | 19 AI models hub | Not started | Pro, PRD section 13.10.2 |
@@ -785,6 +785,8 @@ Decisions (2026-11-01, PRD section 13.8): one-time purchase with paid major upgr
 - A test that a `pro = true` rule produces no rows without a license and does with one.
 
 ### Phase 16: Lockfile tags and orphaned stores
+
+Decision (2026-11-06): the Pro store rules (`pnpm-store-orphans`, `bun-cache-orphans`, `cargo-registry-orphans`, `homebrew-old`) claim the same folders as the free store rules with `priority = 1`, so they replace the free rows only while Pro is active. The matcher keeps one rule per path and revalidation is unchanged; Pro users no longer get the whole-store rows for these four stores. The snapshot did not keep link counts, so it gained `single_link_bytes` per folder and the list of lockfiles seen by the scan.
 
 1. Lockfile detection next to the project manifest and the `Reproducible` and `NoLockfile` badges (PRD FR-LOCK-1).
 2. Providers in `providers/store_orphans.rs`: pnpm (link count 1, from the scan's hard-link table), Bun (text `bun.lock` references; `bun.lockb` only means everything is used), Cargo (`Cargo.lock` references), Homebrew (`brew cleanup --dry-run`) (PRD FR-STORE-1). Review tier.
