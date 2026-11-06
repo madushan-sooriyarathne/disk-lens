@@ -123,6 +123,8 @@ pub enum Cmd {
     /// Pro: keeps the active filter.
     SaveFilter,
     Shortcuts,
+    /// Pro: the Local Snapshots sheet; without a license it explains it.
+    Snapshots,
 }
 
 /// What the Pro sheet explains. The first three are the batch commands (FR-KB-4), listed
@@ -134,6 +136,7 @@ pub enum Pro {
     StageFilter,
     SavedFilters,
     SweepNow,
+    Snapshots,
     About,
 }
 
@@ -144,7 +147,7 @@ pub enum Notice {
     Shortcuts,
 }
 
-const COMMANDS: [Cmd; 8] = [
+const COMMANDS: [Cmd; 9] = [
     Cmd::Rescan,
     Cmd::SelectSafe,
     Cmd::ClearQueue,
@@ -152,6 +155,7 @@ const COMMANDS: [Cmd; 8] = [
     Cmd::ToggleInspector,
     Cmd::ShowQueue,
     Cmd::HighlightCleanable,
+    Cmd::Snapshots,
     Cmd::Shortcuts,
 ];
 const PRO: [Pro; 4] = [
@@ -215,6 +219,7 @@ impl Cmd {
             Self::ClearFilter => "Clear Filter",
             Self::SaveFilter => "Save Filter",
             Self::Shortcuts => "Keyboard Shortcuts",
+            Self::Snapshots => "Local Snapshots…",
         }
     }
 
@@ -227,7 +232,11 @@ impl Cmd {
             Self::ToggleInspector => Box::new(root::ToggleInspector),
             Self::ShowQueue => Box::new(root::ShowQueue),
             Self::HighlightCleanable => Box::new(root::HighlightCleanable),
-            Self::Filter | Self::ClearFilter | Self::SaveFilter | Self::Shortcuts => return None,
+            Self::Filter
+            | Self::ClearFilter
+            | Self::SaveFilter
+            | Self::Shortcuts
+            | Self::Snapshots => return None,
         })
     }
 }
@@ -239,6 +248,7 @@ impl Pro {
             Self::StageFilter => "Stage Everything Matching a Filter",
             Self::SavedFilters => "Saved Filters",
             Self::SweepNow => "Run Sweep Rule Now",
+            Self::Snapshots => "Local Snapshots",
             Self::About => "DiskLens Pro",
         }
     }
@@ -253,6 +263,9 @@ impl Pro {
             }
             Self::SavedFilters => "Keep the filters you use often and apply them by name.",
             Self::SweepNow => "Run an auto-sweep rule now and stage what it finds.",
+            Self::Snapshots => {
+                "See the local Time Machine snapshots that hold purgeable space, thin them, or delete one."
+            }
             Self::About => {
                 "Pro adds scanners for more kinds of clutter, batch staging from the command palette and saved filters."
             }
@@ -801,7 +814,7 @@ fn icon(entry: &Entry) -> &'static str {
         Entry::ApplySaved(_) => "search",
         Entry::ForgetSaved(_) => "x",
         Entry::Command(c) => match c {
-            Cmd::Rescan => "rescan",
+            Cmd::Rescan | Cmd::Snapshots => "rescan",
             Cmd::SelectSafe | Cmd::ShowQueue | Cmd::ClearQueue => "tray",
             Cmd::ExportScript | Cmd::Shortcuts => "doc",
             Cmd::ToggleInspector => "inspector",

@@ -21,6 +21,7 @@ pub mod screens;
 pub mod selection;
 pub mod settings_window;
 pub mod shell;
+pub mod snapshots;
 pub mod source;
 pub mod stats;
 pub mod theme;

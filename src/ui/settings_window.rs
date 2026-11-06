@@ -10,6 +10,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::switch::Switch;
 use gpui_component::{Disableable, Sizable, Size};
 
 use super::model::AppModel;
@@ -20,7 +21,7 @@ use crate::license::{self, Kind, Status};
 /// The marketing site (`site/`); Buy and Start Trial open pages on it.
 const SITE_URL: &str = "https://disklens.space";
 const WIDTH: f32 = 520.;
-const HEIGHT: f32 = 270.;
+const HEIGHT: f32 = 350.;
 const SECONDS_PER_DAY: u64 = 86_400;
 
 /// The main window's model, for the menu action and `disklens://` links, which arrive
@@ -198,6 +199,7 @@ impl Render for SettingsView {
         let has_token = !matches!(status, Status::Free);
         let empty = self.token.read(cx).value().trim().is_empty();
         let problem = matches!(status, Status::Invalid(_));
+        let allow_admin = model.allow_admin_actions;
 
         div()
             .size_full()
@@ -282,6 +284,27 @@ impl Render for SettingsView {
                             }))
                     })),
             )
+            // Only snapshot actions use it, and they are Pro (PRD FR-SNAP-5).
+            .children(status.is_pro().then(|| {
+                let model = self.model.clone();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .pt_2()
+                    .child(
+                        Switch::new("allow-admin")
+                            .label("Allow actions that need administrator rights")
+                            .checked(allow_admin)
+                            .on_click(move |on, _, cx| {
+                                model.update(cx, |m, cx| m.set_allow_admin_actions(*on, cx));
+                            }),
+                    )
+                    .child(div().text_size(px(12.)).text_color(t.secondary).child(
+                        "Used only to delete or thin local Time Machine snapshots. macOS \
+                                 asks for your password each time, and nothing is kept.",
+                    ))
+            }))
     }
 }
 

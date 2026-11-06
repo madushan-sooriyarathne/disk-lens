@@ -17,15 +17,17 @@ use super::cleanup;
 use super::explorer::{self, ExplorerState};
 use super::filter::Filter;
 use super::motion;
-use super::palette::{self, Cmd, Entry, Notice, Palette};
+use super::palette::{self, Cmd, Entry, Notice, Palette, Pro};
 use super::recommendations::{self, PanelState};
 use super::selection;
 use super::settings_window;
+use super::snapshots::{self, SnapshotsView};
 use super::source::Source;
 use super::stats;
 use super::theme;
 use super::treemap::{self, Dir};
 use crate::cleanup::model::{CleanupEvent, CleanupPlan, CleanupSummary, Outcome};
+use crate::cleanup::snapshots::SnapshotAction;
 use crate::error::Error;
 use crate::license::Status;
 use crate::platform;
@@ -162,6 +164,10 @@ pub struct AppModel {
     pub filter: Option<Filter>,
     /// The Pro explanation or Keyboard Shortcuts sheet.
     pub notice: Option<Notice>,
+    /// The Local Snapshots sheet while open (Pro, PRD 13.10.5).
+    pub snapshots: Option<SnapshotsView>,
+    /// "Allow actions that need administrator rights" (FR-SNAP-5), shared with Settings.
+    pub allow_admin_actions: bool,
     /// Shared with the Settings window, which reads and drives it.
     pub license: Status,
     /// Why the last activation or removal failed, shown in Settings.
@@ -398,11 +404,18 @@ impl AppModel {
         off_thread(
             &source,
             cx,
-            |s| (s.license_status(), s.saved_filters()),
-            |this, (license, saved), _| {
+            |s| {
+                (
+                    s.license_status(),
+                    s.saved_filters(),
+                    s.allow_admin_actions(),
+                )
+            },
+            |this, (license, saved, allow_admin), _| {
                 // The scan that follows reads the same license, so this is not a change.
                 this.license = license;
                 this.saved_filters = saved;
+                this.allow_admin_actions = allow_admin;
             },
         );
         Self {
@@ -429,6 +442,8 @@ impl AppModel {
             palette_seq: 0,
             filter: None,
             notice: None,
+            snapshots: None,
+            allow_admin_actions: false,
             license: Status::Free,
             license_error: None,
             saved_filters: Vec::new(),
@@ -1196,6 +1211,7 @@ impl AppModel {
         if self.phase != Phase::Ready
             || self.cleanup.is_some()
             || self.notice.is_some()
+            || self.snapshots.is_some()
             || self.palette.is_some()
         {
             return;
@@ -1381,6 +1397,7 @@ impl AppModel {
                 Cmd::ClearFilter => self.set_filter(None, cx),
                 Cmd::SaveFilter => self.save_filter(cx),
                 Cmd::Shortcuts => self.show_notice(Notice::Shortcuts, cx),
+                Cmd::Snapshots => self.open_snapshots(cx),
                 Cmd::Filter => {}
             },
             Entry::Filter(f) => self.set_filter(Some(f), cx),
@@ -1511,6 +1528,116 @@ impl AppModel {
         if self.notice.take().is_some() {
             cx.notify();
         }
+    }
+
+    /// ⌘K "Local Snapshots…", the Overview purgeable line and the cleanup results link.
+    /// Pro; without a license it opens the Pro sheet that explains it. Not over the
+    /// cleanup sheet.
+    pub fn open_snapshots(&mut self, cx: &mut Context<Self>) {
+        if !self.license.is_pro() {
+            self.show_notice(Notice::Pro(Pro::Snapshots), cx);
+            return;
+        }
+        if self.cleanup.is_some() || matches!(self.phase, Phase::Onboarding(_)) {
+            return;
+        }
+        self.snapshots = Some(SnapshotsView::default());
+        cx.notify();
+        self.load_snapshots(cx);
+    }
+
+    /// Reads the list again, after opening and after every action.
+    fn load_snapshots(&mut self, cx: &mut Context<Self>) {
+        off_thread(
+            &self.source,
+            cx,
+            |s| (s.snapshot_info(), s.allow_admin_actions()),
+            |this, (info, allow_admin), _| {
+                this.allow_admin_actions = allow_admin;
+                let Some(view) = &mut this.snapshots else {
+                    return;
+                };
+                match info {
+                    Ok(info) => {
+                        view.info = Some(info);
+                        view.error = None;
+                    }
+                    Err(e) => {
+                        tracing::warn!("could not list local snapshots: {e}");
+                        view.error = Some(format!("Could not list local snapshots: {e}"));
+                    }
+                }
+            },
+        );
+    }
+
+    /// Thin or Delete: shows the exact command (and the opt-in first when needed).
+    pub fn ask_snapshot_action(&mut self, action: SnapshotAction, cx: &mut Context<Self>) {
+        if let Some(view) = self.snapshots.as_mut().filter(|v| !v.running) {
+            view.confirm = Some(action);
+            view.message = None;
+            cx.notify();
+        }
+    }
+
+    pub fn cancel_snapshot_action(&mut self, cx: &mut Context<Self>) {
+        if let Some(view) = self.snapshots.as_mut().filter(|v| !v.running) {
+            view.confirm = None;
+            cx.notify();
+        }
+    }
+
+    /// Runs the confirmed action off the UI thread: the administrator prompt blocks.
+    pub fn confirm_snapshot_action(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.snapshots.as_mut().filter(|v| !v.running) else {
+            return;
+        };
+        let Some(action) = view.confirm.clone() else {
+            return;
+        };
+        view.running = true;
+        cx.notify();
+        let run = action.clone();
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.snapshot_action(&run),
+            move |this, result, cx| {
+                if let Some(view) = &mut this.snapshots {
+                    view.running = false;
+                    view.confirm = None;
+                    view.message = Some(match &result {
+                        Ok(outcome) => snapshots::outcome_line(&action, outcome),
+                        Err(e) => format!("Nothing changed: {e}."),
+                    });
+                }
+                this.load_snapshots(cx);
+            },
+        );
+    }
+
+    pub fn close_snapshots(&mut self, cx: &mut Context<Self>) {
+        if self.snapshots.as_ref().is_some_and(|v| !v.running) {
+            self.snapshots = None;
+            cx.notify();
+        }
+    }
+
+    /// The FR-SNAP-5 opt-in, from the sheet or Settings.
+    pub fn set_allow_admin_actions(&mut self, allow: bool, cx: &mut Context<Self>) {
+        self.allow_admin_actions = allow;
+        cx.notify();
+        off_thread(
+            &self.source,
+            cx,
+            move |s| s.set_allow_admin_actions(allow),
+            |this, saved, cx| {
+                if let Err(e) = saved {
+                    tracing::warn!("could not save the administrator opt-in: {e}");
+                    this.show_toast(format!("Could not save the setting: {e}"), cx);
+                }
+            },
+        );
     }
 
     /// The recommendation rows the filter lets through, all of them without one.
@@ -3718,6 +3845,74 @@ mod tests {
         );
         let staged = model.read_with(cx, |m, _| m.selected.len());
         assert_eq!(staged, selection::ready_ids(&row).len());
+    }
+
+    #[gpui::test]
+    fn without_pro_local_snapshots_opens_the_pro_sheet(cx: &mut TestAppContext) {
+        let (model, cx) = setup(cx, false);
+        run(&model, cx, Entry::Command(Cmd::Snapshots));
+        let notice = model.read_with(cx, |m, _| m.notice);
+        assert_eq!(notice, Some(Notice::Pro(Pro::Snapshots)));
+    }
+
+    #[gpui::test]
+    fn with_pro_local_snapshots_lists_the_snapshots(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        run(&model, cx, Entry::Command(Cmd::Snapshots));
+        cx.run_until_parked();
+        let listed = model.read_with(cx, |m, _| {
+            m.snapshots
+                .as_ref()
+                .and_then(|v| v.info.as_ref())
+                .map(|i| i.local.len())
+        });
+        assert_eq!(listed, Some(3));
+    }
+
+    #[gpui::test]
+    fn a_delete_without_the_opt_in_changes_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        run(&model, cx, Entry::Command(Cmd::Snapshots));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.ask_snapshot_action(
+                SnapshotAction::Delete {
+                    date: "2026-11-04-091500".into(),
+                },
+                cx,
+            );
+            m.confirm_snapshot_action(cx);
+        });
+        cx.run_until_parked();
+        let message = model.read_with(cx, |m, _| m.snapshots.as_ref()?.message.clone());
+        assert_eq!(
+            message.as_deref(),
+            Some("Nothing changed: Actions that need administrator rights are turned off.")
+        );
+    }
+
+    #[gpui::test]
+    fn a_confirmed_delete_in_a_dry_run_runs_nothing(cx: &mut TestAppContext) {
+        let (model, cx) = setup_pro(cx);
+        run(&model, cx, Entry::Command(Cmd::Snapshots));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| m.set_allow_admin_actions(true, cx));
+        cx.run_until_parked();
+        model.update(cx, |m, cx| {
+            m.ask_snapshot_action(
+                SnapshotAction::Delete {
+                    date: "2026-11-04-091500".into(),
+                },
+                cx,
+            );
+            m.confirm_snapshot_action(cx);
+        });
+        cx.run_until_parked();
+        let message = model.read_with(cx, |m, _| m.snapshots.as_ref()?.message.clone());
+        assert_eq!(
+            message.as_deref(),
+            Some("Dry run: the command was checked and logged, nothing ran.")
+        );
     }
 
     #[gpui::test]
