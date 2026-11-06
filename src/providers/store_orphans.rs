@@ -42,7 +42,8 @@ pub fn pnpm(at: &Found) -> Vec<ProviderItem> {
 
 /// Each `name@version@@@n` folder (also under `@scope/`) that no `bun.lock` under
 /// the root names. A project with only the binary `bun.lockb` cannot be read, so
-/// every package counts as used.
+/// every package counts as used. Lockfiles inside `node_modules` came with an
+/// installed package and are not projects.
 pub fn bun(at: &Found) -> Vec<ProviderItem> {
     let Some(locks) = lockfiles(at, at.path) else {
         return Vec::new();
@@ -188,7 +189,8 @@ fn whole(at: &Found, key: &str, name: &str, size: u64) -> ProviderItem {
     }
 }
 
-/// Lockfiles under the root as (folder, file name), skipping those inside `skip`.
+/// Lockfiles under the root as (folder, file name), skipping those inside `skip`
+/// or inside `node_modules`.
 /// `None` when the snapshot predates lockfile recording.
 fn lockfiles(at: &Found, skip: &Path) -> Option<Vec<(PathBuf, String)>> {
     let snap = at.snap;
@@ -198,6 +200,7 @@ fn lockfiles(at: &Found, skip: &Path) -> Option<Vec<(PathBuf, String)>> {
             .iter()
             .map(|l| (dir_path(snap, l.node), l.name.clone()))
             .filter(|(d, _)| !d.starts_with(skip))
+            .filter(|(d, _)| !d.components().any(|c| c.as_os_str() == "node_modules"))
             .collect(),
     )
 }
@@ -418,6 +421,18 @@ mod tests {
         let s = snap(&root);
         let cache = root.join("cache");
         assert!(bun(&found(&s, &cache)).is_empty());
+    }
+
+    #[test]
+    fn bun_ignores_lockfiles_shipped_inside_node_modules() {
+        let (_t, root) = tree(&[
+            ("cache/orphan@3.0.0@@@1/index.js", "a"),
+            ("app/bun.lock", BUN_LOCK),
+            ("app/node_modules/x/bun.lockb", "binary"),
+        ]);
+        let s = snap(&root);
+        let cache = root.join("cache");
+        assert_eq!(names(&bun(&found(&s, &cache))), ["orphan@3.0.0"]);
     }
 
     #[test]
