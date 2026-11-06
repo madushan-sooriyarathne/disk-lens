@@ -66,8 +66,12 @@ impl Fixture {
             .unwrap();
     }
 
-    /// Relative path of every match -> rule id.
+    /// Relative path of every match -> rule id, without a license.
     fn matches(&self, tools: &Tools) -> HashMap<String, String> {
+        self.matches_with(tools, false)
+    }
+
+    fn matches_with(&self, tools: &Tools, pro: bool) -> HashMap<String, String> {
         let rules = Rules::embedded();
         let snap = scan(
             &self.home,
@@ -83,7 +87,7 @@ impl Fixture {
             runner: &runner,
             tools,
             now: SystemTime::now(),
-            pro: false,
+            pro,
         };
         let matcher = Matcher::new(rules, &snap.meta.root);
         matcher
@@ -296,6 +300,19 @@ const TABLE: &[(&str, &[&str], &[&str])] = &[
         &["Library/Application Support/MobileSync/Backup"],
     ),
     ("trash-bin", &[".Trash"], &[".Trash2"]),
+    // Pro rules never match without a license; `pro_store_rules_win_only_with_pro`.
+    (
+        "pnpm-store-orphans",
+        &[],
+        &["Library/pnpm/store", ".pnpm-store"],
+    ),
+    ("bun-cache-orphans", &[], &[".bun/install/cache"]),
+    (
+        "cargo-registry-orphans",
+        &[],
+        &[".cargo/registry/cache", ".cargo/registry/src"],
+    ),
+    ("homebrew-old", &[], &["Library/Caches/Homebrew"]),
 ];
 
 /// Files that make the guards in TABLE pass or fail as intended.
@@ -364,6 +381,35 @@ fn every_rule_matches_and_misses_as_specified() {
             );
         }
     }
+}
+
+#[test]
+fn pro_store_rules_win_only_with_pro() {
+    let f = Fixture::new();
+    let stores = [
+        "Library/pnpm/store",
+        ".pnpm-store",
+        ".bun/install/cache",
+        ".cargo/registry/cache",
+        ".cargo/registry/src",
+        "Library/Caches/Homebrew",
+    ];
+    for p in stores {
+        f.dir(p);
+    }
+    let got = f.matches_with(&f.all_tools(), true);
+    let winners: Vec<&str> = stores.iter().map(|p| got[*p].as_str()).collect();
+    assert_eq!(
+        winners,
+        [
+            "pnpm-store-orphans",
+            "pnpm-store-orphans",
+            "bun-cache-orphans",
+            "cargo-registry-orphans",
+            "cargo-registry-orphans",
+            "homebrew-old",
+        ]
+    );
 }
 
 #[test]

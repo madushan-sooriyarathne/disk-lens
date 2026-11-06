@@ -673,10 +673,12 @@ mod tests {
         assert_eq!(tilde("/opt/tool", "/Users/x"), "/opt/tool");
     }
 
-    /// The embedded rules with the first one made a Pro rule.
+    /// The embedded rules with only the first one a Pro rule.
     fn rules_with_one_pro_rule() -> Rules {
         let mut rules = Rules::embedded().clone();
-        rules.rules[0].pro = true;
+        for (i, r) in rules.rules.iter_mut().enumerate() {
+            r.pro = i == 0;
+        }
         rules
     }
 

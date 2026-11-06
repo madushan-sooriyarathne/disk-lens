@@ -111,8 +111,11 @@ pub fn validate(r: &Rules) -> Vec<String> {
         if rule.row_label.is_some() && rule.split_rows_by.is_none() {
             errors.push(format!("{at}: row_label needs split_rows_by"));
         }
-        if rule.min_size_mb == 0 {
-            errors.push(format!("{at}: min_size_mb must be at least 1"));
+        // Provider items are whole packages; small ones still count.
+        if rule.min_size_mb == 0 && rule.provider.is_none() {
+            errors.push(format!(
+                "{at}: min_size_mb must be at least 1 without a provider"
+            ));
         }
     }
     errors
@@ -439,7 +442,10 @@ method = "trash"
     fn rejects_bad_ids_and_sizes() {
         let r = BASE.replace("id = \"npm-cache\"", "id = \"Npm_Cache\"");
         assert!(Rules::parse(&r).unwrap_err().contains("kebab-case"));
-        rejects("min_size_mb = 0", "min_size_mb must be at least 1");
+        rejects(
+            "min_size_mb = 0",
+            "min_size_mb must be at least 1 without a provider",
+        );
         let v = BASE.replace("schema_version = 1", "schema_version = 2");
         assert!(Rules::parse(&v).unwrap_err().contains("schema_version 2"));
     }
