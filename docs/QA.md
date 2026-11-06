@@ -244,8 +244,8 @@ Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PW
 - [ ] With Pro, selecting the node_modules row shows "Reproducible via package-lock.json (…)" under `idle-proj`, and the venv row shows "No lockfile: a reinstall may pick newer versions" in amber.
 - [ ] Staging the Cargo orphans and confirming (dry run) lists both items; the audit log has one line each.
 - [ ] Remove License: the free store rows return after the rescan, with no orphan rows.
-- [ ] Real home, read-only, with Pro: the pnpm row (if pnpm is installed) shows an exact size, not "up to"; the Homebrew row lists what `brew cleanup --dry-run` reports for `~/Library/Caches/Homebrew`.
-- [ ] A row with thousands of orphan crates (real `~/.cargo`, with Pro) scrolls smoothly in the inspector.
+- [ ] Real home, read-only, with Pro: the pnpm row (if pnpm is installed) shows "up to" (on APFS pnpm clones, so the one-link size is an upper bound); the Homebrew row lists what `brew cleanup --dry-run` reports for `~/Library/Caches/Homebrew`.
+- [ ] A row with thousands of orphan crates (real `~/.cargo`, with Pro) scrolls smoothly in the inspector. Not measured yet (needs a Pro token): the inspector draws every item, and the dev Mac has 1,032 cached crates and 1,032 source folders, so the Cargo row can hold about 2,000 items. If it stutters, draw the 100 largest and an "and N more" line.
 - [ ] Light and dark: the lockfile lines read clearly beside the active-work reason, and truncate at the minimum window size.
 
 ## Supervised real run (only when the user says so)
