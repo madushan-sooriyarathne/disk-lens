@@ -48,6 +48,32 @@ pub struct DirNode {
     /// over the subtree. Snapshots from before this field read as 0.
     #[serde(default)]
     pub media_bytes: u64,
+    /// Allocated bytes of files with exactly one hard link, aggregated over the subtree.
+    /// In a pnpm store these are the files no project links to. Snapshots from before
+    /// this field read as 0.
+    #[serde(default)]
+    pub single_link_bytes: u64,
+}
+
+/// File names recorded in `Snapshot::lockfiles`, in the order a project's lockfile
+/// is named when it has several.
+pub const LOCKFILES: [&str; 9] = [
+    "bun.lock",
+    "bun.lockb",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "Cargo.lock",
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+];
+
+/// A lockfile seen by the scan: `name` is a file in directory `node`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockfileAt {
+    pub node: u32,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +92,10 @@ pub struct SnapshotMeta {
 pub struct Snapshot {
     pub meta: SnapshotMeta,
     pub nodes: Vec<DirNode>,
+    /// Every lockfile under the root. `None` in snapshots from before this field:
+    /// unknown, so nothing that depends on it may be offered.
+    #[serde(default)]
+    pub lockfiles: Option<Vec<LockfileAt>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +159,7 @@ pub struct TreeBuilder {
     stack: Vec<u32>,
     hardlinks: super::hardlinks::HardLinks,
     media: MediaExtensions,
+    lockfiles: Vec<LockfileAt>,
 }
 
 impl TreeBuilder {
@@ -160,6 +191,7 @@ impl TreeBuilder {
             flags,
             category: String::new(),
             media_bytes: 0,
+            single_link_bytes: 0,
         });
         id
     }
@@ -182,17 +214,27 @@ impl TreeBuilder {
         logical: u64,
         link: Option<(u64, u64)>,
     ) {
+        let dir = self.stack[depth - 1];
+        if LOCKFILES.contains(&name) {
+            self.lockfiles.push(LockfileAt {
+                node: dir,
+                name: name.to_owned(),
+            });
+        }
         if let Some((dev, ino)) = link
             && !self.hardlinks.first_sighting(dev, ino)
         {
             return;
         }
-        let node = &mut self.nodes[self.stack[depth - 1] as usize];
+        let node = &mut self.nodes[dir as usize];
         node.size += size;
         node.logical_size += logical;
         node.file_count += 1;
         if self.media.is_media(name) {
             node.media_bytes += size;
+        }
+        if link.is_none() {
+            node.single_link_bytes += size;
         }
         // Keep the 20 largest (ties broken by name) without allocating names for the rest.
         if node.top_files.len() < TOP_FILES {
@@ -214,15 +256,26 @@ impl TreeBuilder {
         }
     }
 
+    /// The lockfiles seen so far; call before `finish`.
+    pub fn take_lockfiles(&mut self) -> Vec<LockfileAt> {
+        std::mem::take(&mut self.lockfiles)
+    }
+
     pub fn finish(mut self) -> Vec<DirNode> {
         for node in &mut self.nodes {
             trim_top(&mut node.top_files);
         }
         // Children have larger ids than parents: one reverse pass aggregates the subtree.
         for i in (1..self.nodes.len()).rev() {
-            let (size, logical, files, media) = {
+            let (size, logical, files, media, single) = {
                 let n = &self.nodes[i];
-                (n.size, n.logical_size, n.file_count, n.media_bytes)
+                (
+                    n.size,
+                    n.logical_size,
+                    n.file_count,
+                    n.media_bytes,
+                    n.single_link_bytes,
+                )
             };
             let p = self.nodes[i].parent.expect("non-root has parent") as usize;
             let parent = &mut self.nodes[p];
@@ -230,6 +283,7 @@ impl TreeBuilder {
             parent.logical_size += logical;
             parent.file_count += files;
             parent.media_bytes += media;
+            parent.single_link_bytes += single;
         }
         let sizes: Vec<u64> = self.nodes.iter().map(|n| n.size).collect();
         for node in &mut self.nodes {
@@ -310,6 +364,42 @@ mod tests {
         assert_eq!(n[1].media_bytes, 150);
         assert_eq!(n[0].media_bytes, 170);
         assert_eq!(n[0].size, 186);
+    }
+
+    #[test]
+    fn single_link_bytes_skip_hard_linked_files() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        b.push_dir(1, "store".into(), 0, NodeFlags::default());
+        b.add_file(2, "orphan", 300, 300, None);
+        b.add_file(2, "linked", 500, 500, Some((1, 4)));
+        b.add_file(1, "top", 7, 7, None);
+        let n = b.finish();
+        assert_eq!((n[1].single_link_bytes, n[0].single_link_bytes), (300, 307));
+    }
+
+    #[test]
+    fn lockfiles_are_recorded_with_their_folder() {
+        let mut b = TreeBuilder::default();
+        b.push_dir(0, "root".into(), 0, NodeFlags::default());
+        b.push_dir(1, "app".into(), 0, NodeFlags::default());
+        b.add_file(2, "package.json", 1, 1, None);
+        b.add_file(2, "bun.lock", 1, 1, None);
+        b.add_file(1, "Cargo.lock", 1, 1, Some((1, 3)));
+        let got = b.take_lockfiles();
+        assert_eq!(
+            got,
+            [
+                LockfileAt {
+                    node: 1,
+                    name: "bun.lock".into()
+                },
+                LockfileAt {
+                    node: 0,
+                    name: "Cargo.lock".into()
+                }
+            ]
+        );
     }
 
     #[test]

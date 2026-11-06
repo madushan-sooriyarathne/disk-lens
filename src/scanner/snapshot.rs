@@ -71,7 +71,9 @@ mod tests {
                 flags: NodeFlags::default(),
                 category: String::new(),
                 media_bytes: 4096,
+                single_link_bytes: 0,
             }],
+            lockfiles: Some(vec![]),
         }
     }
 

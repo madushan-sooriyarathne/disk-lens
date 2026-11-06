@@ -56,5 +56,6 @@ pub fn scan(
     Ok(Snapshot {
         meta,
         nodes: walked.nodes,
+        lockfiles: Some(walked.lockfiles),
     })
 }
