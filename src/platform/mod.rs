@@ -15,7 +15,10 @@ pub mod drag;
 mod quick_look;
 mod snapshots;
 pub use quick_look::quick_look;
-pub use snapshots::local_snapshot_count;
+pub use snapshots::{
+    LocalSnapshot, TMUTIL, is_snapshot_date, list_local_snapshots, local_snapshot_count,
+    other_snapshots,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Proc {
