@@ -506,6 +506,19 @@ fn pro_store_orphans_match_the_fixture_exactly() {
 }
 
 #[test]
+fn pnpm_orphan_size_is_an_estimate_because_apfs_clones() {
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let (_t, tools) = fake_tools(&["git", "pnpm", "brew"]);
+    let rows = rows_with(&snap, &tools, &FakeRunner::default(), true);
+    let pnpm = rows
+        .iter()
+        .find(|r| r.row_id == "pnpm-store-orphans")
+        .unwrap();
+    assert!(pnpm.size_is_estimate);
+}
+
+#[test]
 fn free_store_rows_are_unchanged_without_a_license() {
     let Some(home) = sandbox() else { return };
     let snap = scanned(&home);

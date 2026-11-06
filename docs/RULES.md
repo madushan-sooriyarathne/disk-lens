@@ -115,7 +115,7 @@ In sandbox mode (`DISKLENS_SCAN_ROOT` set) only `git` resolves as a tool. The `o
 | `git_worktrees` | Each child of the matched folder whose `.git` is a file containing `gitdir:`. Resolves `{main_repo}` and `{project}` (main repo folder name) | `git -C {main_repo} worktree remove {path}` (never `--force`) |
 | `simctl_unavailable` | `xcrun simctl list devices unavailable -j`, sizing each device folder from the snapshot | `xcrun simctl delete unavailable` once for all items |
 | `docker` | `docker system df --format json`. Reclaimable size of images, containers and build cache (volumes excluded), always an estimate. When Docker does not answer, the matched folder's size stands in as the upper bound | `docker system prune -a -f` (volumes are kept) |
-| `pnpm_orphans` | One item for the store: the allocated bytes of files under `<store>/<version>/files` with a link count of 1, which no `node_modules` folder links to (the scan sums them per folder). Exact | `pnpm store prune` |
+| `pnpm_orphans` | One item for the store: the allocated bytes of files under `<store>/<version>/files` with a link count of 1, which no `node_modules` folder links to (the scan sums them per folder). An upper bound: exact when pnpm hard-links, but on APFS pnpm clones by default, so used files also have one link | `pnpm store prune` |
 | `bun_orphans` | Each `name@version@@@n` folder (also under `@scope/`) that no `bun.lock` under the scan root names. A folder with only the binary `bun.lockb` counts every package as used | Delete the folder |
 | `cargo_orphans` | `.crate` archives (matched `registry/cache`, listed on disk) or source folders (matched `registry/src`) whose `name-version` no `Cargo.lock` under the scan root names as a registry package. Lockfiles inside `~/.cargo/registry` do not count | Delete the archive or folder |
 | `homebrew_old` | `brew cleanup --dry-run`; the listed paths inside the matched folder, sized from disk. Always an estimate | `brew cleanup` |
@@ -721,6 +721,7 @@ paths = ["~/Library/pnpm/store", "~/.pnpm-store"]
 provider = "pnpm_orphans"
 method = "command"
 command = ["pnpm", "store", "prune"]
+size_is_estimate = true
 priority = 1
 pro = true
 guards = { requires_tool = "pnpm", process_not_running = ["pnpm"] }

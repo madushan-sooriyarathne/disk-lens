@@ -568,6 +568,7 @@ paths = ["~/Library/pnpm/store", "~/.pnpm-store"]
 provider = "pnpm_orphans"
 method = "command"
 command = ["pnpm", "store", "prune"]
+size_is_estimate = true
 priority = 1
 pro = true
 guards = { requires_tool = "pnpm", process_not_running = ["pnpm"] }

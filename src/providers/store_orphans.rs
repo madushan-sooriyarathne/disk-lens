@@ -1,8 +1,9 @@
 //! Packages in global stores that no project under the scan root uses
 //! (PRD FR-STORE-1). Each store has its own model of "used":
 //!
-//! - pnpm hard-links store files into `node_modules`, so a file with one link is
-//!   used by no project. The scan already sums those bytes per folder.
+//! - When pnpm hard-links store files into `node_modules`, a file with one link
+//!   is used by no project. The scan already sums those bytes per folder. On APFS
+//!   pnpm clones by default, so the sum is an upper bound (the rule says estimate).
 //! - Bun clones packages on macOS, so link counts say nothing: a cached
 //!   `name@version` is unused when no `bun.lock` names it.
 //! - Cargo crates are unused when no `Cargo.lock` names them.
@@ -23,8 +24,8 @@ use crate::rules::guards::Env;
 use crate::scanner::walk::allocated_bytes;
 use crate::view::{dir_id, dir_path};
 
-/// One item for the store: the bytes in `<store>/<version>/files` that no
-/// `node_modules` folder links to. `pnpm store prune` removes them.
+/// One item for the store: the bytes in `<store>/<version>/files` with one link,
+/// an upper bound of what no project uses. `pnpm store prune` removes the real orphans.
 pub fn pnpm(at: &Found) -> Vec<ProviderItem> {
     let snap = at.snap;
     let size: u64 = snap.nodes[at.node as usize]
