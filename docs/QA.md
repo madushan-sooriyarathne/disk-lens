@@ -235,6 +235,19 @@ Setup: copy `server/.env.example` to `server/.env.local` and fill in the payment
 - [ ] The server log has no token, key or full email address.
 - [ ] Owner review of `/privacy` and `/terms` before launch.
 
+## Phase 16: lockfile tags and orphaned stores
+
+Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run`) and activate a minted Pro token (Phase 15a). In sandbox mode only `git` resolves, so the pnpm and Homebrew Pro rows stay hidden there; check them against the real home folder read-only (do not clean).
+
+- [ ] Without a license, Recommended still shows "Bun install cache" and "Cargo registry cache" (safe), and "More with Pro" names the four store rules.
+- [ ] With Pro, after the background rescan, those rows are replaced by "Bun cache: packages no project uses" (`orphan@2.0.0`) and "Cargo registry: crates no project uses" (`orphan-0.1.0` and `orphan-0.1.0.crate`), both review tier. `used@1.0.0` and `used-1.0.0` appear nowhere.
+- [ ] With Pro, selecting the node_modules row shows "Reproducible via package-lock.json (…)" under `idle-proj`, and the venv row shows "No lockfile: a reinstall may pick newer versions" in amber.
+- [ ] Staging the Cargo orphans and confirming (dry run) lists both items; the audit log has one line each.
+- [ ] Remove License: the free store rows return after the rescan, with no orphan rows.
+- [ ] Real home, read-only, with Pro: the pnpm row (if pnpm is installed) shows "up to" (on APFS pnpm clones, so the one-link size is an upper bound); the Homebrew row lists what `brew cleanup --dry-run` reports for `~/Library/Caches/Homebrew`.
+- [ ] A row with thousands of orphan crates (real `~/.cargo`, with Pro) scrolls smoothly in the inspector. Not measured yet (needs a Pro token): the inspector draws every item, and the dev Mac has 1,032 cached crates and 1,032 source folders, so the Cargo row can hold about 2,000 items. If it stutters, draw the 100 largest and an "and N more" line.
+- [ ] Light and dark: the lockfile lines read clearly beside the active-work reason, and truncate at the minimum window size.
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.

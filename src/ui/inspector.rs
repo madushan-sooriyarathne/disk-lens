@@ -17,7 +17,7 @@ use super::selection::{self, RowState, within};
 use super::shell::{self, CONTROL_HEIGHT};
 use super::stats::{compute_stats, largest_folders};
 use super::theme::{self, Theme};
-use crate::recommend::model::{ItemStatus, MethodView, RecItem, Recommendation};
+use crate::recommend::model::{ItemStatus, MethodView, RecItem, Recommendation, Rehydrate};
 use crate::rules::model::Rules;
 use crate::view::{ViewKind, ViewNode};
 
@@ -755,6 +755,17 @@ fn rec_item(
                         .text_size(px(theme::T_SMALL))
                         .text_color(t.review_text)
                         .child(why.clone())
+                }))
+                .children(i.rehydrate.as_ref().map(|r| {
+                    let color = match r {
+                        Rehydrate::Lockfile(_) => t.safe_text,
+                        Rehydrate::NoLockfile => t.review_text,
+                    };
+                    div()
+                        .truncate()
+                        .text_size(px(theme::T_SMALL))
+                        .text_color(color)
+                        .child(rehydrate_line(r, i.size))
                 })),
         )
         .child(
@@ -767,9 +778,25 @@ fn rec_item(
         .into_any_element()
 }
 
+/// FR-LOCK-1 wording for an item's lockfile tag.
+fn rehydrate_line(r: &Rehydrate, size: u64) -> String {
+    match r {
+        Rehydrate::Lockfile(name) => format!("Reproducible via {name} ({})", format_bytes(size)),
+        Rehydrate::NoLockfile => "No lockfile: a reinstall may pick newer versions".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lockfile_tag_names_the_lockfile_and_size() {
+        assert_eq!(
+            rehydrate_line(&Rehydrate::Lockfile("bun.lock".into()), 4_200_000_000),
+            "Reproducible via bun.lock (4.2 GB)"
+        );
+    }
 
     #[test]
     fn method_words_read_plainly() {

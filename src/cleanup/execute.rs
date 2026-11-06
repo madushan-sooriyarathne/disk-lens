@@ -155,9 +155,7 @@ fn run<'p>(
     }
     let protected = revalidator.protected();
     let result = match &action.method {
-        PlannedMethod::Delete => fs::remove_dir_all(path)
-            .map(|()| None)
-            .map_err(|e| e.to_string()),
+        PlannedMethod::Delete => remove(path).map(|()| None).map_err(|e| e.to_string()),
         PlannedMethod::DeleteContents => each_child(protected, path, remove),
         PlannedMethod::Trash => engine
             .trash

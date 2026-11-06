@@ -7,14 +7,16 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::model::{ItemDetails, ItemStatus, MethodView, RecItem, Recommendation, Subfolder, Tier};
+use super::model::{
+    ItemDetails, ItemStatus, MethodView, RecItem, Recommendation, Rehydrate, Subfolder, Tier,
+};
 use crate::providers::{self, Found, ProviderItem};
 use crate::rules::category::Categories;
 use crate::rules::git_state::{self, RepoState};
 use crate::rules::guards::{self, Env};
 use crate::rules::matcher::Matcher;
 use crate::rules::model::{FallbackMethod, Method, Rule, Rules, SplitBy};
-use crate::scanner::tree::Snapshot;
+use crate::scanner::tree::{LOCKFILES, Snapshot};
 use crate::view::dir_path;
 
 /// `min_size_mb` uses decimal megabytes, like the sizes the UI shows.
@@ -40,6 +42,8 @@ pub struct Item {
     pub active_work: Option<String>,
     /// Whole days since the project last changed, for rules with `project_idle_days`.
     pub idle_days: Option<u32>,
+    /// Pro: the lockfile tag of a project artifact (a rule with `sibling_exists`).
+    pub rehydrate: Option<Rehydrate>,
 }
 
 pub struct Analysis {
@@ -102,6 +106,12 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 guards::project_age(&f.path, Path::new(&snap.meta.root), env)
                     .map(|a| u32::try_from(a.as_secs() / 86_400).unwrap_or(u32::MAX))
             });
+            let rehydrate = (env.pro && !rule.guards.sibling_exists.is_empty())
+                .then(|| {
+                    f.node
+                        .and_then(|n| rehydrate(snap, n, &rule.guards.sibling_exists))
+                })
+                .flatten();
             items.push(Item {
                 id: format!("{}:{}", rule.id, f.key),
                 rule: m.rule,
@@ -114,6 +124,7 @@ pub fn analyze(rules: &Rules, snap: &Snapshot, env: &Env) -> Analysis {
                 project: f.project,
                 active_work,
                 idle_days,
+                rehydrate,
             });
         }
     }
@@ -191,6 +202,7 @@ impl Analysis {
                 method: self.method(rule, item, env),
                 active_work: item.active_work.clone(),
                 idle_days: item.idle_days,
+                rehydrate: item.rehydrate.clone(),
             });
         }
         for row in &mut rows {
@@ -320,6 +332,48 @@ fn active_work(
     }
 }
 
+/// The lockfile in the folder holding `node` (the project), first in `LOCKFILES`
+/// order, of the ecosystem the rule's `markers` name: a `.venv` is not rebuilt
+/// from `package-lock.json`. `None` when the snapshot predates lockfile recording
+/// or no marker names an ecosystem.
+fn rehydrate(snap: &Snapshot, node: u32, markers: &[String]) -> Option<Rehydrate> {
+    let locks = snap.lockfiles.as_ref()?;
+    let project = snap.nodes[node as usize].parent?;
+    let names: Vec<&str> = LOCKFILES
+        .into_iter()
+        .filter(|n| markers.iter().any(|m| lockfiles_of(m).contains(n)))
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    Some(
+        names
+            .iter()
+            .find(|name| locks.iter().any(|l| l.node == project && l.name == **name))
+            .map_or(Rehydrate::NoLockfile, |name| {
+                Rehydrate::Lockfile((*name).to_owned())
+            }),
+    )
+}
+
+/// The lockfiles that rebuild a project with this `sibling_exists` marker.
+fn lockfiles_of(marker: &str) -> &'static [&'static str] {
+    match marker {
+        "package.json" | "turbo.json" => &[
+            "bun.lock",
+            "bun.lockb",
+            "pnpm-lock.yaml",
+            "package-lock.json",
+            "yarn.lock",
+        ],
+        "Cargo.toml" => &["Cargo.lock"],
+        "pyproject.toml" | "requirements.txt" | "uv.lock" => {
+            &["uv.lock", "poetry.lock", "Pipfile.lock"]
+        }
+        _ => &[],
+    }
+}
+
 /// `(row_id, label)`: one row per rule, or per project when the rule splits.
 fn row_of(rule: &Rule, item: &Item) -> (String, String) {
     match (rule.split_rows_by, &item.project) {
@@ -435,6 +489,10 @@ mod tests {
     }
 
     fn rows(w: &World, facts: &Facts) -> (Analysis, Vec<Recommendation>) {
+        rows_with(w, facts, false)
+    }
+
+    fn rows_with(w: &World, facts: &Facts, pro: bool) -> (Analysis, Vec<Recommendation>) {
         let rules = Rules::embedded();
         let snap = w.snap();
         let tools = w.tools();
@@ -444,7 +502,7 @@ mod tests {
             runner: &runner,
             tools: &tools,
             now: SystemTime::now(),
-            pro: false,
+            pro,
         };
         let a = analyze(rules, &snap, &env);
         let r = a.recommendations(rules, &env);
@@ -502,6 +560,61 @@ mod tests {
             .map(|i| (i.name.as_str(), i.idle_days))
             .collect();
         assert_eq!(ages, [("node_modules", Some(90)), ("_cacache", None)]);
+    }
+
+    /// An idle `p/node_modules` with `files` (name, contents) next to it.
+    fn idle_project(w: &World, files: &[&str]) {
+        w.put("p/node_modules", 2);
+        for name in ["package.json"].iter().chain(files) {
+            let f = w.home.join("p").join(name);
+            fs::write(&f, "{}").unwrap();
+            age(&f);
+        }
+    }
+
+    fn tag(w: &World, pro: bool) -> Option<Rehydrate> {
+        let (a, _) = rows_with(w, &Facts::default(), pro);
+        a.items
+            .iter()
+            .find(|i| i.name == "node_modules")
+            .unwrap()
+            .rehydrate
+            .clone()
+    }
+
+    #[test]
+    fn project_artifacts_name_their_lockfile_with_pro() {
+        let w = World::new();
+        idle_project(&w, &["package-lock.json", "bun.lock"]);
+        assert_eq!(tag(&w, true), Some(Rehydrate::Lockfile("bun.lock".into())));
+    }
+
+    #[test]
+    fn project_artifacts_ignore_another_ecosystems_lockfile() {
+        let w = World::new();
+        w.put("p/.venv", 2);
+        for name in ["pyproject.toml", "package-lock.json"] {
+            let f = w.home.join("p").join(name);
+            fs::write(&f, "{}").unwrap();
+            age(&f);
+        }
+        let (a, _) = rows_with(&w, &Facts::default(), true);
+        let venv = a.items.iter().find(|i| i.name == ".venv").unwrap();
+        assert_eq!(venv.rehydrate, Some(Rehydrate::NoLockfile));
+    }
+
+    #[test]
+    fn project_artifacts_without_a_lockfile_say_so_with_pro() {
+        let w = World::new();
+        idle_project(&w, &[]);
+        assert_eq!(tag(&w, true), Some(Rehydrate::NoLockfile));
+    }
+
+    #[test]
+    fn project_artifacts_carry_no_lockfile_tag_without_pro() {
+        let w = World::new();
+        idle_project(&w, &["bun.lock"]);
+        assert_eq!(tag(&w, false), None);
     }
 
     #[test]

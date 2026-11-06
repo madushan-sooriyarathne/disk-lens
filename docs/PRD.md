@@ -539,11 +539,12 @@ Each Pro feature has its own subsection here, as PLAN.md requires before work st
 
 - **FR-LOCK-1** Project artifact items (`node_modules`, `.next`, `.turbo`, `target`, `dist`, `.venv`) show "Reproducible via <lockfile> (4.2 GB)" when a lockfile sits next to the project manifest: `bun.lock`, `bun.lockb`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Cargo.lock`, `uv.lock`, `poetry.lock`, `Pipfile.lock`. Without one, the item shows "No lockfile: a reinstall may pick newer versions". The rule's plain `regenerates` text stays free.
 - **FR-STORE-1** Global stores are checked for packages no local project uses, each with that store's own model:
-  - **pnpm store** (`~/Library/pnpm/store`, `~/.pnpm-store`): pnpm hard-links store files into `node_modules`, so a file with a link count of 1 is used by no project. The scanner already tracks link counts, so the orphaned size is measured exactly instead of estimated. Cleanup stays `pnpm store prune` (owning tool, RULES.md principle 3).
+  - **pnpm store** (`~/Library/pnpm/store`, `~/.pnpm-store`): when pnpm hard-links store files into `node_modules`, a file with a link count of 1 is used by no project. The scan sums the bytes of files with one link per folder. On APFS pnpm clones by default (`package-import-method` `auto`), so used files have one link too: the size is an upper bound, shown as an estimate. Cleanup stays `pnpm store prune` (owning tool, RULES.md principle 3).
   - **Bun cache** (`~/.bun/install/cache`): on macOS Bun installs by clonefile, so link counts say nothing. A cached `name@version` is orphaned when no `bun.lock` under the scan root references it. A project with only the binary `bun.lockb` counts every package as used (conservative). The orphaned folders are deleted.
   - **Cargo** (`~/.cargo/registry/cache`, `~/.cargo/registry/src`): crates referenced by no `Cargo.lock` under the scan root. Their `.crate` files and source folders are deleted; Cargo downloads them again when needed.
   - **Homebrew** (`~/Library/Caches/Homebrew`): Homebrew downloads are not linked to repositories, so "orphaned" means old versions and downloads that `brew cleanup --dry-run` lists. Cleanup is `brew cleanup`.
 - **FR-STORE-2** Orphans are review tier ("Not used by any project on this Mac"), because projects outside the scan root or on other volumes may still use them.
+- **FR-STORE-3** (decided 2026-11-06) While Pro is active, each store's Pro rule replaces its free rule's row; without a license the free rows are unchanged. Verified layouts: Bun 1.4 keeps packages in `name@version@@@n` folders (scoped ones under `@scope/`) beside hashed `.npm` manifest files, and `brew cleanup --dry-run` prints `Would remove: <path> (<size>)` lines.
 
 #### 13.10.2 AI models hub
 

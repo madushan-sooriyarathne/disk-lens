@@ -76,6 +76,10 @@ pub enum Provider {
     GitWorktrees,
     SimctlUnavailable,
     Docker,
+    PnpmOrphans,
+    BunOrphans,
+    CargoOrphans,
+    HomebrewOld,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

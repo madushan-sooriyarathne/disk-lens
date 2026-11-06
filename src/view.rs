@@ -507,6 +507,7 @@ mod tests {
                 inaccessible_count: 0,
             },
             nodes,
+            lockfiles: Some(Vec::new()),
         }
     }
 

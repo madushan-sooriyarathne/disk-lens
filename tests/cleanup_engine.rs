@@ -36,6 +36,18 @@ fn delete_removes_the_folder() {
 }
 
 #[test]
+fn delete_removes_a_file_item() {
+    let mut w = World::new();
+    w.pro = true;
+    w.put(".cargo/registry/cache/index", 0);
+    w.file(".cargo/registry/cache/index/orphan-0.1.0.crate", "x");
+    w.scan();
+    let plan = w.plan_rules(&["cargo-registry-orphans"]);
+    w.execute(&plan, false);
+    assert!(!w.exists(".cargo/registry/cache/index/orphan-0.1.0.crate"));
+}
+
+#[test]
 fn delete_contents_keeps_the_folder() {
     let mut w = World::new();
     w.put(".Trash/old", 2);

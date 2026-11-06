@@ -192,6 +192,7 @@ mod tests {
                     method: MethodView::Delete,
                     idle_days,
                     active_work: None,
+                    rehydrate: None,
                 })
                 .collect(),
         }

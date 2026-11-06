@@ -20,7 +20,7 @@ use disklens_lib::scanner::tree::Snapshot;
 use disklens_lib::scanner::{ScanOptions, scan};
 use disklens_lib::view::{ViewNode, build_view};
 
-const FIXTURE_VERSION: &str = "4";
+const FIXTURE_VERSION: &str = "5";
 const MB: u64 = 1_000_000;
 
 fn sandbox() -> Option<PathBuf> {
@@ -49,6 +49,15 @@ fn scanned(home: &Path) -> Snapshot {
 }
 
 fn rows(snap: &Snapshot, tools: &Tools, runner: &dyn Runner) -> Vec<Recommendation> {
+    rows_with(snap, tools, runner, false)
+}
+
+fn rows_with(
+    snap: &Snapshot,
+    tools: &Tools,
+    runner: &dyn Runner,
+    pro: bool,
+) -> Vec<Recommendation> {
     let rules = Rules::embedded();
     let facts = Facts::default();
     let env = Env {
@@ -56,7 +65,7 @@ fn rows(snap: &Snapshot, tools: &Tools, runner: &dyn Runner) -> Vec<Recommendati
         runner,
         tools,
         now: SystemTime::now(),
-        pro: false,
+        pro,
     };
     analyze(rules, snap, &env).recommendations(rules, &env)
 }
@@ -395,5 +404,180 @@ fn providers_on_the_fixture_with_all_tools() {
         MethodView::Command {
             display: "pnpm store prune".into()
         }
+    );
+}
+
+/// Executables named `names` in a temp folder, as `Tools` outside sandbox mode.
+fn fake_tools(names: &[&str]) -> (tempfile::TempDir, Tools) {
+    let t = tempfile::tempdir().unwrap();
+    for name in names {
+        let p = t.path().join(name);
+        fs::write(&p, "").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let tools = Tools::new(vec![t.path().to_path_buf()], false);
+    (t, tools)
+}
+
+/// Allocated bytes of `rels` under `home`, counted as the scanner counts them.
+fn allocated(home: &Path, rels: &[&str]) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    rels.iter()
+        .map(|r| fs::symlink_metadata(home.join(r)).unwrap().blocks() * 512)
+        .sum()
+}
+
+/// Pro rows for the four stores: (rule, item names, size).
+fn store_rows(home: &Path) -> Vec<(String, Vec<String>, u64)> {
+    let snap = scanned(home);
+    let (_t, tools) = fake_tools(&["git", "pnpm", "brew"]);
+    let download = home.join("Library/Caches/Homebrew/downloads/a.tar.gz");
+    let runner = FakeRunner::default().with(
+        "brew cleanup --dry-run",
+        true,
+        &format!(
+            "Would remove: {} (1.1MB)\nWould remove: /opt/homebrew/Cellar/x/1.0 (3 files, 9MB)\n",
+            download.display()
+        ),
+    );
+    let rows = rows_with(&snap, &tools, &runner, true);
+    [
+        "pnpm-store-orphans",
+        "bun-cache-orphans",
+        "cargo-registry-orphans",
+        "homebrew-old",
+    ]
+    .iter()
+    .map(|id| {
+        let r = rows.iter().find(|r| r.row_id == *id).unwrap();
+        let mut names: Vec<String> = r.items.iter().map(|i| i.name.clone()).collect();
+        names.sort();
+        (r.row_id.clone(), names, r.size)
+    })
+    .collect()
+}
+
+#[test]
+fn pro_store_orphans_match_the_fixture_exactly() {
+    let Some(home) = sandbox() else { return };
+    let want = [
+        (
+            "pnpm-store-orphans",
+            vec!["Packages no project links to"],
+            allocated(&home, &["Library/pnpm/store/v3/files/ab/cd"]),
+        ),
+        (
+            "bun-cache-orphans",
+            vec!["orphan@2.0.0"],
+            allocated(
+                &home,
+                &[
+                    ".bun/install/cache/orphan@2.0.0@@@1",
+                    ".bun/install/cache/orphan@2.0.0@@@1/index.js",
+                ],
+            ),
+        ),
+        (
+            "cargo-registry-orphans",
+            vec!["orphan-0.1.0", "orphan-0.1.0.crate"],
+            allocated(
+                &home,
+                &[
+                    ".cargo/registry/cache/index/orphan-0.1.0.crate",
+                    ".cargo/registry/src/index/orphan-0.1.0",
+                    ".cargo/registry/src/index/orphan-0.1.0/lib.rs",
+                ],
+            ),
+        ),
+        (
+            "homebrew-old",
+            vec!["Old versions and downloads"],
+            allocated(&home, &["Library/Caches/Homebrew/downloads/a.tar.gz"]),
+        ),
+    ]
+    .map(|(id, names, size)| {
+        (
+            id.to_owned(),
+            names.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+            size,
+        )
+    });
+    assert_eq!(store_rows(&home), want);
+}
+
+#[test]
+fn pnpm_orphan_size_is_an_estimate_because_apfs_clones() {
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let (_t, tools) = fake_tools(&["git", "pnpm", "brew"]);
+    let rows = rows_with(&snap, &tools, &FakeRunner::default(), true);
+    let pnpm = rows
+        .iter()
+        .find(|r| r.row_id == "pnpm-store-orphans")
+        .unwrap();
+    assert!(pnpm.size_is_estimate);
+}
+
+#[test]
+fn free_store_rows_are_unchanged_without_a_license() {
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let (_t, tools) = fake_tools(&["git", "pnpm", "brew"]);
+    let rows = rows(&snap, &tools, &FakeRunner::default());
+    let ids: Vec<&str> = rows
+        .iter()
+        .map(|r| r.rule_id.as_str())
+        .filter(|id| {
+            [
+                "pnpm-store",
+                "bun-cache",
+                "cargo-registry",
+                "homebrew-cache",
+                "pnpm-store-orphans",
+                "bun-cache-orphans",
+                "cargo-registry-orphans",
+                "homebrew-old",
+            ]
+            .contains(id)
+        })
+        .collect();
+    let mut ids = ids;
+    ids.sort();
+    assert_eq!(
+        ids,
+        [
+            "bun-cache",
+            "cargo-registry",
+            "homebrew-cache",
+            "pnpm-store"
+        ]
+    );
+}
+
+#[test]
+fn pro_tags_project_artifacts_with_their_lockfile() {
+    use disklens_lib::recommend::model::Rehydrate;
+    let Some(home) = sandbox() else { return };
+    let snap = scanned(&home);
+    let (_t, tools) = fake_tools(&["git"]);
+    let rows = rows_with(&snap, &tools, &FakeRunner::default(), true);
+    let tag = |rel: &str| {
+        let path = home.join(rel).display().to_string();
+        rows.iter()
+            .flat_map(|r| r.items.iter())
+            .find(|i| i.path == path)
+            .unwrap()
+            .rehydrate
+            .clone()
+    };
+    assert_eq!(
+        [
+            tag("Desktop/idle-proj/node_modules"),
+            tag("Desktop/py-proj/.venv")
+        ],
+        [
+            Some(Rehydrate::Lockfile("package-lock.json".into())),
+            Some(Rehydrate::NoLockfile)
+        ]
     );
 }

@@ -549,3 +549,75 @@ tier = "review"
 paths = ["~/.Trash"]
 target = "contents"
 method = "delete"
+
+# ============================================================
+# Pro: packages no project uses (PRD 13.10.1). Each rule claims the same folders
+# as its free rule with a higher priority, so it replaces the free row only
+# while Pro is active.
+# ============================================================
+
+[[rule]]
+id = "pnpm-store-orphans"
+label = "pnpm store: packages no project uses"
+description = "Files in pnpm's shared store that no node_modules folder links to. Not used by any project on this Mac."
+regenerates = "Pruned packages are downloaded again only if a project needs them. Projects on other volumes may still use them."
+keywords = ["pnpm", "store", "orphan", "orphaned", "unused", "packages"]
+category = "package_caches"
+tier = "review"
+paths = ["~/Library/pnpm/store", "~/.pnpm-store"]
+provider = "pnpm_orphans"
+method = "command"
+command = ["pnpm", "store", "prune"]
+size_is_estimate = true
+priority = 1
+pro = true
+guards = { requires_tool = "pnpm", process_not_running = ["pnpm"] }
+
+[[rule]]
+id = "bun-cache-orphans"
+label = "Bun cache: packages no project uses"
+description = "Packages in Bun's install cache that no bun.lock under your home folder names. Not used by any project on this Mac."
+regenerates = "Bun downloads a package again if a project needs it. Projects on other volumes may still use them."
+keywords = ["bun", "cache", "orphan", "orphaned", "unused", "packages"]
+category = "package_caches"
+tier = "review"
+paths = ["~/.bun/install/cache"]
+provider = "bun_orphans"
+method = "delete"
+min_size_mb = 0
+priority = 1
+pro = true
+guards = { quiet_minutes = 10 }
+
+[[rule]]
+id = "cargo-registry-orphans"
+label = "Cargo registry: crates no project uses"
+description = "Crate archives and sources that no Cargo.lock under your home folder names. Not used by any project on this Mac."
+regenerates = "Cargo downloads a crate again if a project needs it. Projects on other volumes may still use them."
+keywords = ["cargo", "rust", "registry", "crates", "orphan", "orphaned", "unused"]
+category = "package_caches"
+tier = "review"
+paths = ["~/.cargo/registry/cache", "~/.cargo/registry/src"]
+provider = "cargo_orphans"
+method = "delete"
+min_size_mb = 0
+priority = 1
+pro = true
+guards = { process_not_running = ["cargo"] }
+
+[[rule]]
+id = "homebrew-old"
+label = "Homebrew: old versions and downloads"
+description = "Downloads and old versions that `brew cleanup` would remove. Not used by any installed formula."
+regenerates = "Homebrew downloads installers again only when needed."
+keywords = ["homebrew", "brew", "cleanup", "old", "orphan", "unused", "downloads"]
+category = "package_caches"
+tier = "review"
+paths = ["~/Library/Caches/Homebrew"]
+provider = "homebrew_old"
+method = "command"
+command = ["brew", "cleanup"]
+size_is_estimate = true
+priority = 1
+pro = true
+guards = { requires_tool = "brew", process_not_running = ["brew "] }

@@ -1,13 +1,14 @@
 //! Tool-aware item enumeration for folders that cannot be cleaned by deleting
 //! the matched folder (RULES.md section 4.3). Everything here is read-only.
 //!
-//! `ollama`, `simctl_unavailable` and `docker` act on machine-wide state, so in
-//! sandbox mode they return nothing.
+//! `ollama`, `simctl_unavailable`, `docker` and `homebrew_old` act on machine-wide
+//! state, so in sandbox mode they return nothing.
 
 pub mod docker;
 pub mod git_worktrees;
 pub mod ollama;
 pub mod simctl;
+pub mod store_orphans;
 
 use std::path::{Path, PathBuf};
 
@@ -43,7 +44,7 @@ pub struct Found<'a> {
 pub fn items(provider: Provider, at: &Found, env: &Env) -> Vec<ProviderItem> {
     let global = matches!(
         provider,
-        Provider::Ollama | Provider::SimctlUnavailable | Provider::Docker
+        Provider::Ollama | Provider::SimctlUnavailable | Provider::Docker | Provider::HomebrewOld
     );
     if global && env.tools.is_sandbox() {
         return Vec::new();
@@ -53,6 +54,10 @@ pub fn items(provider: Provider, at: &Found, env: &Env) -> Vec<ProviderItem> {
         Provider::GitWorktrees => git_worktrees::items(at),
         Provider::SimctlUnavailable => simctl::items(at, env),
         Provider::Docker => docker::items(at, env),
+        Provider::PnpmOrphans => store_orphans::pnpm(at),
+        Provider::BunOrphans => store_orphans::bun(at),
+        Provider::CargoOrphans => store_orphans::cargo(at),
+        Provider::HomebrewOld => store_orphans::homebrew(at, env),
     }
 }
 

@@ -43,7 +43,7 @@ Each `[[rule]]` table supports these fields:
 | `guards` | inline table | no | See section 4.2 |
 | `allow_permanent` | bool | no, default `true` | `false` hides the "delete permanently" option for trash items |
 | `size_is_estimate` | bool | no, default `false` | UI shows "up to" |
-| `min_size_mb` | integer | no, default `1` | Items smaller than this are dropped |
+| `min_size_mb` | integer | no, default `1` | Items smaller than this are dropped. `0` only with a `provider` |
 | `priority` | integer | no, default `0` | Higher wins when several rules match one path |
 | `split_rows_by` | `"project"` | no | Produces one row per project instead of one per rule |
 | `row_label` | string | no | Template for split rows. Supports `{project}` |
@@ -115,6 +115,12 @@ In sandbox mode (`DISKLENS_SCAN_ROOT` set) only `git` resolves as a tool. The `o
 | `git_worktrees` | Each child of the matched folder whose `.git` is a file containing `gitdir:`. Resolves `{main_repo}` and `{project}` (main repo folder name) | `git -C {main_repo} worktree remove {path}` (never `--force`) |
 | `simctl_unavailable` | `xcrun simctl list devices unavailable -j`, sizing each device folder from the snapshot | `xcrun simctl delete unavailable` once for all items |
 | `docker` | `docker system df --format json`. Reclaimable size of images, containers and build cache (volumes excluded), always an estimate. When Docker does not answer, the matched folder's size stands in as the upper bound | `docker system prune -a -f` (volumes are kept) |
+| `pnpm_orphans` | One item for the store: the allocated bytes of files under `<store>/<version>/files` with a link count of 1, which no `node_modules` folder links to (the scan sums them per folder). An upper bound: exact when pnpm hard-links, but on APFS pnpm clones by default, so used files also have one link | `pnpm store prune` |
+| `bun_orphans` | Each `name@version@@@n` folder (also under `@scope/`) that no `bun.lock` under the scan root names. A folder with only the binary `bun.lockb` counts every package as used. Lockfiles inside `node_modules` do not count, and git, GitHub and tarball folders (`@G@…`, `@GH@…`, `@T@…`) are never items | Delete the folder |
+| `cargo_orphans` | `.crate` archives (matched `registry/cache`, listed on disk) or source folders (matched `registry/src`) whose `name-version` no `Cargo.lock` under the scan root names as a registry package. Lockfiles inside `~/.cargo/registry` do not count | Delete the archive or folder |
+| `homebrew_old` | `brew cleanup --dry-run`; the listed paths inside the matched folder, sized from disk. Always an estimate | `brew cleanup` |
+
+The four store providers are Pro (PRD 13.10.1). They are conservative: when a lockfile cannot be read, or the snapshot was saved before lockfiles were recorded, they offer nothing. They run when the snapshot is analyzed, not again before cleanup: a project that starts using a package after the scan downloads it again.
 
 ## 5. Hardcoded protections (Rust, not configurable)
 
@@ -696,6 +702,78 @@ tier = "review"
 paths = ["~/.Trash"]
 target = "contents"
 method = "delete"
+
+# ============================================================
+# Pro: packages no project uses (PRD 13.10.1). Each rule claims the same folders
+# as its free rule with a higher priority, so it replaces the free row only
+# while Pro is active.
+# ============================================================
+
+[[rule]]
+id = "pnpm-store-orphans"
+label = "pnpm store: packages no project uses"
+description = "Files in pnpm's shared store that no node_modules folder links to. Not used by any project on this Mac."
+regenerates = "Pruned packages are downloaded again only if a project needs them. Projects on other volumes may still use them."
+keywords = ["pnpm", "store", "orphan", "orphaned", "unused", "packages"]
+category = "package_caches"
+tier = "review"
+paths = ["~/Library/pnpm/store", "~/.pnpm-store"]
+provider = "pnpm_orphans"
+method = "command"
+command = ["pnpm", "store", "prune"]
+size_is_estimate = true
+priority = 1
+pro = true
+guards = { requires_tool = "pnpm", process_not_running = ["pnpm"] }
+
+[[rule]]
+id = "bun-cache-orphans"
+label = "Bun cache: packages no project uses"
+description = "Packages in Bun's install cache that no bun.lock under your home folder names. Not used by any project on this Mac."
+regenerates = "Bun downloads a package again if a project needs it. Projects on other volumes may still use them."
+keywords = ["bun", "cache", "orphan", "orphaned", "unused", "packages"]
+category = "package_caches"
+tier = "review"
+paths = ["~/.bun/install/cache"]
+provider = "bun_orphans"
+method = "delete"
+min_size_mb = 0
+priority = 1
+pro = true
+guards = { quiet_minutes = 10 }
+
+[[rule]]
+id = "cargo-registry-orphans"
+label = "Cargo registry: crates no project uses"
+description = "Crate archives and sources that no Cargo.lock under your home folder names. Not used by any project on this Mac."
+regenerates = "Cargo downloads a crate again if a project needs it. Projects on other volumes may still use them."
+keywords = ["cargo", "rust", "registry", "crates", "orphan", "orphaned", "unused"]
+category = "package_caches"
+tier = "review"
+paths = ["~/.cargo/registry/cache", "~/.cargo/registry/src"]
+provider = "cargo_orphans"
+method = "delete"
+min_size_mb = 0
+priority = 1
+pro = true
+guards = { process_not_running = ["cargo"] }
+
+[[rule]]
+id = "homebrew-old"
+label = "Homebrew: old versions and downloads"
+description = "Downloads and old versions that `brew cleanup` would remove. Not used by any installed formula."
+regenerates = "Homebrew downloads installers again only when needed."
+keywords = ["homebrew", "brew", "cleanup", "old", "orphan", "unused", "downloads"]
+category = "package_caches"
+tier = "review"
+paths = ["~/Library/Caches/Homebrew"]
+provider = "homebrew_old"
+method = "command"
+command = ["brew", "cleanup"]
+size_is_estimate = true
+priority = 1
+pro = true
+guards = { requires_tool = "brew", process_not_running = ["brew "] }
 ```
 
 ## 8. Adding or changing a rule

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use jwalk::{ClientState, DirEntry, WalkDirGeneric};
 
 use super::ScanOptions;
-use super::tree::{DirNode, NodeFlags, TreeBuilder};
+use super::tree::{DirNode, LockfileAt, NodeFlags, TreeBuilder};
 use crate::error::{Error, Result};
 
 /// `SF_DATALESS`: the file's data lives in the cloud and is not on disk.
@@ -30,6 +30,7 @@ pub struct Progress {
 
 pub struct WalkResult {
     pub nodes: Vec<DirNode>,
+    pub lockfiles: Vec<LockfileAt>,
     pub inaccessible_count: u32,
 }
 
@@ -62,7 +63,7 @@ pub fn is_dataless(st_flags: u32) -> bool {
 }
 
 /// Allocated bytes of an entry, never counting dataless placeholders.
-fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
+pub(crate) fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
     if is_dataless(md.st_flags()) {
         0
     } else {
@@ -226,6 +227,7 @@ pub fn walk(
         });
     }
     Ok(WalkResult {
+        lockfiles: tree.take_lockfiles(),
         nodes: tree.finish(),
         inaccessible_count: inaccessible,
     })

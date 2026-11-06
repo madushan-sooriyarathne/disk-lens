@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Bump when the fixture changes; sandbox_rows.rs refuses a stale fixture.
-FIXTURE_VERSION=4
+FIXTURE_VERSION=5
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SANDBOX="$REPO/.sandbox"
@@ -59,8 +59,10 @@ file Library/Caches/pip/http/a $MB
 file Library/Caches/Homebrew/downloads/a.tar.gz $MB
 file Library/Caches/CocoaPods/Pods/a $MB
 file Library/Caches/go-build/aa/obj $MB
-file .cargo/registry/cache/index/crate.crate $MB
-file .cargo/registry/src/index/crate/lib.rs $MB
+file .cargo/registry/cache/index/used-1.0.0.crate $MB
+file .cargo/registry/cache/index/orphan-0.1.0.crate $MB
+file .cargo/registry/src/index/used-1.0.0/lib.rs $MB
+file .cargo/registry/src/index/orphan-0.1.0/lib.rs $MB
 file Library/Caches/com.example.app/cache.db $BIG
 file Library/Caches/com.example.small/cache.db 64    # app cache under 50 MB: dropped
 # ---- Review tier targets -----------------------------------------------------
@@ -91,6 +93,35 @@ file .ollama/models/blobs/sha256-aaaa $MB
 file .ollama/models/blobs/sha256-bbbb 64
 file .ollama/models/blobs/sha256-cccc $MB
 file .ollama/models/blobs/sha256-c0ffee 4
+
+# ---- Pro store orphans (PRD 13.10.1) ----------------------------------------
+# pnpm: ab/cd above has one link (unused); ef/gh is linked into a project.
+file Library/pnpm/store/v3/files/ef/gh $MB
+mkdir -p Desktop/pnpm-app/node_modules/dep
+ln Library/pnpm/store/v3/files/ef/gh Desktop/pnpm-app/node_modules/dep/index.js
+# Bun: a bun.lock names used@1.0.0, nothing names orphan@2.0.0.
+file ".bun/install/cache/used@1.0.0@@@1/index.js" $MB
+file ".bun/install/cache/orphan@2.0.0@@@1/index.js" $MB
+mkdir -p Desktop/bun-app
+cat > Desktop/bun-app/bun.lock <<'LOCK'
+{
+  "lockfileVersion": 1,
+  "workspaces": { "": { "name": "bun-app", "dependencies": { "used": "^1.0.0" } } },
+  "packages": {
+    "used": ["used@1.0.0", "", {}, "sha512-fixture"],
+  },
+}
+LOCK
+# Cargo: a Cargo.lock names used 1.0.0 from crates.io; orphan 0.1.0 is unused.
+mkdir -p Desktop/rust-app
+cat > Desktop/rust-app/Cargo.lock <<'LOCK'
+version = 4
+
+[[package]]
+name = "used"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+LOCK
 
 # ---- Near misses (must NOT match) -------------------------------------------
 file Desktop/not-a-project/.next/a.js $MB           # .next without package.json/turbo.json
@@ -171,7 +202,7 @@ for p in aw-clean aw-dirty aw-unpushed aw-noupstream; do
   (
     cd Desktop/$p
     file Cargo.toml 1
-    file Cargo.lock 1
+    printf 'version = 4\n' > Cargo.lock
     file package.json 1
     file package-lock.json 1
     file src/main.rs 1
