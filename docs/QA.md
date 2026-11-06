@@ -248,6 +248,31 @@ Run against the sandbox (`scripts/make-fixture.sh`, then `DISKLENS_SCAN_ROOT=$PW
 - [ ] A row with thousands of orphan crates (real `~/.cargo`, with Pro) scrolls smoothly in the inspector. Not measured yet (needs a Pro token): the inspector draws every item, and the dev Mac has 1,032 cached crates and 1,032 source folders, so the Cargo row can hold about 2,000 items. If it stutters, draw the 100 largest and an "and N more" line.
 - [ ] Light and dark: the lockfile lines read clearly beside the active-work reason, and truncate at the minimum window size.
 
+## Phase 17: APFS snapshot inspector
+
+Spike (run by hand on the dev Mac, macOS 26.6.2; macOS 13 to 15 are not available here). Paste the output of each:
+
+1. `tmutil localsnapshot` (creates a test snapshot; does it need sudo?)
+2. `tmutil listlocalsnapshots /` and `tmutil listlocalsnapshotdates /`
+3. `tmutil thinlocalsnapshots / 1000000000 4` without sudo, then `echo $?` (this can remove every local Time Machine snapshot, not only the test one)
+4. `tmutil localsnapshot` again, then `tmutil deletelocalsnapshots <date>` without sudo, then `echo $?`
+5. `osascript -e 'do shell script "/usr/bin/tmutil deletelocalsnapshots <date>" with administrator privileges'`, then `echo $?` (record the prompt text)
+6. Step 5 again, pressing Cancel: exit code and message
+
+Results: not run yet. If step 3 succeeds without sudo, set `THIN_NEEDS_ADMIN` in `src/cleanup/snapshots.rs` to false.
+
+Manual checks (`DISKLENS_MOCK=pro cargo run` for the look, the packaged app or `DISKLENS_DRY_RUN=0` with a Pro license for real actions):
+
+- [ ] Free: ⌘K "Local Snapshots…", the Overview purgeable line and the results "Show Snapshots…" link open the Pro sheet; the held-by line and the purgeable line read as before.
+- [ ] Pro, mock: the sheet lists 3 snapshots with dates and ages, one "Managed by macOS" name without actions, and the purgeable line.
+- [ ] Delete with the opt-in off shows the explanation and the switch; nothing runs. After turning it on, Confirm shows `/usr/bin/tmutil deletelocalsnapshots <date>` and, in a dry run, reports that nothing ran.
+- [ ] Settings shows the same switch only with Pro, and it stays in sync with the sheet.
+- [ ] Real Mac, with a test snapshot: Delete shows the macOS administrator prompt; after it, the snapshot is gone from the list and the audit log has one `privileged_command` line with the argv. Record free space before and after.
+- [ ] Real Mac: Cancel in the prompt reports "Nothing changed: Cancelled or failed." and the snapshot stays.
+- [ ] Real Mac: Thin with snapshots present; record free space before and after.
+- [ ] Dry run on a real Mac: the snapshot stays and no prompt appears.
+- [ ] Light and dark: the sheet, the command line and the opt-in read clearly; Esc closes it (not while an action runs).
+
 ## Supervised real run (only when the user says so)
 
 - [x] On the real home folder, select only the npm cache, note its size, run a real cleanup, and check that `du -sk ~/.npm` before and after differ by the freed size within 1%.
