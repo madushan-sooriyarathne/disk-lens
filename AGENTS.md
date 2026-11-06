@@ -12,7 +12,7 @@ Read these before any task. If they conflict or are unclear, ask the user; do no
 - `docs/PLAN.md` - stack, repo layout, data contracts, backend functions, phases
 - `docs/mockup.jpg` - v1 target UI; v2 target is `docs/mockup-v2.png` and `docs/mockup-v2-dark.png` (from `docs/mockup-v2/mockup.html`)
 
-Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8, design foundation and window shell, merged in two parts, 8a and 8b; Phase 9, Overview, merged; Phase 10, Explore and inspector, merged; Phase 11, Recommended, staging queue and cleanup sheet, merged; Phase 12, onboarding, merged, awaiting QA and the Full Disk Access spike; Phase 13, command palette, merged; Phase 14, active-work guard and project artifacts, merged; Phase 15, Pro licensing, split into 15a (app side, built on `feat/phase-15a-licensing`, awaiting review) and 15b (website `site/` and license server `server/`, not started)); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
+Work one PLAN.md phase at a time: propose the task breakdown in plan mode, wait for approval, commit per task (conventional commits), finish with the phase acceptance checks and a short summary, then stop for review. Current status: Phases 0-4 merged; Phase 5 (permissions, persistence, polish) built on branch `feat/phase-5-polish`, awaiting review; Phase 6 (packaging and release) built on `feat/phase-6-release`, stacked on Phase 5, awaiting review. Open items for both are in `docs/PLAN.md`. Nothing is released yet. v2 is defined in `docs/PRD.md` section 13 and `docs/PLAN.md` Phases 7 to 22 (Phase 7, background rescan, merged; Phase 8, design foundation and window shell, merged in two parts, 8a and 8b; Phase 9, Overview, merged; Phase 10, Explore and inspector, merged; Phase 11, Recommended, staging queue and cleanup sheet, merged; Phase 12, onboarding, merged, awaiting QA and the Full Disk Access spike; Phase 13, command palette, merged; Phase 14, active-work guard and project artifacts, merged; Phase 15, Pro licensing, split into 15a (app side, merged) and 15b (website `site/` and license server `server/`, built on `feat/phase-15b-web`, awaiting review)); Pro features are specified in `docs/PRD.md` section 13.10. Use the `apple-design` skill for all v2 design work.
 
 ## Commands
 
@@ -31,9 +31,14 @@ scripts/package.sh                          # universal DiskLens.app + DMG (+ up
 scripts/make-icon.sh                        # regenerate assets/icons/icon-256(-light).png from the brand kit's icns files
 scripts/render-mockup.sh                    # docs/mockup-v2.png and -dark.png from docs/mockup-v2/mockup.html (headless Chrome)
 cargo test --release -- --ignored layout_of_400_tiles   # treemap timing target (release only)
+cargo test --test license_contract          # a token minted by server/ verifies in the app
+cd server && bun run dev                    # license server on :8787 (env in server/.env.local; MAIL_DRY_RUN=1 locally)
+cd server && bun test && bun run typecheck  # server tests (no network) and types
+cd site && bun run dev                      # marketing site on :3000
+cd site && bun run build                    # site build and type check
 ```
 
-Every phase ends with `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` passing.
+Every phase ends with `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` passing. Changes under `server/` also pass `bun test && bun run typecheck` there, and changes under `site/` pass `bun run build`.
 
 ## Architecture
 
@@ -58,6 +63,10 @@ UI (`src/ui/`, GPUI):
 - Pure logic with unit tests beside it: `treemap.rs` (squarified layout ported from d3, label fitting, keyboard neighbours), `stats.rs`, `selection.rs`, `filter.rs` (the palette's filter grammar), `format.rs`, `motion.rs` (spring presets, Reduce Motion cross-fade), `theme.rs` (v2 tokens with a WCAG AA test over every text-on-fill pair; category colors from `rules.toml`; also drives gpui-component's theme).
 - Views stay presentational: `screens.rs` (idle, scanning, error, update banner), `overview.rs`, `explorer.rs` (tiles, textures, zoom), `inspector.rs` (tile, recommendation row or queue), `recommendations.rs` (list and row menu), `cleanup.rs` (confirm, progress and results sheet, toast). When a cleanup finishes the model rescans the whole root.
 
+Web (Phase 15b; two separate deployables, each with its own `package.json` and lockfile, sharing only the token contract and HTTP):
+- `server/`: the license server (Bun, `Bun.serve` routes, `bun:sqlite`). It is the only code that holds secrets and talks to payments.lk: checkout, the signed webhook, order lookup (which also asks payments.lk when the webhook is late), one email-verified trial per address and recovery. It signs tokens in the minisign layout with `node:crypto` and emails them through AWS SES (React Email templates in `server/emails/`). `createApp(deps)` in `src/app.ts` takes the clock, mailer and payments.lk client, so tests run with fakes and no network.
+- `site/`: the marketing site (Next.js App Router on Bun, plain CSS, no secrets, only `NEXT_PUBLIC_*` env). `site/content/features.ts` marks each feature available or coming; the site never presents a coming feature as available. `/activate#<token>` reads the token from the fragment only.
+
 ## Safety rules (non-negotiable)
 
 - Never delete, trash or run cleanup against the real home folder. Develop against the fixture sandbox: `DISKLENS_SCAN_ROOT=$PWD/.sandbox/home cargo run` (absolute path).
@@ -66,7 +75,7 @@ UI (`src/ui/`, GPUI):
 - Real cleanup execution is enabled only in Phase 4, on a single safe item (the npm cache), and only when the user explicitly says so.
 - `scripts/make-fixture.sh` may only delete `<repo>/.sandbox`, and `scripts/make-perf-tree.sh` only `<repo>/.sandbox/perf`; keep their path guards.
 - Never publish a release (`gh release create`, uploads, tags pushed) unless the user says so; `scripts/package.sh` only prints the command.
-- Never commit or print signing secrets: the minisign private keys (update and license), `.p12` files, `APPLE_*` and `PAYMENTS_LK_*` values. Only `assets/update.pub` and `assets/license.pub` are committed.
+- Never commit or print signing secrets: the minisign private keys (update and license), `.p12` files, `.env.local` files, and `APPLE_*`, `PAYMENTS_LK_*`, `LICENSE_SECRET_KEY` and `AWS_*` values. The repository is public. Only `assets/update.pub` and `assets/license.pub` are committed.
 - No TODOs in safety-related code (`cleanup/`, `rules/guards.rs`, `rules/matcher.rs`).
 
 ## Conventions
@@ -85,7 +94,7 @@ UI (`src/ui/`, GPUI):
 | `DISKLENS_DRY_RUN`   | `1`/`true` log actions without performing; `0`/`false` perform. Unset = on in debug builds, off in release                                                                         |
 | `DISKLENS_DATA_DIR`  | Snapshot/settings dir. Default: `<scan root>/../data` when `DISKLENS_SCAN_ROOT` is set (so sandboxed runs write to `.sandbox/data`), else `~/Library/Application Support/DiskLens`. The audit log follows the same rule: `<scan root>/../logs` when sandboxed, else `~/Library/Logs/DiskLens` |
 | `DISKLENS_MOCK`      | `1` serves the mock snapshot instead of scanning; `preselect` also selects the mockup's rows; `onboarding` starts as a first launch (access granted 6 s after Open System Settings); `pro` starts with Pro active |
-| `DISKLENS_SITE_URL` | Marketing site for Buy and Start Trial (default `https://disklens.app`) |
+| `DISKLENS_SITE_URL` | Marketing site for Buy and Start Trial (default `https://disklens.space`) |
 | `DISKLENS_LICENSE_KEY_PATH` | `scripts/mint-license.sh`: the license secret key file. Never commit or print it |
 | `DISKLENS_UPDATE_URL` | Update endpoint override (dev and QA only); also turns the update check on in debug, mock and sandboxed runs |
 | `DISKLENS_SIGNING_IDENTITY` | `scripts/package.sh`: codesign identity, e.g. `Developer ID Application: … (TEAM)`. Unset = ad-hoc (`-`) |

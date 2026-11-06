@@ -1,0 +1,8 @@
+.card { display: grid; gap: 1rem; padding: clamp(1.25rem, 4vw, 2rem); border-radius: var(--radius); background: var(--surface); max-width: 40rem; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; }
+.token {
+  width: 100%; resize: none; padding: 0.75rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline); background: var(--bg); color: var(--text);
+  font: 0.8125rem/1.5 var(--mono); word-break: break-all;
+}
+.steps { margin: 0; padding-left: 1.25rem; display: grid; gap: 0.25rem; }

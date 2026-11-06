@@ -6,3 +6,11 @@
 src-tauri/bindings
 target/
 *.key
+node_modules/
+site/.next/
+site/out/
+site/next-env.d.ts
+.env*
+!.env.example
+server/*.db*
+server/.mail/

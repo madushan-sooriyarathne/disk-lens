@@ -1,0 +1,9 @@
+.form { display: grid; gap: 0.5rem; max-width: 30rem; }
+.form label { font-weight: 600; font-size: 0.9375rem; }
+.row { display: grid; gap: 0.625rem; }
+.error { color: var(--review-text); font-size: 0.9375rem; min-height: 1.4em; }
+.done { max-width: 30rem; padding: 1.25rem; border-radius: var(--radius); background: var(--safe-bg); color: var(--text); }
+
+@media (min-width: 520px) {
+  .row { grid-template-columns: 1fr auto; }
+}

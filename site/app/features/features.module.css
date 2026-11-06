@@ -1,0 +1,10 @@
+.tour { display: grid; gap: 2rem; margin-block: 1rem; }
+.tour figure { margin: 0; display: grid; gap: 0.75rem; }
+.tour figcaption { color: var(--text-2); max-width: 40rem; }
+.tour figcaption strong { color: var(--text); }
+.h { margin-top: 2rem; }
+
+@media (min-width: 900px) {
+  .tour { grid-template-columns: repeat(2, 1fr); }
+  .tour figure:first-child { grid-column: 1 / -1; }
+}
