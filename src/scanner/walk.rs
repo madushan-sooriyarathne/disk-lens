@@ -63,7 +63,7 @@ pub fn is_dataless(st_flags: u32) -> bool {
 }
 
 /// Allocated bytes of an entry, never counting dataless placeholders.
-fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
+pub(crate) fn allocated_bytes(md: &std::fs::Metadata) -> u64 {
     if is_dataless(md.st_flags()) {
         0
     } else {
