@@ -9,9 +9,10 @@ use crate::cleanup::model::{CleanupEvent, CleanupPlan};
 use crate::cleanup::plan::{self, Request};
 use crate::cleanup::revalidate::GROWTH_FLOOR;
 use crate::cleanup::script;
+use crate::cleanup::snapshots::{self, SnapshotAction, SnapshotEngine, SnapshotOutcome};
 use crate::error::{Error, Result};
 use crate::license::{self, Status};
-use crate::platform::{self, Facts};
+use crate::platform::{self, Facts, LocalSnapshot};
 use crate::recommend::build::analyze;
 use crate::recommend::model::{ItemDetails, Recommendation};
 use crate::rules::model::Rules;
@@ -350,6 +351,66 @@ pub fn local_snapshot_count(state: &Arc<AppState>) -> Result<usize> {
     Ok(platform::local_snapshot_count(
         state.machine.runner.as_ref(),
     )?)
+}
+
+/// What the Local Snapshots sheet shows (PRD FR-SNAP-1, FR-SNAP-2).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnapshotInfo {
+    /// Local Time Machine snapshots, the only ones offered for actions (S-12).
+    pub local: Vec<LocalSnapshot>,
+    /// Other APFS snapshots, managed by macOS and listed read-only.
+    pub others: Vec<String>,
+    /// The scan root volume's purgeable total, when it could be read.
+    pub purgeable: Option<u64>,
+}
+
+/// The snapshots of `/` and the purgeable total. A failed `diskutil` listing only hides
+/// the read-only section; a failed `tmutil` listing is an error.
+pub fn snapshot_info(state: &Arc<AppState>) -> Result<SnapshotInfo> {
+    let runner = state.machine.runner.as_ref();
+    let local = platform::list_local_snapshots(runner)?;
+    let others = platform::other_snapshots(runner).unwrap_or_else(|e| {
+        tracing::warn!("could not list other apfs snapshots: {e}");
+        Vec::new()
+    });
+    let purgeable = state
+        .config
+        .root()
+        .and_then(|root| volume::volume_info(&root))
+        .map(|v| v.purgeable);
+    Ok(SnapshotInfo {
+        local,
+        others,
+        purgeable,
+    })
+}
+
+/// Runs one Thin or Delete, checked and audit logged by `cleanup::snapshots::run`. Blocks
+/// while the administrator prompt is open, so the caller runs it off the UI thread.
+pub fn run_snapshot_action(
+    state: &Arc<AppState>,
+    action: &SnapshotAction,
+) -> Result<SnapshotOutcome> {
+    let mut audit = Audit::open(&state.config.log_dir)
+        .map_err(|e| Error::Audit(format!("{}: {e}", state.config.log_dir.display())))?;
+    let engine = SnapshotEngine {
+        probes: state.machine.runner.as_ref(),
+        commands: state.machine.commands.as_ref(),
+        dry_run: state.config.dry_run,
+        allow_admin: allow_admin_actions(state),
+        pro: state.is_pro(),
+    };
+    Ok(snapshots::run(&engine, action, &mut audit)?)
+}
+
+pub fn allow_admin_actions(state: &Arc<AppState>) -> bool {
+    settings::load(&state.config.data_dir).allow_admin_actions
+}
+
+pub fn set_allow_admin_actions(state: &Arc<AppState>, allow: bool) -> Result<()> {
+    let mut stored = settings::load(&state.config.data_dir);
+    stored.allow_admin_actions = allow;
+    settings::save(&state.config.data_dir, &stored)
 }
 
 pub fn license_status(state: &Arc<AppState>) -> Status {
