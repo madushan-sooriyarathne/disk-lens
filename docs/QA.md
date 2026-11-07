@@ -265,7 +265,7 @@ Manual checks (`DISKLENS_MOCK=pro cargo run` for the look, the packaged app or `
 - [ ] Free: ⌘K "Local Snapshots…", the Overview purgeable line and the results "Show Snapshots…" link open the Pro sheet; the held-by line and the purgeable line read as before.
 - [ ] Pro, mock: the sheet lists 3 snapshots with dates and ages, one "Managed by macOS" name without actions, and the purgeable line.
 - [ ] Delete shows `/usr/bin/tmutil deletelocalsnapshots <date>` before Confirm and, in a dry run, reports that nothing ran.
-- [ ] Settings shows the same switch only with Pro, and it stays in sync with the sheet.
+- [ ] Settings shows the "Allow actions that need administrator rights" switch only with Pro; its state is the one the sheet's fallback uses.
 - [ ] Real Mac, with a test snapshot (`tmutil localsnapshot`): Delete runs with no prompt; the snapshot is gone from the list and the audit log has one `command` line with the argv. Record free space before and after.
 - [ ] Fallback (only testable where `tmutil` refuses without admin rights, e.g. macOS 13 to 15, or without Full Disk Access): with the opt-in off, the sheet says macOS refused and shows the switch; with it on, Confirm shows the macOS administrator prompt and the log has a `privileged_command` line. Cancel reports "Nothing changed: Cancelled or failed." and the snapshot stays.
 - [ ] Real Mac: Thin with snapshots present; record free space before and after.
