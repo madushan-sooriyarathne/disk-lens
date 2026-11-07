@@ -480,7 +480,14 @@ fn results(
             .child(line(trashed, s.trashed)),
     );
     if let Some((bytes, snapshots)) = held {
-        c = c.child(note(t, held_line(bytes, snapshots)));
+        c = c.child(note(t, held_line(bytes, snapshots)).child(
+            super::overview::snapshots_link(t, "results-snapshots").on_click(cx.listener(
+                |m, _: &ClickEvent, _, cx| {
+                    m.close_cleanup(cx);
+                    m.open_snapshots(cx);
+                },
+            )),
+        ));
     }
     if !s.skipped.is_empty() {
         c = c.child(

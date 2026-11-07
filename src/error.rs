@@ -30,6 +30,8 @@ pub enum Error {
     Update(String),
     #[error("{0}")]
     License(#[from] crate::license::LicenseError),
+    #[error("{0}")]
+    Refused(#[from] crate::cleanup::snapshots::Refused),
     #[error("this license has ended")]
     LicenseEnded,
     #[error("a Pro license is already active; a trial would replace it")]

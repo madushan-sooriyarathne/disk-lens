@@ -7,14 +7,16 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::backend;
+use crate::backend::{self, SnapshotInfo};
 use crate::cleanup::model::{
     CleanupEvent, CleanupPlan, CleanupSummary, Outcome, PlannedAction, PlannedMethod,
 };
 use crate::cleanup::script;
+use crate::cleanup::snapshots::{Refused, SnapshotAction, SnapshotOutcome};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::license::{LicenseError, Status};
+use crate::platform::LocalSnapshot;
 use crate::recommend::model::{ItemDetails, MethodView, Recommendation, Subfolder, Tier};
 use crate::scanner::tree::{ScanEvent, SnapshotMeta};
 use crate::settings;
@@ -53,6 +55,7 @@ pub struct MockData {
     /// In memory only: the mock never reads or writes a license.
     license: Mutex<Status>,
     saved_filters: Mutex<Vec<String>>,
+    allow_admin_actions: AtomicBool,
 }
 
 /// The JSON file's shape; `_note` is ignored.
@@ -65,6 +68,13 @@ struct MockFile {
 }
 
 const SCAN_STEPS: u64 = 12;
+
+/// Local snapshot dates the mock lists, oldest first.
+const MOCK_SNAPSHOTS: [&str; 3] = [
+    "2026-11-04-091500",
+    "2026-11-05-091500",
+    "2026-11-06-091500",
+];
 
 impl MockData {
     pub fn new(preselect: bool) -> Self {
@@ -86,6 +96,7 @@ impl MockData {
             fda_calls: Mutex::new(Vec::new()),
             license: Mutex::new(Status::Free),
             saved_filters: Mutex::new(Vec::new()),
+            allow_admin_actions: AtomicBool::new(false),
         }
     }
 
@@ -477,6 +488,51 @@ impl Source {
             Self::Mock(m) => {
                 let v = &m.file.meta.volume;
                 Some(v.available.saturating_sub(v.purgeable))
+            }
+        }
+    }
+
+    /// The Local Snapshots sheet. The mock lists three snapshots and one update snapshot.
+    pub fn snapshot_info(&self) -> Result<SnapshotInfo> {
+        match self {
+            Self::Live(state) => backend::snapshot_info(state),
+            Self::Mock(m) => Ok(SnapshotInfo {
+                local: MOCK_SNAPSHOTS
+                    .iter()
+                    .map(|d| LocalSnapshot { date: (*d).into() })
+                    .collect(),
+                others: vec!["com.apple.os.update-60587424F5399FC0".into()],
+                purgeable: Some(m.file.meta.volume.purgeable),
+            }),
+        }
+    }
+
+    /// The mock checks Pro, then acts as a dry run: nothing runs.
+    pub fn snapshot_action(&self, action: &SnapshotAction) -> Result<SnapshotOutcome> {
+        match self {
+            Self::Live(state) => backend::run_snapshot_action(state, action),
+            Self::Mock(m) => {
+                if !m.license.lock().expect("mock license").is_pro() {
+                    return Err(Refused::NotPro.into());
+                }
+                Ok(SnapshotOutcome::DryRun)
+            }
+        }
+    }
+
+    pub fn allow_admin_actions(&self) -> bool {
+        match self {
+            Self::Live(state) => backend::allow_admin_actions(state),
+            Self::Mock(m) => m.allow_admin_actions.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn set_allow_admin_actions(&self, allow: bool) -> Result<()> {
+        match self {
+            Self::Live(state) => backend::set_allow_admin_actions(state, allow),
+            Self::Mock(m) => {
+                m.allow_admin_actions.store(allow, Ordering::Relaxed);
+                Ok(())
             }
         }
     }

@@ -519,7 +519,7 @@ GPUI stays the UI stack because Windows and Linux builds are planned after v2. T
 | Token delivery | **Decided (2026-11-01):** a purchase shows its token on the success page (with Open in DiskLens and Copy) and emails it. A trial is sent by email only, so one trial per email means one per real inbox. `/recover` emails every token for an address. Email goes through AWS SES with React Email templates and links to `https://disklens.space/activate#<token>` (the token stays in the fragment, out of server logs; mail clients strip `disklens://` links). A refund marks the order refunded; an offline token cannot be revoked |
 | Website | **Decided (2026-11-01):** a full marketing site (features, pricing, download, docs, FAQ, changelog, legal, and the purchase, trial, activate and recover pages). Pro features show as available or "Coming in 2.x" from one data file, so the site never sells a feature that isn't built |
 | Which Pro features ship with v2.0 | Recommended first set: snapshot inspector, containers and VMs, AI models hub, lockfile tags and orphaned stores, palette batch commands. They extend the main window and need no background process. Then the menu bar agent and auto-sweep (auto-sweep depends on the agent), then other volumes, history and the rest in point releases |
-| Privileged snapshot deletion mechanism | A one-shot `osascript` `do shell script … with administrator privileges` (works with ad-hoc signing, but goes through a shell), or an `SMAppService` privileged helper (needs Developer ID and user approval in System Settings). Decided by the Phase 17 spike |
+| Privileged snapshot deletion mechanism | **Decided (2026-11-06, revised 2026-11-07 after the spike):** `tmutil` runs directly first; only when it fails, a one-shot `osascript` `do shell script … with administrator privileges` retries that one action. It works with ad-hoc signing and keeps no authorization; the script text holds only constants and a validated date (FR-SNAP-5). An `SMAppService` privileged helper was set aside: it needs a Developer ID and user approval in System Settings. Spike results in `docs/QA.md` Phase 17 |
 | Developer ID | Still needed from v1 (PLAN.md Phase 6); required before selling |
 
 ### 13.9 Release criteria for v2
@@ -578,14 +578,15 @@ Each Pro feature has its own subsection here, as PLAN.md requires before work st
 
 #### 13.10.5 APFS snapshot inspector
 
-- **FR-SNAP-1** Lists local Time Machine snapshots of the boot volume (`tmutil listlocalsnapshots /`, names `com.apple.TimeMachine.<date>.local`) with date and age. Other APFS snapshots (`diskutil apfs listSnapshots`) are listed read-only with "Managed by macOS" (S-12).
+- **FR-SNAP-1** The inspector is a sheet, opened from ⌘K "Local Snapshots…", the Overview purgeable line and the "held by snapshots" line in cleanup results. It lists local Time Machine snapshots of the boot volume (`tmutil listlocalsnapshots /`, names `com.apple.TimeMachine.<date>.local`) with date and age. Other APFS snapshots (`diskutil apfs listSnapshots`) are listed read-only with "Managed by macOS" (S-12).
 - **FR-SNAP-2** macOS does not report a size per snapshot. The inspector shows the volume's purgeable total (important-usage available capacity minus `statfs` free; FR-SCAN-7 already reads both) as "Up to 38 GB is purgeable, mostly held by local snapshots", and per snapshot only its date.
 - **FR-SNAP-3** Free: the explanation in the cleanup results (section 13.4.8) and a "Held by snapshots" line in the Overview Disk widget.
 - **FR-SNAP-4** Pro actions:
-  - **Thin:** `tmutil thinlocalsnapshots / <bytes> <urgency>` asks macOS to free that much purgeable space. If the Phase 17 spike shows it needs no admin rights, it runs without a prompt.
-  - **Delete one snapshot:** `tmutil deletelocalsnapshots <date>`, which needs admin rights on current macOS.
+  - **Thin:** `tmutil thinlocalsnapshots / <bytes> <urgency>` asks macOS to free that much purgeable space.
+  - **Delete one snapshot:** `tmutil deletelocalsnapshots <date>`.
+  - The Phase 17 spike (2026-11-07, macOS 26.6.2) showed that both run without admin rights, so both run directly first. Only when `tmutil` fails, and only with the opt-in on, the action is retried once through the privileged path (FR-SNAP-5); that keeps older macOS versions working, where Delete may need admin rights.
 - **FR-SNAP-5** Privileged actions (the S-06 exception):
-  - Opt-in. The option stays off until the user turns on "Allow actions that need administrator rights" in the sheet that explains what will run and why (also in Settings).
+  - Opt-in. The option stays off until the user turns on "Allow actions that need administrator rights" in the sheet that explains what will run and why (also in Settings). The sheet offers it only after `tmutil` failed without admin rights.
   - Each action shows the exact command, then the system administrator prompt. No authorization is kept, so the next action asks again.
   - The command is fixed argv for `/usr/bin/tmutil`. Its only variable is a snapshot date that must match `^\d{4}-\d{2}-\d{2}-\d{6}$` and be in the `listlocalsnapshots` output read right before. If the chosen mechanism (section 13.8) uses a shell, the command string is built only from constants and that validated date. That is the single documented exception to S-05.
   - Dry run applies. Every action is audit logged with method `privileged_command`.

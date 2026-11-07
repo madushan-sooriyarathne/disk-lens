@@ -23,8 +23,8 @@ Version 2.0 draft · Companion to `docs/PRD.md` and `docs/RULES.md`
 | 13 Command palette | Merged | v2, PRD section 13.4.9 (free part) |
 | 14 Active-work guard and project artifacts | Built, awaiting review | v2, PRD section 13.4.11 (free). Branch `feat/phase-14-active-work` |
 | 15 Pro licensing and gating | Merged | v2, PRD section 13.6. Split: 15a app side merged (manual checks in `docs/QA.md` Phase 15a passed on 2026-11-01); 15b website (`site/`) and license server (`server/`) merged, manual checks in `docs/QA.md` Phase 15b still to run. Decisions recorded in PRD section 13.8 on 2026-11-01 |
-| 16 Lockfile tags and orphaned stores | Built, awaiting review | Pro, PRD section 13.10.1. Branch `feat/phase-16-lockfile-stores`. Pro store rules replace the free rows while a license is active (decided 2026-11-06). Manual checks in `docs/QA.md` Phase 16 |
-| 17 APFS snapshot inspector | Not started | Pro, PRD section 13.10.5 |
+| 16 Lockfile tags and orphaned stores | Merged | Pro, PRD section 13.10.1. Pro store rules replace the free rows while a license is active (decided 2026-11-06). Manual checks in `docs/QA.md` Phase 16 |
+| 17 APFS snapshot inspector | Built, awaiting review | Pro, PRD section 13.10.5. Branch `feat/phase-17-snapshots`. A sheet, not a page; `tmutil` directly, one-shot `osascript` only as the fallback (decided 2026-11-07 after the spike). Spike and manual checks in `docs/QA.md` Phase 17 |
 | 18 Containers and VMs | Not started | Pro, PRD section 13.10.3 |
 | 19 AI models hub | Not started | Pro, PRD section 13.10.2 |
 | 20 Apple, mobile and creative scanners | Not started | Pro, PRD section 13.10.4 |
@@ -485,8 +485,9 @@ Selections survive a new snapshot by matching `(rule_id, path)` from `RecItem`, 
 | `activate_license` | `{ token: string }` | `LicenseStatus` or an error (Phase 15) |
 | `remove_license` | none | none (Phase 15) |
 | `find_folders` | `{ query, under: Option<path>, limit }` | `Vec<{ path, size }>` from the snapshot (palette, Phase 13) |
-| `list_local_snapshots` | none | `{ snapshots: Vec<LocalSnapshot>, purgeable: u64 }` (Phase 17) |
-| `thin_snapshots` / `delete_snapshot` | `{ bytes }` / `{ date }` | result; `delete_snapshot` asks for admin each time (Phase 17) |
+| `snapshot_info` | none | `SnapshotInfo { local: Vec<LocalSnapshot>, others: Vec<String>, purgeable: Option<u64> }` (Phase 17) |
+| `run_snapshot_action` | `SnapshotAction::Thin { bytes }` or `Delete { date }` | `SnapshotOutcome` or a refusal; an action that needs admin asks each time (Phase 17) |
+| `allow_admin_actions` / `set_allow_admin_actions` | none / `bool` | the FR-SNAP-5 opt-in in `settings.json` (Phase 17) |
 | `get_models` | none | models grouped by family (Phase 19) |
 
 `export_script` is unchanged; the UI writes its output to the file the user picks in the save panel.
@@ -800,6 +801,8 @@ Decision (2026-11-06): the Pro store rules (`pnpm-store-orphans`, `bun-cache-orp
 2. `snapshots.rs` behind `platform/`: `list_local_snapshots` (parsing `tmutil` output, fake-tested) and the purgeable total.
 3. Inspector page: the list, the purgeable line, Thin, and Delete per snapshot (PRD FR-SNAP-1 to FR-SNAP-4).
 4. Privileged path (PRD FR-SNAP-5): the Settings opt-in, the explanation sheet with the exact command, the date regex, re-reading the list right before acting, dry run, the audit method `privileged_command`.
+
+Decision (2026-11-06): the inspector is a sheet (`ui/snapshots.rs`), opened from ⌘K "Local Snapshots…", the Overview purgeable line and the "held by snapshots" line in cleanup results; without Pro these open the Pro sheet. Actions live in `cleanup/snapshots.rs` (`SnapshotEngine`), outside `CleanupPlan`, so S-01 and plan revalidation are unchanged. Spike (2026-11-07, macOS 26.6.2): `tmutil thinlocalsnapshots` and `tmutil deletelocalsnapshots` both run without admin rights, so both run directly first. Only when `tmutil` fails, and only with the opt-in on, the action is retried once through one `osascript … with administrator privileges` call (no Developer ID needed), after the listing is read again; with the opt-in off the sheet then offers it.
 
 **Acceptance:** tests: a date not in the current list is refused; a malformed date is refused; non-Time Machine snapshots are never offered (S-12); with the opt-in off, no privileged path runs; dry run never invokes the runner. Manual on macOS: thin and delete one snapshot, with free space before and after recorded in `docs/QA.md`.
 

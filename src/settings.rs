@@ -18,6 +18,9 @@ pub struct Settings {
     pub license: Option<String>,
     /// Palette filter queries the user saved (PRD FR-KB-4).
     pub saved_filters: Vec<String>,
+    /// "Allow actions that need administrator rights": off until the user turns it on;
+    /// only snapshot thin and delete use it (PRD FR-SNAP-5).
+    pub allow_admin_actions: bool,
 }
 
 fn settings_path(data_dir: &Path) -> PathBuf {
@@ -61,6 +64,7 @@ mod tests {
             onboarding_done: true,
             license: Some("DL1.a.b".into()),
             saved_filters: vec!["size:>1gb".into()],
+            allow_admin_actions: true,
         };
         save(dir.path(), &settings).unwrap();
         assert_eq!(load(dir.path()), settings);
@@ -88,6 +92,13 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(load(dir.path()), expected);
+    }
+
+    #[test]
+    fn a_file_from_before_the_opt_in_keeps_admin_actions_off() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(settings_path(dir.path()), r#"{"onboarding_done": true}"#).unwrap();
+        assert!(!load(dir.path()).allow_admin_actions);
     }
 
     #[test]

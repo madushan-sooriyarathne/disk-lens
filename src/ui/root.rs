@@ -6,7 +6,8 @@ use gpui::{
 
 use super::model::{AppModel, Cleanup, Page, Phase};
 use super::{
-    cleanup, inspector, keymap, onboarding, palette, screens, settings_window, shell, theme,
+    cleanup, inspector, keymap, onboarding, palette, screens, settings_window, shell, snapshots,
+    theme,
 };
 use crate::view::ViewKind;
 
@@ -169,7 +170,9 @@ impl Render for AppModel {
         let toast = cleanup::toast(self, window);
         let palette = palette::render(self, window, cx);
         let notice = palette::notice(self, window, cx);
+        let snapshots = snapshots::render(self, window, cx);
         body.children(dialog)
+            .children(snapshots)
             .children(toast)
             .children(palette)
             .children(notice)
@@ -245,6 +248,8 @@ impl Render for AppModel {
             .on_action(cx.listener(|this, _: &Back, window, cx| {
                 if this.notice.is_some() {
                     this.close_notice(cx);
+                } else if this.snapshots.is_some() {
+                    this.close_snapshots(cx);
                 } else if this.palette.is_some() {
                     this.palette_escape(window, cx);
                 } else if matches!(this.phase, Phase::Onboarding(_)) {

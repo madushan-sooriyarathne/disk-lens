@@ -1,8 +1,8 @@
 //! Overview page (PRD 13.4.4): Disk, Safe to clean, Worth a look, Largest folders.
 
 use gpui::{
-    Context, Div, FontWeight, Hsla, Role, SharedString, Stateful, Window, div, prelude::*, px,
-    relative, svg,
+    ClickEvent, Context, Div, FontWeight, Hsla, Role, SharedString, Stateful, Window, div,
+    prelude::*, px, relative, svg,
 };
 use gpui_component::button::Button;
 use gpui_component::{Disableable, Sizable, Size};
@@ -47,7 +47,7 @@ pub fn render(
         .grid_cols(3)
         .gap(px(theme::GAP_CONTENT))
         .child(
-            disk(&t, name, total, &s, model)
+            disk(&t, name, total, &s, model, cx)
                 .col_span(2)
                 .aria_label(disk_sentence(name, total, &s)),
         )
@@ -104,7 +104,14 @@ fn big(text: String, color: Hsla) -> Div {
         .child(text)
 }
 
-fn disk(t: &Theme, name: &str, total: u64, s: &Stats, model: &AppModel) -> Stateful<Div> {
+fn disk(
+    t: &Theme,
+    name: &str,
+    total: u64,
+    s: &Stats,
+    model: &AppModel,
+    cx: &mut Context<AppModel>,
+) -> Stateful<Div> {
     let segments = capacity_segments(s, &model.category_totals);
     let sum: u64 = segments.iter().map(|(_, b)| b).sum();
     let color = |seg: &Segment| match seg {
@@ -179,9 +186,16 @@ fn disk(t: &Theme, name: &str, total: u64, s: &Stats, model: &AppModel) -> State
         .when(s.purgeable >= PURGEABLE_MIN, |d| {
             d.child(
                 div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_x_1()
                     .text_size(px(theme::T_SMALL))
                     .text_color(t.secondary)
-                    .child(purgeable_line(s.purgeable)),
+                    .child(purgeable_line(s.purgeable))
+                    .child(
+                        snapshots_link(t, "overview-snapshots")
+                            .on_click(cx.listener(|m, _: &ClickEvent, _, cx| m.open_snapshots(cx))),
+                    ),
             )
         })
 }
@@ -270,6 +284,21 @@ fn largest(t: &Theme, folders: &[ViewNode], cx: &mut Context<AppModel>) -> State
             .when(folders.is_empty(), |d| {
                 d.child(div().text_color(t.secondary).child("No folders yet"))
             }),
+    )
+}
+
+/// "Show Snapshots…", which opens the Local Snapshots sheet with Pro and the Pro sheet
+/// without. The caller adds the click.
+pub(super) fn snapshots_link(t: &Theme, id: &'static str) -> Stateful<Div> {
+    theme::focusable(
+        div()
+            .id(id)
+            .text_color(t.accent)
+            .cursor_pointer()
+            .child("Show Snapshots…"),
+        t,
+        Role::Link,
+        "Show Snapshots",
     )
 }
 
